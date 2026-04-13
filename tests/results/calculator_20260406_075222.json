@@ -1,0 +1,116 @@
+{
+  "suite_name": "calculator",
+  "run_time": "2026-04-06T07:52:01.396405",
+  "duration_ms": 20841,
+  "total": 4,
+  "passed": 4,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "CalculatorTest.test_01_open_calculator",
+      "suite": "calculator",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:52:01.396405",
+      "duration_ms": 4368,
+      "steps": [],
+      "screenshots": [
+        {
+          "stage": "calc_opened",
+          "path": "C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\results\\calc_opened_075204.png"
+        }
+      ],
+      "logs": [
+        "[07:52:01.396] ── 단계: 계산기 실행 ──",
+        "[07:52:01.458] 대기 2.0초: 계산기 시작 대기",
+        "[07:52:03.459] ── 단계: UWP 윈도우 감지 (Desktop 방식) ──",
+        "[07:52:03.661] [PASS] 계산기 윈도우가 존재해야 합니다",
+        "[07:52:03.827] 윈도우 제목: 계산기"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CalculatorTest.test_02_button_click_addition",
+      "suite": "calculator",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:52:05.764416",
+      "duration_ms": 7773,
+      "steps": [],
+      "screenshots": [
+        {
+          "stage": "calc_result",
+          "path": "C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\results\\calc_result_075213.png"
+        }
+      ],
+      "logs": [
+        "[07:52:05.791] 대기 2.0초: 계산기 시작 대기",
+        "[07:52:07.792] ── 단계: 계산기 윈도우 연결 ──",
+        "[07:52:08.536] ── 단계: Clear 버튼 (초기화) ──",
+        "[07:52:09.446] ── 단계: 1 + 2 = 입력 ──",
+        "[07:52:12.314] ── 단계: 결과 검증 ──",
+        "[07:52:12.610] 결과 텍스트: 표시는 3",
+        "[07:52:12.610] [PASS] 1+2 결과가 3이어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CalculatorTest.test_03_keyboard_input",
+      "suite": "calculator",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:52:13.538029",
+      "duration_ms": 5677,
+      "steps": [],
+      "screenshots": [
+        {
+          "stage": "calc_keyboard",
+          "path": "C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\results\\calc_keyboard_075218.png"
+        }
+      ],
+      "logs": [
+        "[07:52:13.562] 대기 2.0초: 계산기 시작 대기",
+        "[07:52:16.409] ── 단계: 키보드로 5*6= 입력 ──",
+        "[07:52:17.928] ── 단계: 결과 확인 ──",
+        "[07:52:18.174] 결과: 표시는 30",
+        "[07:52:18.174] [PASS] 5*6 결과가 30이어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CalculatorTest.test_04_inspector_on_calculator",
+      "suite": "calculator",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:52:19.216304",
+      "duration_ms": 3021,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[07:52:19.237] 대기 2.0초: 계산기 시작 대기",
+        "[07:52:21.238] ── 단계: WindowInspector로 검사 ──",
+        "[07:52:21.970] [PASS] 계산기 검사 성공: ",
+        "[07:52:21.970] [PASS] 버튼 등 컨트롤이 충분히 있어야 합니다 (11개)",
+        "[07:52:21.970] 발견된 컨트롤: 11개",
+        "[07:52:21.970] [PASS] Button 컨트롤이 있어야 합니다 (5개)"
+      ],
+      "error": null,
+      "error_type": null
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.11.9",
+    "machine": "AMD64",
+    "timestamp": "2026-04-06T07:52:01.396405",
+    "screen_width": 3840,
+    "screen_height": 2160,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PyQt6": "installed",
+    "pkg_selenium": "4.41.0",
+    "pkg_Pillow": "12.1.1"
+  }
+}

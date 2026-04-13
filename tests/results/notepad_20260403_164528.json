@@ -1,0 +1,119 @@
+{
+  "suite_name": "notepad",
+  "run_time": "2026-04-03T16:44:58.083329",
+  "duration_ms": 30246,
+  "total": 5,
+  "passed": 2,
+  "failed": 0,
+  "errors": 3,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "NotepadTest.test_01_open_and_detect",
+      "suite": "notepad",
+      "status": "pass",
+      "timestamp": "2026-04-03T16:44:58.848839",
+      "duration_ms": 2981,
+      "steps": [],
+      "screenshots": [
+        {
+          "stage": "notepad_opened",
+          "path": "C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\results\\notepad_opened_164501.png"
+        }
+      ],
+      "logs": [
+        "[16:44:58.848] ── 단계: 메모장 실행 ──",
+        "[16:44:58.952] 대기 2.0초: 메모장 시작 대기",
+        "[16:45:00.953] ── 단계: 윈도우 존재 확인 ──",
+        "[16:45:01.405] [PASS] 윈도우 발견: bridge_20260402_144936.log - 메모장",
+        "[16:45:01.406] 윈도우 제목: bridge_20260402_144936.log - 메모장"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "NotepadTest.test_02_type_and_read_text",
+      "suite": "notepad",
+      "status": "error",
+      "timestamp": "2026-04-03T16:45:01.829893",
+      "duration_ms": 7685,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[16:45:01.879] 대기 2.0초: 메모장 시작 대기",
+        "[16:45:03.880] ── 단계: Edit 요소에 텍스트 입력 ──"
+      ],
+      "error": "Traceback (most recent call last):\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 250, in __resolve_control\n    ctrl = wait_until_passes(\n           ^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\timings.py\", line 458, in wait_until_passes\n    raise err\npywinauto.timings.TimeoutError\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\test_runner.py\", line 434, in _run_single_test\n    method()\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\test_notepad.py\", line 87, in test_02_type_and_read_text\n    edit.set_text(test_text)\n    ^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 379, in __getattribute__\n    ctrls = self.__resolve_control(self.criteria)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 261, in __resolve_control\n    raise e.original_exception\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\timings.py\", line 436, in wait_until_passes\n    func_val = func(*args, **kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 222, in __get_ctrl\n    ctrl = self.backend.generic_wrapper_class(findwindows.find_element(**ctrl_criteria))\n                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\findwindows.py\", line 87, in find_element\n    raise ElementNotFoundError(kwargs)\npywinauto.findwindows.ElementNotFoundError: {'control_type': 'Edit', 'found_index': 0, 'top_level_only': False, 'parent': <uia_element_info.UIAElementInfo - 'bridge_20260402_144936.log - 메모장', Notepad, 3542850>, 'backend': 'uia'}\n",
+      "error_type": "ElementNotFoundError"
+    },
+    {
+      "test_name": "NotepadTest.test_03_hotkey_select_copy",
+      "suite": "notepad",
+      "status": "error",
+      "timestamp": "2026-04-03T16:45:09.515616",
+      "duration_ms": 7969,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[16:45:09.640] 대기 2.0초: 메모장 시작 대기",
+        "[16:45:11.927] ── 단계: 텍스트 입력 ──"
+      ],
+      "error": "Traceback (most recent call last):\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 250, in __resolve_control\n    ctrl = wait_until_passes(\n           ^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\timings.py\", line 458, in wait_until_passes\n    raise err\npywinauto.timings.TimeoutError\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\test_runner.py\", line 434, in _run_single_test\n    method()\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\test_notepad.py\", line 110, in test_03_hotkey_select_copy\n    edit.set_text(\"Clipboard Test 클립보드\")\n    ^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 379, in __getattribute__\n    ctrls = self.__resolve_control(self.criteria)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 261, in __resolve_control\n    raise e.original_exception\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\timings.py\", line 436, in wait_until_passes\n    func_val = func(*args, **kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 222, in __get_ctrl\n    ctrl = self.backend.generic_wrapper_class(findwindows.find_element(**ctrl_criteria))\n                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\findwindows.py\", line 87, in find_element\n    raise ElementNotFoundError(kwargs)\npywinauto.findwindows.ElementNotFoundError: {'control_type': 'Edit', 'found_index': 0, 'top_level_only': False, 'parent': <uia_element_info.UIAElementInfo - 'bridge_20260402_144936.log - 메모장', Notepad, 47911616>, 'backend': 'uia'}\n",
+      "error_type": "ElementNotFoundError"
+    },
+    {
+      "test_name": "NotepadTest.test_04_win_inspector_integration",
+      "suite": "notepad",
+      "status": "pass",
+      "timestamp": "2026-04-03T16:45:17.485363",
+      "duration_ms": 2927,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[16:45:17.790] 대기 2.0초: 메모장 시작 대기",
+        "[16:45:19.791] ── 단계: WindowInspector 로드 ──",
+        "[16:45:19.816] [PASS] pywinauto 사용 가능해야 합니다",
+        "[16:45:19.816] ── 단계: 윈도우 목록에서 메모장 찾기 ──",
+        "[16:45:20.010] [PASS] 윈도우 목록에 메모장이 있어야 합니다",
+        "[16:45:20.010] ── 단계: 메모장 UI 트리 추출 ──",
+        "[16:45:20.307] [PASS] inspect_window 성공해야 합니다: ",
+        "[16:45:20.307] [PASS] 컨트롤이 1개 이상이어야 합니다",
+        "[16:45:20.307] 발견된 컨트롤: 23개",
+        "[16:45:20.307] ── 단계: 텍스트 변환 테스트 ──",
+        "[16:45:20.307] [PASS] 텍스트에 컨트롤 정보가 포함되어야 합니다",
+        "[16:45:20.307] 생성된 텍스트 길이: 1340자"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "NotepadTest.test_05_close_without_save",
+      "suite": "notepad",
+      "status": "error",
+      "timestamp": "2026-04-03T16:45:20.412498",
+      "duration_ms": 7917,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[16:45:20.509] 대기 2.0초: 메모장 시작 대기",
+        "[16:45:22.664] ── 단계: 텍스트 입력 (변경사항 생성) ──"
+      ],
+      "error": "Traceback (most recent call last):\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 250, in __resolve_control\n    ctrl = wait_until_passes(\n           ^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\timings.py\", line 458, in wait_until_passes\n    raise err\npywinauto.timings.TimeoutError\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\test_runner.py\", line 434, in _run_single_test\n    method()\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\test_notepad.py\", line 176, in test_05_close_without_save\n    edit.set_text(\"저장하지 않을 텍스트\")\n    ^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 379, in __getattribute__\n    ctrls = self.__resolve_control(self.criteria)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 261, in __resolve_control\n    raise e.original_exception\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\timings.py\", line 436, in wait_until_passes\n    func_val = func(*args, **kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\application.py\", line 222, in __get_ctrl\n    ctrl = self.backend.generic_wrapper_class(findwindows.find_element(**ctrl_criteria))\n                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\venv\\Lib\\site-packages\\pywinauto\\findwindows.py\", line 87, in find_element\n    raise ElementNotFoundError(kwargs)\npywinauto.findwindows.ElementNotFoundError: {'control_type': 'Edit', 'found_index': 0, 'top_level_only': False, 'parent': <uia_element_info.UIAElementInfo - 'bridge_20260402_144936.log - 메모장', Notepad, 1769848>, 'backend': 'uia'}\n",
+      "error_type": "ElementNotFoundError"
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.11.9",
+    "machine": "AMD64",
+    "timestamp": "2026-04-03T16:44:58.140735",
+    "screen_width": 3840,
+    "screen_height": 2160,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PyQt6": "installed",
+    "pkg_selenium": "4.41.0",
+    "pkg_Pillow": "12.1.1"
+  }
+}

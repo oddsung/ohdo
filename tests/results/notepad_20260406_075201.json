@@ -1,0 +1,127 @@
+{
+  "suite_name": "notepad",
+  "run_time": "2026-04-06T07:51:38.043389",
+  "duration_ms": 23350,
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "NotepadTest.test_01_open_and_detect",
+      "suite": "notepad",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:51:38.533676",
+      "duration_ms": 3171,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[07:51:38.533] ── 단계: 메모장 실행 ──",
+        "[07:51:38.930] 대기 2.5초: 메모장 시작 대기",
+        "[07:51:41.559] ── 단계: 윈도우 존재 확인 ──",
+        "[07:51:41.702] [PASS] 메모장 윈도우가 열려야 합니다",
+        "[07:51:41.703] 윈도우 제목: 제목 없음 - 메모장",
+        "[07:51:41.703] [PASS] 윈도우 제목에 메모장/Notepad가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "NotepadTest.test_02_type_and_read_text",
+      "suite": "notepad",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:51:41.705140",
+      "duration_ms": 4570,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[07:51:41.990] 대기 2.5초: 메모장 시작 대기",
+        "[07:51:44.853] ── 단계: 편집 영역에 텍스트 입력 ──",
+        "[07:51:45.738] 대기 0.5초: 입력 완료 대기",
+        "[07:51:46.238] ── 단계: 입력된 텍스트 검증 ──",
+        "[07:51:46.273] [PASS] 영문 포함 확인",
+        "[07:51:46.273] [PASS] 숫자 포함 확인"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "NotepadTest.test_03_hotkey_select_copy",
+      "suite": "notepad",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:51:46.275721",
+      "duration_ms": 5368,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[07:51:46.669] 대기 2.5초: 메모장 시작 대기",
+        "[07:51:49.507] ── 단계: 텍스트 입력 ──",
+        "[07:51:50.330] ── 단계: Ctrl+A 전체선택 -> Ctrl+C 복사 ──",
+        "[07:51:51.642] ── 단계: 클립보드 내용 검증 ──",
+        "[07:51:51.643] [PASS] 클립보드에 복사된 내용 확인"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "NotepadTest.test_04_win_inspector_integration",
+      "suite": "notepad",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:51:51.644049",
+      "duration_ms": 3537,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[07:51:52.000] 대기 2.5초: 메모장 시작 대기",
+        "[07:51:54.636] ── 단계: WindowInspector 로드 ──",
+        "[07:51:54.639] [PASS] pywinauto 사용 가능해야 합니다",
+        "[07:51:54.639] ── 단계: 윈도우 목록에서 메모장 찾기 ──",
+        "[07:51:54.786] [PASS] 윈도우 목록에 메모장이 있어야 합니다",
+        "[07:51:54.786] ── 단계: 메모장 UI 트리 추출 ──",
+        "[07:51:55.179] [PASS] inspect_window 성공해야 합니다: ",
+        "[07:51:55.179] [PASS] 컨트롤이 1개 이상이어야 합니다",
+        "[07:51:55.179] 발견된 컨트롤: 30개",
+        "[07:51:55.179] ── 단계: 텍스트 변환 테스트 ──",
+        "[07:51:55.179] [PASS] 텍스트에 컨트롤 정보가 포함되어야 합니다",
+        "[07:51:55.179] 생성된 텍스트 길이: 1519자"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "NotepadTest.test_05_close_without_save",
+      "suite": "notepad",
+      "status": "pass",
+      "timestamp": "2026-04-06T07:51:55.181313",
+      "duration_ms": 6212,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[07:51:55.555] 대기 2.5초: 메모장 시작 대기",
+        "[07:51:58.411] ── 단계: 텍스트 입력 (변경사항 생성) ──",
+        "[07:51:59.182] ── 단계: Alt+F4 닫기 시도 ──",
+        "[07:51:59.289] 대기 1.0초: 저장 대화상자 대기",
+        "[07:52:00.290] ── 단계: 저장 안 함 선택 ──",
+        "[07:52:00.893] ── 단계: 윈도우 종료 확인 ──",
+        "[07:52:01.393] 메모장 종료 여부: True"
+      ],
+      "error": null,
+      "error_type": null
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.11.9",
+    "machine": "AMD64",
+    "timestamp": "2026-04-06T07:51:38.073526",
+    "screen_width": 3840,
+    "screen_height": 2160,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PyQt6": "installed",
+    "pkg_selenium": "4.41.0",
+    "pkg_Pillow": "12.1.1"
+  }
+}

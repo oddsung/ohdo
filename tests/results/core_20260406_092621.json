@@ -1,0 +1,45 @@
+{
+  "suite_name": "core",
+  "run_time": "2026-04-06T09:26:21.298679",
+  "duration_ms": 395,
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "CoreTest.test_25_export_workflow_uses_import_manager",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-06T09:26:21.684971",
+      "duration_ms": 8,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[09:26:21.691] ── 단계: 스텝 2개로 export ──",
+        "[09:26:21.692] [PASS] export에서 import os 중복 제거",
+        "[09:26:21.692] [PASS] time import 포함",
+        "[09:26:21.692] [PASS] pywinauto import 포함",
+        "[09:26:21.692] [PASS] 스텝1 코드 포함",
+        "[09:26:21.692] [PASS] 스텝2 코드 포함"
+      ],
+      "error": null,
+      "error_type": null
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.11.9",
+    "machine": "AMD64",
+    "timestamp": "2026-04-06T09:26:21.331935",
+    "screen_width": 3840,
+    "screen_height": 2160,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PyQt6": "installed",
+    "pkg_selenium": "4.41.0",
+    "pkg_Pillow": "12.1.1"
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "suite_name": "browser",
+  "run_time": "2026-04-06T08:07:25.983885",
+  "duration_ms": 38061,
+  "total": 4,
+  "passed": 4,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "BrowserTest.test_01_open_browser",
+      "suite": "browser",
+      "status": "pass",
+      "timestamp": "2026-04-06T08:07:25.983885",
+      "duration_ms": 10319,
+      "steps": [],
+      "screenshots": [
+        {
+          "stage": "browser_google",
+          "path": "C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\results\\browser_google_080732.png"
+        }
+      ],
+      "logs": [
+        "[08:07:25.983] ── 단계: ChromeDriver 생성 ──",
+        "[08:07:29.517] [PASS] WebDriver가 생성되어야 합니다",
+        "[08:07:29.517] ── 단계: Google 페이지 로드 ──",
+        "[08:07:30.788] 대기 2.0초: 페이지 로드 대기",
+        "[08:07:32.789] ── 단계: 페이지 제목 확인 ──",
+        "[08:07:32.805] 페이지 제목: Google",
+        "[08:07:32.806] [PASS] 페이지 제목이 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "BrowserTest.test_02_find_elements",
+      "suite": "browser",
+      "status": "pass",
+      "timestamp": "2026-04-06T08:07:36.303141",
+      "duration_ms": 15491,
+      "steps": [],
+      "screenshots": [
+        {
+          "stage": "browser_search_typed",
+          "path": "C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\results\\browser_search_typed_080747.png"
+        }
+      ],
+      "logs": [
+        "[08:07:46.707] ── 단계: 검색창 요소 찾기 ──",
+        "[08:07:46.775] [PASS] Google 검색창이 있어야 합니다",
+        "[08:07:46.775] 검색창 발견",
+        "[08:07:46.775] ── 단계: 텍스트 입력 ──"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "BrowserTest.test_03_javascript_execution",
+      "suite": "browser",
+      "status": "pass",
+      "timestamp": "2026-04-06T08:07:51.794968",
+      "duration_ms": 12250,
+      "steps": [],
+      "screenshots": [
+        {
+          "stage": "browser_js_element",
+          "path": "C:\\Users\\doosung.oh\\My_Projects\\python_stuff\\ai_rpa_solution\\tests\\results\\browser_js_element_080801.png"
+        }
+      ],
+      "logs": [
+        "[08:08:00.947] ── 단계: JavaScript로 제목 가져오기 ──",
+        "[08:08:00.951] [PASS] JS로 제목을 가져올 수 있어야 합니다",
+        "[08:08:00.951] JS 제목: Google",
+        "[08:08:00.951] ── 단계: JavaScript로 요소 생성 ──",
+        "[08:08:01.477] [PASS] JS로 생성한 요소 텍스트 확인"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "BrowserTest.test_04_win_inspector_browser_code_gen",
+      "suite": "browser",
+      "status": "pass",
+      "timestamp": "2026-04-06T08:08:04.045663",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:08:04.045] ── 단계: WindowInspector 로드 ──",
+        "[08:08:04.045] ── 단계: 브라우저 요소 → Selenium 코드 생성 테스트 ──",
+        "[08:08:04.045] [PASS] 브라우저 요소는 Selenium 코드를 생성해야 합니다",
+        "[08:08:04.045] [PASS] automation_id가 포함되어야 합니다",
+        "[08:08:04.045] 생성된 Selenium 코드 길이: 1111자",
+        "[08:08:04.045] ── 단계: 비인터랙티브 요소 → JS click 코드 생성 테스트 ──",
+        "[08:08:04.045] [PASS] Text 요소는 JS click을 사용해야 합니다",
+        "[08:08:04.045] [PASS] visibility 대기를 사용해야 합니다",
+        "[08:08:04.045] ── 단계: 데스크톱 요소 → pywinauto 코드 생성 테스트 ──",
+        "[08:08:04.045] [PASS] 데스크톱 요소는 pywinauto 코드를 생성해야 합니다",
+        "[08:08:04.045] [PASS] automation_id가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.11.9",
+    "machine": "AMD64",
+    "timestamp": "2026-04-06T08:07:25.983885",
+    "screen_width": 3840,
+    "screen_height": 2160,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PyQt6": "installed",
+    "pkg_selenium": "4.41.0",
+    "pkg_Pillow": "12.1.1"
+  }
+}

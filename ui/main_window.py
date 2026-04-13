@@ -1,0 +1,1629 @@
+"""
+PyQt6 메인 윈도우
+
+3패널 레이아웃: 세션 목록 | 대화 패널 | 코드+캡처 뷰어
+하단: 콘솔/로그 패널
+"""
+
+import sys
+import os
+import json
+import asyncio
+import logging
+import threading
+import subprocess
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QSplitter, QMenuBar, QMenu, QToolBar, QStatusBar,
+    QMessageBox, QFileDialog, QApplication, QComboBox
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence
+from PyQt6.QtWidgets import QShortcut
+
+from .chat_panel import ChatPanel
+from .code_viewer import CodeViewer
+from .console_panel import ConsolePanel
+from .session_list import SessionListPanel
+from .settings_dialog import SettingsDialog
+from .screen_capture import ScreenCaptureOverlay
+if sys.platform == "win32":
+    from .window_picker import WindowPickerOverlay
+    from .element_picker import ElementPickerOverlay
+else:
+    from .element_picker_macos import ElementPickerOverlay
+
+# 프로젝트 루트 경로
+PROJECT_ROOT = Path(__file__).parent.parent
+
+# 시스템 모듈 import
+sys.path.insert(0, str(PROJECT_ROOT))
+from core.ai_engine import AIEngineManager
+from core.session_manager import SessionManager, Session, Step
+from core.prompt_builder import PromptBuilder
+from core.workflow_engine import WorkflowEngine, CodeSandbox
+from core.win_inspector import WindowInspector
+
+logger = logging.getLogger(__name__)
+
+
+class AsyncSignals(QObject):
+    """스레드 간 통신 시그널"""
+    ai_response_ready = pyqtSignal(dict)    # AI 응답 수신
+    step_executed = pyqtSignal(dict)         # 스텝 실행 완료
+    log_message = pyqtSignal(str)            # 로그 메시지
+    error_occurred = pyqtSignal(str)         # 에러 발생
+
+
+class MainWindow(QMainWindow):
+    """
+    AI RPA Solution 메인 윈도우.
+
+    레이아웃:
+    ┌──────────┬─────────────┬──────────────┐
+    │ 세션목록  │  대화 패널   │ 코드+캡처 뷰어 │
+    ├──────────┴─────────────┴──────────────┤
+    │           콘솔/로그 패널               │
+    └──────────────────────────────────────┘
+    """
+
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("AI RPA Solution v2.0")
+        self.setMinimumSize(1200, 800)
+        self.resize(1400, 900)
+
+        # ── 설정 로드 ──
+        self.settings = self._load_settings()
+        self.prompts_config = self._load_prompts()
+
+        # ── 코어 엔진 초기화 ──
+        self.session_manager = SessionManager()
+        self.ai_engine = AIEngineManager(self.settings)
+        self.prompt_builder = PromptBuilder(self.prompts_config)
+        self.workflow_engine = WorkflowEngine(
+            step_delay_ms=self.settings.get("execution", {}).get("step_delay_ms", 500)
+        )
+
+        # ── 상태 변수 ──
+        self.current_session: Optional[Session] = None
+        self.current_code: str = ""
+        self.is_processing: bool = False
+        self.pending_images: list[str] = []
+        self._current_sandbox: Optional[CodeSandbox] = None  # F9 강제 중지용
+
+        # ── 영역 캡처 오버레이 ──
+        self.capture_overlay = ScreenCaptureOverlay()
+        self.capture_overlay.capture_completed.connect(self._on_region_captured)
+        self.capture_overlay.capture_cancelled.connect(self._on_capture_cancelled)
+
+        # ── 윈도우 인스펙터 ──
+        self.win_inspector = WindowInspector()
+        self.pending_window_context: str = ""
+
+        # ── 윈도우 피커 오버레이 (Windows 전용) ──
+        self.window_picker = None
+        if sys.platform == "win32":
+            self.window_picker = WindowPickerOverlay()
+            self.window_picker.window_picked.connect(self._on_window_picked)
+            self.window_picker.pick_cancelled.connect(self._on_window_pick_cancelled)
+
+        # ── UI 요소 피커 오버레이 ──
+        self.element_picker = ElementPickerOverlay()
+        self.element_picker.element_picked.connect(self._on_element_picked)
+        self.element_picker.pick_cancelled.connect(self._on_element_pick_cancelled)
+
+        # ── 비동기 시그널 ──
+        self.signals = AsyncSignals()
+        self.signals.ai_response_ready.connect(self._on_ai_response)
+        self.signals.step_executed.connect(self._on_step_executed)
+        self.signals.log_message.connect(self._on_log_message)
+        self.signals.error_occurred.connect(self._on_error)
+
+        # ── UI 구성 ──
+        self._setup_ui()
+        self._setup_menu()
+        self._setup_toolbar()
+        self._setup_statusbar()
+        self._setup_shortcuts()
+        self._apply_theme()
+
+        # ── 로깅 설정 ──
+        self._setup_logging()
+
+        # 초기 상태
+        self.statusBar().showMessage("준비 완료 - 새 세션을 생성하거나 기존 세션을 불러오세요")
+
+    # ──────────────────────────────────────────
+    # 설정 로드
+    # ──────────────────────────────────────────
+
+    def _load_settings(self) -> dict:
+        settings_file = PROJECT_ROOT / "config" / "settings.json"
+        if settings_file.exists():
+            with open(settings_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def _load_prompts(self) -> dict:
+        prompts_file = PROJECT_ROOT / "config" / "prompts.json"
+        if prompts_file.exists():
+            with open(prompts_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def _save_settings(self):
+        settings_file = PROJECT_ROOT / "config" / "settings.json"
+        with open(settings_file, "w", encoding="utf-8") as f:
+            json.dump(self.settings, f, ensure_ascii=False, indent=2)
+
+    # ──────────────────────────────────────────
+    # UI 구성
+    # ──────────────────────────────────────────
+
+    def _setup_ui(self):
+        """메인 윈도우 레이아웃 구성"""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(4)
+
+        # ── 상단: 3패널 영역 ──
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # 1. 세션 목록 패널 (왼쪽)
+        self.session_list = SessionListPanel()
+        self.session_list.session_selected.connect(self._on_session_selected)
+        self.session_list.session_delete_requested.connect(self._on_session_delete)
+        self.main_splitter.addWidget(self.session_list)
+
+        # 2. 대화 패널 (중앙)
+        self.chat_panel = ChatPanel()
+        self.chat_panel.message_sent.connect(self._on_user_message)
+        self.chat_panel.capture_requested.connect(self._on_capture_request)
+        self.chat_panel.element_pick_requested.connect(self._on_element_pick_request)
+        self.main_splitter.addWidget(self.chat_panel)
+
+        # 3. 코드+캡처 뷰어 (오른쪽)
+        self.code_viewer = CodeViewer()
+        self.code_viewer.run_code_requested.connect(self._on_run_code)
+        self.code_viewer.stop_code_requested.connect(self._on_stop_code)
+        self.code_viewer.step_delete_requested.connect(self._on_step_delete)
+        self.code_viewer.step_insert_requested.connect(self._on_step_insert)
+        self.code_viewer.step_move_requested.connect(self._on_step_move)
+        self.code_viewer.step_code_edited.connect(self._on_step_code_edited)
+        self.main_splitter.addWidget(self.code_viewer)
+
+        # 스플리터 비율 설정 (세션:대화:코드 = 1:2:2)
+        self.main_splitter.setSizes([200, 450, 450])
+
+        # ── 하단: 콘솔/로그 패널 ──
+        self.vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.vertical_splitter.addWidget(self.main_splitter)
+
+        self.console_panel = ConsolePanel()
+        self.vertical_splitter.addWidget(self.console_panel)
+
+        # 상단:하단 비율 = 7:3
+        self.vertical_splitter.setSizes([600, 250])
+
+        main_layout.addWidget(self.vertical_splitter)
+
+    def _setup_menu(self):
+        """메뉴바 구성"""
+        menubar = self.menuBar()
+
+        # 파일 메뉴
+        file_menu = menubar.addMenu("파일(&F)")
+
+        new_action = QAction("새 세션(&N)", self)
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self._new_session)
+        file_menu.addAction(new_action)
+
+        open_action = QAction("세션 불러오기(&O)", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self._load_session_dialog)
+        file_menu.addAction(open_action)
+
+        save_action = QAction("세션 저장(&S)", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self._save_current_session)
+        file_menu.addAction(save_action)
+
+        file_menu.addSeparator()
+
+        export_action = QAction("워크플로우 내보내기(&E)...", self)
+        export_action.triggered.connect(self._export_workflow)
+        file_menu.addAction(export_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("종료(&X)", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # 실행 메뉴
+        run_menu = menubar.addMenu("실행(&R)")
+
+        stop_action = QAction("⛔ 실행 강제 중지", self)
+        stop_action.setShortcut(QKeySequence(Qt.Key.Key_F9))
+        stop_action.setStatusTip("실행 중인 코드를 즉시 강제 종료합니다 (F9)")
+        stop_action.triggered.connect(self._on_stop_code)
+        run_menu.addAction(stop_action)
+
+        # 설정 메뉴
+        settings_menu = menubar.addMenu("설정(&S)")
+
+        pref_action = QAction("환경 설정(&P)...", self)
+        pref_action.triggered.connect(self._open_settings)
+        settings_menu.addAction(pref_action)
+
+        # 도움말 메뉴
+        help_menu = menubar.addMenu("도움말(&H)")
+        about_action = QAction("AI RPA Solution 소개", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+    def _setup_toolbar(self):
+        """툴바 구성"""
+        toolbar = QToolBar("메인 툴바")
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+
+        # 새 세션 버튼
+        new_btn = QAction("📄 새 세션", self)
+        new_btn.triggered.connect(self._new_session)
+        toolbar.addAction(new_btn)
+
+        toolbar.addSeparator()
+
+        # AI 엔진 선택 콤보박스
+        ai_label = QAction("AI 엔진:", self)
+        ai_label.setEnabled(False)
+        toolbar.addAction(ai_label)
+
+        self.ai_combo = QComboBox()
+        self.ai_combo.setMinimumWidth(150)
+        self._refresh_ai_combo()
+        self.ai_combo.currentTextChanged.connect(self._on_ai_engine_changed)
+        toolbar.addWidget(self.ai_combo)
+
+        toolbar.addSeparator()
+
+        # 전체 실행 버튼
+        run_all_btn = QAction("▶ 전체 실행", self)
+        run_all_btn.triggered.connect(self._run_all_steps)
+        toolbar.addAction(run_all_btn)
+
+        toolbar.addSeparator()
+
+        # 윈도우 검사 버튼
+        inspect_btn = QAction("🔍 윈도우 검사", self)
+        inspect_btn.triggered.connect(self._inspect_window)
+        toolbar.addAction(inspect_btn)
+
+    def _setup_statusbar(self):
+        """상태바 구성"""
+        self.statusBar().showMessage("준비됨")
+
+    def _setup_shortcuts(self):
+        """전역 키보드 단축키 등록"""
+        # F9: 실행 중인 코드 강제 중지 (포커스 위치에 관계없이 동작)
+        f9 = QShortcut(QKeySequence(Qt.Key.Key_F9), self)
+        f9.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        f9.activated.connect(self._on_stop_code)
+
+    def _apply_theme(self):
+        """테마 적용"""
+        theme = self.settings.get("ui", {}).get("theme", "dark")
+        theme_file = PROJECT_ROOT / "ui" / "resources" / "styles" / f"{theme}_theme.qss"
+
+        if theme_file.exists():
+            with open(theme_file, "r", encoding="utf-8") as f:
+                self.setStyleSheet(f.read())
+        else:
+            # 기본 다크 테마
+            self.setStyleSheet(self._get_default_dark_theme())
+
+    def _get_default_dark_theme(self) -> str:
+        """기본 다크 테마 스타일시트"""
+        return """
+        QMainWindow {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+        }
+        QWidget {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-size: 11px;
+        }
+        QMenuBar {
+            background-color: #181825;
+            color: #cdd6f4;
+            border-bottom: 1px solid #313244;
+        }
+        QMenuBar::item:selected {
+            background-color: #45475a;
+        }
+        QMenu {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            border: 1px solid #313244;
+        }
+        QMenu::item:selected {
+            background-color: #45475a;
+        }
+        QToolBar {
+            background-color: #181825;
+            border-bottom: 1px solid #313244;
+            spacing: 5px;
+            padding: 3px;
+        }
+        QSplitter::handle {
+            background-color: #313244;
+            width: 2px;
+            height: 2px;
+        }
+        QPushButton {
+            background-color: #45475a;
+            color: #cdd6f4;
+            border: 1px solid #585b70;
+            border-radius: 4px;
+            padding: 6px 16px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #585b70;
+        }
+        QPushButton:pressed {
+            background-color: #6c7086;
+        }
+        QPushButton:disabled {
+            background-color: #313244;
+            color: #585b70;
+        }
+        QLineEdit, QTextEdit, QPlainTextEdit {
+            background-color: #313244;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 4px;
+            padding: 4px;
+            selection-background-color: #585b70;
+        }
+        QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+            border: 1px solid #89b4fa;
+        }
+        QComboBox {
+            background-color: #313244;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 4px;
+            padding: 4px 8px;
+        }
+        QComboBox::drop-down {
+            border: none;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            selection-background-color: #45475a;
+        }
+        QListWidget {
+            background-color: #181825;
+            color: #cdd6f4;
+            border: 1px solid #313244;
+            border-radius: 4px;
+        }
+        QListWidget::item {
+            padding: 8px;
+            border-bottom: 1px solid #313244;
+        }
+        QListWidget::item:selected {
+            background-color: #45475a;
+            color: #cdd6f4;
+        }
+        QListWidget::item:hover {
+            background-color: #313244;
+        }
+        QTabWidget::pane {
+            border: 1px solid #313244;
+            background-color: #1e1e2e;
+        }
+        QTabBar::tab {
+            background-color: #181825;
+            color: #a6adc8;
+            border: 1px solid #313244;
+            padding: 6px 16px;
+            margin-right: 2px;
+        }
+        QTabBar::tab:selected {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            border-bottom: 2px solid #89b4fa;
+        }
+        QStatusBar {
+            background-color: #181825;
+            color: #a6adc8;
+            border-top: 1px solid #313244;
+        }
+        QGroupBox {
+            border: 1px solid #313244;
+            border-radius: 4px;
+            margin-top: 10px;
+            padding-top: 10px;
+            color: #cdd6f4;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 5px;
+        }
+        QScrollBar:vertical {
+            background-color: #181825;
+            width: 10px;
+            margin: 0;
+        }
+        QScrollBar::handle:vertical {
+            background-color: #45475a;
+            border-radius: 5px;
+            min-height: 20px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background-color: #585b70;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0;
+        }
+        QLabel {
+            color: #cdd6f4;
+        }
+        """
+
+    def _setup_logging(self):
+        """로깅 설정"""
+        log_config = self.settings.get("logging", {})
+        log_level = getattr(logging, log_config.get("level", "INFO"))
+
+        # 파일 핸들러
+        if log_config.get("file_enabled", True):
+            log_dir = PROJECT_ROOT / "logs"
+            log_dir.mkdir(exist_ok=True)
+            log_file = log_dir / f"rpa_{datetime.now().strftime('%Y%m%d')}.log"
+
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(logging.Formatter(
+                "[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"
+            ))
+            logging.getLogger().addHandler(file_handler)
+
+        logging.getLogger().setLevel(log_level)
+
+    # ──────────────────────────────────────────
+    # AI 엔진 관리
+    # ──────────────────────────────────────────
+
+    def _refresh_ai_combo(self):
+        """AI 엔진 콤보박스 새로고침"""
+        self.ai_combo.blockSignals(True)
+        self.ai_combo.clear()
+        for engine in self.ai_engine.list_available():
+            display = f"{engine['display_name']}"
+            if not engine['available']:
+                display += " (미설치)"
+            self.ai_combo.addItem(display, engine['name'])
+            if engine['is_current']:
+                self.ai_combo.setCurrentText(display)
+        self.ai_combo.blockSignals(False)
+
+    def _on_ai_engine_changed(self, text: str):
+        """AI 엔진 변경"""
+        idx = self.ai_combo.currentIndex()
+        engine_name = self.ai_combo.itemData(idx)
+        if engine_name:
+            try:
+                self.ai_engine.switch_engine(engine_name)
+                self.console_panel.log(f"AI 엔진 변경: {text}", "INFO")
+            except ValueError as e:
+                self.console_panel.log(str(e), "ERROR")
+
+    # ──────────────────────────────────────────
+    # 세션 관리
+    # ──────────────────────────────────────────
+
+    def _new_session(self):
+        """새 세션 생성"""
+        from PyQt6.QtWidgets import QInputDialog
+
+        title, ok = QInputDialog.getText(
+            self, "새 세션", "세션 제목을 입력하세요:",
+            text=f"RPA_{datetime.now().strftime('%Y%m%d_%H%M')}"
+        )
+        if not ok or not title.strip():
+            return
+
+        # 프로젝트 유형 자동 탐지 모드로 설정 ("auto")
+        project_type = "auto"
+
+        self.current_session = self.session_manager.create_session(
+            title=title.strip(),
+            project_type=project_type
+        )
+        self.current_code = ""
+
+        # UI 갱신
+        self.chat_panel.clear()
+        self.code_viewer.clear()
+        self.chat_panel.add_system_message(
+            f"새 세션 '{title}' 생성 완료!\n"
+            f"자동화하고 싶은 작업을 입력해주세요. (예: 메모장 열기, 특정 웹페이지 접속 등)\n"
+            f"입력하신 내용을 바탕으로 데스크톱/웹 자동화 방식을 스스로 결정합니다."
+        )
+        self._refresh_session_list()
+        self.statusBar().showMessage(f"세션 생성: {title}")
+        self.console_panel.log(f"새 세션 생성: {title} (자동 탐지 모드)", "INFO")
+
+    def _refresh_session_list(self):
+        """세션 목록 새로고침"""
+        sessions = self.session_manager.list_sessions()
+        self.session_list.refresh(sessions)
+
+    def _on_session_selected(self, session_id: str):
+        """세션 목록에서 세션 선택"""
+        try:
+            self.current_session = self.session_manager.load_session(session_id)
+            self._restore_session_ui()
+            self.statusBar().showMessage(f"세션 로드: {self.current_session.title}")
+            self.console_panel.log(f"세션 로드: {self.current_session.title}", "INFO")
+        except Exception as e:
+            QMessageBox.warning(self, "로드 실패", f"세션을 불러올 수 없습니다:\n{e}")
+
+    def _on_session_delete(self, session_id: str):
+        """세션 삭제 요청"""
+        reply = QMessageBox.question(
+            self, "세션 삭제", "선택한 세션을 삭제하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.session_manager.delete_session(session_id)
+            if self.current_session and self.current_session.session_id == session_id:
+                self.current_session = None
+                self.chat_panel.clear()
+                self.code_viewer.clear()
+            self._refresh_session_list()
+            self.console_panel.log("세션 삭제 완료", "INFO")
+
+    def _restore_session_ui(self):
+        """세션 데이터를 UI에 복원"""
+        if not self.current_session:
+            return
+
+        self.chat_panel.clear()
+        self.code_viewer.clear()
+
+        for step_data in self.current_session.steps:
+            step = step_data if isinstance(step_data, dict) else {}
+
+            # 대화 복원
+            for msg in step.get("conversation", []):
+                m = msg if isinstance(msg, dict) else {}
+                if m.get("role") == "user":
+                    self.chat_panel.add_user_message(m.get("content", ""))
+                elif m.get("role") == "assistant":
+                    self.chat_panel.add_ai_message(m.get("content", ""))
+
+            # 코드 복원
+            code = step.get("generated_code", "")
+            if code:
+                self.current_code = code
+                captures = step.get("captures", [])
+                capture_path = None
+                if captures:
+                    c = captures[0] if isinstance(captures[0], dict) else {}
+                    capture_path = c.get("path")
+                self.code_viewer.add_step(step.get("step_id", 0), code, capture_path)
+
+    def _save_current_session(self):
+        """현재 세션 저장"""
+        if not self.current_session:
+            QMessageBox.information(self, "안내", "저장할 세션이 없습니다.")
+            return
+        self.session_manager.save_session(self.current_session)
+        self.statusBar().showMessage("세션 저장 완료")
+        self.console_panel.log("세션 저장 완료", "INFO")
+
+    def _load_session_dialog(self):
+        """세션 불러오기 - 목록 새로고침"""
+        self._refresh_session_list()
+
+    def _export_workflow(self):
+        """워크플로우를 독립 프로젝트 폴더로 내보내기"""
+        if not self.current_session:
+            QMessageBox.information(self, "안내", "내보낼 세션이 없습니다.")
+            return
+
+        # 출력 디렉터리 선택
+        default_dir = self.settings.get("output_project", {}).get("default_output_dir", "")
+        if not default_dir:
+            default_dir = str(Path.home() / "Desktop")
+
+        output_dir = QFileDialog.getExistingDirectory(
+            self, "프로젝트 내보내기 - 폴더 선택",
+            default_dir
+        )
+        if not output_dir:
+            return
+
+        # 프로젝트 폴더명 = 세션 제목
+        import re
+        safe_name = re.sub(r'[<>:"/\\|?*]', '_', self.current_session.title)
+        project_dir = Path(output_dir) / safe_name
+
+        try:
+            output_settings = self.settings.get("output_project", {})
+
+            self.session_manager.export_as_project(
+                session=self.current_session,
+                output_dir=project_dir,
+                settings=output_settings
+            )
+
+            self.console_panel.log(f"프로젝트 내보내기 완료: {project_dir}", "INFO")
+            self.console_panel.log(f"  - main.py (코드)", "INFO")
+            self.console_panel.log(f"  - requirements.txt (패키지 목록)", "INFO")
+            self.console_panel.log(f"  - README.md (설치/실행 가이드)", "INFO")
+            self.console_panel.log(f"  - run.bat (윈도우 실행 스크립트)", "INFO")
+
+            QMessageBox.information(
+                self, "내보내기 완료",
+                f"프로젝트가 생성되었습니다:\n{project_dir}\n\n"
+                f"생성된 파일:\n"
+                f"  • main.py - 실행 코드\n"
+                f"  • requirements.txt - 패키지 목록\n"
+                f"  • README.md - 설치/실행 가이드\n"
+                f"  • run.bat - 윈도우 실행 스크립트"
+            )
+        except Exception as e:
+            self.console_panel.log(f"내보내기 실패: {e}", "ERROR")
+            QMessageBox.warning(self, "내보내기 실패", f"프로젝트 생성 중 오류:\n{e}")
+
+    # ──────────────────────────────────────────
+    # 사용자 입력 처리 (AI 연동)
+    # ──────────────────────────────────────────
+
+    def _on_user_message(self, message: str):
+        """사용자가 대화 패널에서 메시지를 전송"""
+        if not message.strip() and not self.pending_images:
+            return
+        if self.is_processing:
+            return
+        if not self.current_session:
+            QMessageBox.information(self, "안내", "먼저 새 세션을 생성해주세요. (Ctrl+N)")
+            return
+
+        self.is_processing = True
+        self.chat_panel.set_input_enabled(False)
+        self.statusBar().showMessage("AI 응답 대기 중...")
+        self.console_panel.log(f"사용자 요청: {message[:100]}...", "INFO")
+
+        # 백그라운드 스레드에서 AI 호출
+        images = list(self.pending_images)
+        self.pending_images.clear()
+        self.chat_panel.clear_capture_status()
+
+        thread = threading.Thread(
+            target=self._call_ai_thread,
+            args=(message, images),
+            daemon=True
+        )
+        thread.start()
+
+    def _call_ai_thread(self, user_message: str, images: list[str]):
+        """백그라운드 스레드: AI 프롬프트 전송 및 응답 수신"""
+        try:
+            # 방어 코드 추가
+            if not self.current_session:
+                raise ValueError("세션이 초기화되지 않았습니다.")
+
+            # 프롬프트 구성 (윈도우/요소 컨텍스트 포함)
+            window_ctx = self.pending_window_context if self.pending_window_context else None
+            self.pending_window_context = ""  # 사용 후 초기화
+
+            pending_elems = self.chat_panel.get_pending_elements()
+            element_summary = ""  # 세션 기록용 요소 요약
+            if pending_elems:
+                parts = [self.win_inspector.get_element_info_text(e) for e in pending_elems]
+                element_ctx: str | None = "\n\n---\n\n".join(parts)
+                # 세션 기록용 요소 요약 생성
+                summaries = []
+                for e in pending_elems:
+                    ctrl_type = e.get("control_type", "")
+                    name = e.get("name", "")
+                    auto_id = e.get("automation_id", "")
+                    if name:
+                        summaries.append(f"[{ctrl_type}] \"{name}\"")
+                    elif auto_id:
+                        summaries.append(f"[{ctrl_type}] (ID: {auto_id})")
+                    else:
+                        summaries.append(f"[{ctrl_type}]")
+                element_summary = "📌 선택된 요소: " + ", ".join(summaries) + "\n"
+                self.chat_panel.clear_pending_elements()
+            else:
+                element_ctx = None
+
+            is_browser_elem = any(e.get("is_browser", False) for e in pending_elems) if pending_elems else False
+            prompt = self.prompt_builder.build_step_prompt(
+                session=self.current_session,
+                user_request=user_message,
+                image_paths=images if images else None,
+                window_context=window_ctx,
+                element_context=element_ctx,
+                project_type=self.current_session.project_type,
+                is_browser_element=is_browser_elem
+            )
+
+            self.signals.log_message.emit(f"[PROMPT] 프롬프트 전송 ({len(prompt)}자)")
+
+            # AI 호출 (비동기를 동기로 래핑)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            response = loop.run_until_complete(
+                self.ai_engine.generate(prompt, images)
+            )
+            loop.close()
+
+            self.signals.log_message.emit(
+                f"[AI] 응답 수신 ({response.response_time_ms}ms, "
+                f"코드 {len(response.code)}자)"
+            )
+
+            # AI 원본 응답 로깅 (디버깅용)
+            raw_preview = response.raw_response[:300] if response.raw_response else '(응답 없음)'
+            self.signals.log_message.emit(f"[AI] 원본 응답 미리보기: {raw_preview}")
+
+            # 결과 전달 (요소 정보 포함)
+            display_message = element_summary + user_message if element_summary else user_message
+            self.signals.ai_response_ready.emit({
+                "user_message": user_message,
+                "display_message": display_message,  # 세션 기록용 (요소 정보 포함)
+                "images": images,
+                "response": {
+                    "text": response.text,
+                    "code": response.code,
+                    "description": response.description,
+                    "packages": response.packages,
+                    "raw_response": response.raw_response,
+                    "tokens_used": response.tokens_used,
+                    "response_time_ms": response.response_time_ms,
+                    "success": response.success,
+                    "error": response.error
+                },
+                "prompt": prompt
+            })
+
+        except Exception as e:
+            self.signals.error_occurred.emit(f"AI 호출 실패: {str(e)}")
+
+    def _on_ai_response(self, data: dict):
+        """AI 응답 수신 처리 (메인 스레드)"""
+        response = data["response"]
+
+        # 프롬프트 탭에 상세 로그 기록
+        element_info = ""
+        display_msg = data.get("display_message", "")
+        if display_msg.startswith("📌"):
+            # 요소 정보 추출
+            lines = display_msg.split("\n", 1)
+            element_info = lines[0] if lines else ""
+
+        self.console_panel.log_prompt_detail(
+            user_message=data["user_message"],
+            full_prompt=data.get("prompt", ""),
+            ai_response=response.get("description") or response.get("text", ""),
+            code=response.get("code", ""),
+            tokens_used=response.get("tokens_used", 0),
+            response_time_ms=response.get("response_time_ms", 0),
+            ai_engine=self.ai_engine.current_engine if hasattr(self.ai_engine, 'current_engine') else "",
+            has_images=bool(data.get("images")),
+            element_info=element_info
+        )
+
+        # AI 응답을 대화 패널에 표시
+        if response["success"]:
+            ai_text = response["description"] or response["text"]
+            self.chat_panel.add_ai_message(ai_text.strip())
+
+            # 코드가 있으면 코드 뷰어에 추가
+            if response["code"]:
+                # 수동 편집된 값이 AI에 의해 되돌아가지 않도록 강제 복원
+                patched_code = self._apply_manual_edit_patches(response["code"])
+                if patched_code != response["code"]:
+                    self.console_panel.log(
+                        "[편집 복원] 수동 수정된 값이 AI 코드에 자동 복원되었습니다.", "INFO"
+                    )
+                    response["code"] = patched_code
+
+                self.current_code = response["code"]
+                step_id = len(self.current_session.steps) + 1
+                # 캡처 이미지가 있으면 첫 번째 이미지를 함께 표시
+                images = data.get("images", [])
+                capture_path = images[0] if images else None
+                self.code_viewer.add_step(step_id, response["code"], capture_path)
+                self.console_panel.log(f"코드 추출 완료 ({len(response['code'])}자)", "INFO")
+            else:
+                # 코드가 없는 경우 안내 (단, 역질문 등 정상적인 응답일 수도 있음)
+                self.console_panel.log(
+                    f"[INFO] 코드 추출 없음. 보조 텍스트 출력됨.",
+                    "INFO"
+                )
+        else:
+            self.chat_panel.add_system_message(
+                f"AI 응답 실패: {response['error']}"
+            )
+
+        # 세션에 스텝 추가 (요소 정보 포함된 메시지 사용)
+        recorded_message = data.get("display_message", data["user_message"])
+        # import/코드 분리
+        full_code = response.get("code", "")
+        from core.import_manager import extract_imports, extract_code_delta, extract_import_delta
+        separated_imports, separated_body = extract_imports(full_code)
+
+        # 이전 스텝의 누적 코드에서 이번 스텝에서 새로 추가된 부분만 추출
+        prev_body = ""
+        prev_imports: list = []
+        if self.current_session and self.current_session.steps:
+            last_step = self.current_session.steps[-1]
+            s = last_step if isinstance(last_step, dict) else {}
+            prev_full_code = s.get("generated_code", "")
+            prev_imports = s.get("step_imports", [])
+            if prev_full_code:
+                _, prev_body = extract_imports(prev_full_code)
+
+        delta_body = extract_code_delta(separated_body, prev_body)
+        delta_imports = extract_import_delta(separated_imports, prev_imports)
+
+        step = Step(
+            status="completed" if response["success"] else "failed",
+            conversation=[
+                {"role": "user", "content": recorded_message,
+                 "timestamp": datetime.now().isoformat()},
+                {"role": "assistant", "content": response.get("description", response["text"]),
+                 "timestamp": datetime.now().isoformat()}
+            ],
+            generated_code=full_code,
+            required_packages=response.get("packages", []),
+            captures=[
+                {"type": "screen", "path": img, "timestamp": datetime.now().isoformat()}
+                for img in data.get("images", [])
+            ],
+            prompt_log={
+                "full_prompt": data.get("prompt", ""),
+                "raw_response": response.get("raw_response", ""),
+                "tokens_used": response.get("tokens_used", 0),
+                "response_time_ms": response.get("response_time_ms", 0)
+            },
+            execution_result=None,
+            step_code=delta_body,
+            step_imports=delta_imports,
+        )
+        self.session_manager.add_step(self.current_session, step)
+
+        # 상태 복원
+        self.is_processing = False
+        self.chat_panel.set_input_enabled(True)
+        self.statusBar().showMessage("준비 완료")
+
+    def _on_step_executed(self, data: dict):
+        """스텝 실행 완료 처리"""
+        success = data.get("success")
+        step_id = data.get('step_id')
+        self.console_panel.log(
+            f"스텝 #{step_id} 실행 완료: {'성공' if success else '실패'}",
+            "INFO" if success else "ERROR"
+        )
+        if success and data.get("output"):
+            self.console_panel.log(f"  출력: {data['output'][:500]}", "DEBUG")
+        elif not success and data.get("error"):
+            # 에러 전체 내용을 줄별로 분리해서 빨간색으로 표시
+            self.console_panel.log("─" * 50, "ERROR")
+            for line in data["error"].splitlines():
+                if line.strip():
+                    self.console_panel.log(f"  {line}", "ERROR")
+            self.console_panel.log("─" * 50, "ERROR")
+        self.statusBar().showMessage("실행 완료" if success else "실행 실패")
+
+    def _on_log_message(self, message: str):
+        """로그 메시지 처리"""
+        # workflow_engine에서 에러 traceback 줄은 "  " 들여쓰기 또는 "─"로 시작
+        if message.startswith("  ") or message.startswith("─"):
+            self.console_panel.log(message, "ERROR")
+        else:
+            self.console_panel.log(message, "INFO")
+
+    def _on_error(self, message: str):
+        """에러 처리"""
+        self.console_panel.log(message, "ERROR")
+        self.is_processing = False
+        self.chat_panel.set_input_enabled(True)
+        self.statusBar().showMessage("에러 발생")
+
+    # ──────────────────────────────────────────
+    # 화면 캡처 (영역 선택)
+    # ──────────────────────────────────────────
+
+    def _on_capture_request(self):
+        """화면 캡처 요청 - 영역 선택 오버레이 표시"""
+        # 먼저 자신을 최소화한 뒤, 그 다음 포그라운드 윈도우를 검사+캡처
+        self.showMinimized()
+        QTimer.singleShot(400, self._inspect_then_capture)
+
+    def _inspect_then_capture(self):
+        """최소화 후: 포그라운드 윈도우 검사 → 캡처 시작"""
+        self._auto_inspect_before_capture()
+        QTimer.singleShot(100, self._start_region_capture)
+
+    def _start_region_capture(self):
+        """영역 선택 캡처 오버레이를 시작합니다."""
+        self.capture_overlay.start_capture()
+
+    def _on_region_captured(self, pil_image):
+        """영역 캡처 완료 콜백"""
+        try:
+            from PIL import Image
+
+            img = pil_image
+
+            # 이미지 품질 조절
+            img_config = self.settings.get("image", {})
+            max_width = img_config.get("max_width", 1280)
+
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_size = (max_width, int(img.height * ratio))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+            # 세션 캡처 폴더에 저장
+            if self.current_session:
+                captures_dir = self.session_manager.get_captures_dir(
+                    self.current_session.session_id
+                )
+            else:
+                captures_dir = PROJECT_ROOT / "data" / "captures"
+                captures_dir.mkdir(parents=True, exist_ok=True)
+
+            filename = f"capture_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            filepath = captures_dir / filename
+            img.save(str(filepath))
+
+            self.pending_images.append(str(filepath))
+            self.chat_panel.set_capture_status(
+                f"📷 캡처 완료: {filename} ({img.width}×{img.height})"
+            )
+            self.console_panel.log(
+                f"영역 캡처 저장: {filepath} ({img.width}×{img.height})", "INFO"
+            )
+
+        except Exception as e:
+            self.console_panel.log(f"캡처 저장 실패: {e}", "ERROR")
+
+        finally:
+            self.showNormal()
+            self.activateWindow()
+
+    def _on_capture_cancelled(self):
+        """캡처 취소 콜백"""
+        self.showNormal()
+        self.activateWindow()
+        self.console_panel.log("캡처가 취소되었습니다.", "INFO")
+
+    def _inspect_window(self):
+        """윈도우 피커를 열어 사용자가 검사할 윈도우를 클릭으로 선택하게 합니다."""
+        if not self.win_inspector.is_available:
+            QMessageBox.warning(
+                self, "기능 비활성화",
+                "pywinauto가 설치되지 않았습니다.\n"
+                "pip install pywinauto 로 설치해주세요."
+            )
+            return
+
+        self.console_panel.log("윈도우 피커 시작 — 검사할 윈도우를 클릭하세요", "INFO")
+        self.statusBar().showMessage("검사할 윈도우를 클릭하세요...")
+
+        # 앱을 최소화하고 윈도우 피커 오버레이 표시
+        if self.window_picker is None:
+            self.console_panel.log("윈도우 피커는 Windows에서만 지원됩니다", "WARNING")
+            return
+        self.showMinimized()
+        QTimer.singleShot(400, self.window_picker.start_pick)
+
+    def _on_window_picked(self, hwnd: int, title: str):
+        """윈도우 피커에서 윈도우가 선택됨"""
+        self.console_panel.log(f"윈도우 선택됨: '{title}' (핸들: {hwnd})", "INFO")
+        self.statusBar().showMessage(f"윈도우 검사 중: {title}")
+
+        try:
+            window_info = self.win_inspector.inspect_window(
+                handle=hwnd,
+                max_depth=3, max_controls=50
+            )
+            self._finish_inspect(window_info)
+        except Exception as e:
+            self.console_panel.log(f"윈도우 검사 실패: {e}", "ERROR")
+            self._finish_inspect(None)
+
+    def _on_window_pick_cancelled(self):
+        """윈도우 피커가 취소됨 (ESC)"""
+        self.showNormal()
+        self.activateWindow()
+        self.console_panel.log("윈도우 검사가 취소되었습니다.", "INFO")
+        self.statusBar().showMessage("준비 완료")
+
+    # ──────────────────────────────────────────
+    # UI 요소 선택 (Element Picker)
+    # ──────────────────────────────────────────
+
+    def _on_element_pick_request(self):
+        """UI 요소 선택 요청 - 요소 피커 오버레이 표시"""
+        self.console_panel.log("UI 요소 피커 시작 — 선택할 요소에 마우스를 올린 후 클릭하세요", "INFO")
+        self.statusBar().showMessage("선택할 UI 요소를 클릭하세요... (ESC: 취소)")
+        self.showMinimized()
+        QTimer.singleShot(400, self.element_picker.start_picking)
+
+    def _on_element_picked(self, element_info: dict):
+        """UI 요소 선택 완료 콜백"""
+        # 요소 영역 스크린샷 캡처를 먼저 수행 (메인 윈도우 표시 전)
+        # 윈도우가 표시되면 요소 위에 덮여서 캡처됨
+        try:
+            import mss
+            from PIL import Image as PilImage
+
+            rect = element_info.get("rect", {})
+            w = rect.get("width", 0)
+            h = rect.get("height", 0)
+
+            if w > 0 and h > 0:
+                padding = 20
+                cap_left  = max(0, rect["left"] - padding)
+                cap_top   = max(0, rect["top"]  - padding)
+                cap_w     = w + padding * 2
+                cap_h     = h + padding * 2
+
+                with mss.mss() as sct:
+                    sct_img = sct.grab({
+                        "left": cap_left, "top": cap_top,
+                        "width": cap_w,   "height": cap_h
+                    })
+                    img = PilImage.frombytes(
+                        "RGB", sct_img.size, sct_img.bgra, "raw", "BGRX"
+                    )
+
+                if self.current_session:
+                    captures_dir = self.session_manager.get_captures_dir(
+                        self.current_session.session_id
+                    )
+                else:
+                    captures_dir = PROJECT_ROOT / "data" / "captures"
+                    captures_dir.mkdir(parents=True, exist_ok=True)
+
+                filename = f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                filepath = captures_dir / filename
+                img.save(str(filepath))
+                self.pending_images.append(str(filepath))
+                self.console_panel.log(
+                    f"UI 요소 이미지 저장: {filepath} ({w}×{h})", "INFO"
+                )
+
+        except Exception as e:
+            self.console_panel.log(f"요소 이미지 캡처 실패: {e}", "WARNING")
+
+        # 캡처 완료 후 메인 윈도우 표시
+        self.showNormal()
+        self.activateWindow()
+
+        # 요소를 대화창 칩으로 추가
+        self.chat_panel.add_element_chip(element_info)
+
+        ctrl_type = element_info.get("control_type", "")
+        name      = element_info.get("name", "")
+        display   = f"[{ctrl_type}] {name}" if name else f"[{ctrl_type}]"
+        parent    = element_info.get("parent_window_title", "")
+
+        self.statusBar().showMessage(
+            "UI 요소 선택 완료 — 다음 요청에 요소 정보가 자동 포함됩니다"
+        )
+        self.console_panel.log(
+            f"요소 선택 완료: {display}"
+            + (f" (창: {parent})" if parent else ""), "INFO"
+        )
+
+    def _on_element_pick_cancelled(self):
+        """UI 요소 선택 취소 (ESC 또는 우클릭)"""
+        self.showNormal()
+        self.activateWindow()
+        self.console_panel.log("UI 요소 선택이 취소되었습니다.", "INFO")
+        self.statusBar().showMessage("준비 완료")
+
+    def _finish_inspect(self, window_info: dict | None):
+        """검사 결과 처리 및 앱 복원"""
+        # 앱 복원
+        self.showNormal()
+        self.activateWindow()
+
+        if window_info is None:
+            self.statusBar().showMessage("윈도우 검사 실패")
+            return
+
+        if "error" in window_info:
+            self.console_panel.log(
+                f"윈도우 검사 실패: {window_info['error']}", "WARNING"
+            )
+            self.statusBar().showMessage("윈도우 검사 실패")
+            return
+
+        # 검사 결과를 텍스트로 변환
+        context_text = self.win_inspector.get_control_info_text(window_info)
+        self.pending_window_context = context_text
+
+        # 로그에 표시
+        title = window_info.get("window_title", "?")
+        count = window_info.get("control_count", 0)
+        self.console_panel.log(
+            f"윈도우 검사 완료: '{title}' ({count}개 컨트롤 발견)", "INFO"
+        )
+
+        # 컨트롤 목록을 콘솔에 표시
+        for ctrl in window_info.get("controls", [])[:20]:
+            indent = "  " * ctrl.get("depth", 0)
+            name = ctrl.get("name", "")
+            ctype = ctrl.get("control_type", "")
+            self.console_panel.log(
+                f"  {indent}[{ctype}] {name}", "DEBUG"
+            )
+
+        self.chat_panel.set_capture_status(
+            f"🔍 윈도우 검사 완료: {title} ({count}개 컨트롤)"
+        )
+        self.statusBar().showMessage(
+            f"윈도우 검사 완료 - 다음 요청에 컨트롤 정보가 자동 포함됩니다"
+        )
+
+    def _auto_inspect_before_capture(self):
+        """캡처 전에 포그라운드 윈도우 정보를 자동 수집합니다.
+        AI RPA Solution 자체는 건너뛰고 실제 타겟 앱을 검사합니다."""
+        if not self.win_inspector.is_available:
+            return
+
+        try:
+            if sys.platform != "win32":
+                return
+
+            import ctypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()  # type: ignore
+            if not hwnd:
+                return
+
+            # 먼저 포그라운드 윈도우 타이틀 확인
+            buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)  # type: ignore
+            fg_title = buf.value
+
+            # 자기 자신이면 건너뛰기
+            if "AI RPA Solution" in fg_title:
+                self.console_panel.log(
+                    f"자동 검사 건너뜀: 포그라운드가 자기 자신 ('{fg_title}')",
+                    "DEBUG"
+                )
+                # 자기 자신 다음의 윈도우를 찾기 시도
+                windows = self.win_inspector.list_windows()
+                target_win = None
+                for w in windows:
+                    if "AI RPA Solution" not in w.get("title", ""):
+                        target_win = w
+                        break
+
+                if target_win:
+                    window_info = self.win_inspector.inspect_window(
+                        handle=target_win["handle"],
+                        max_depth=2, max_controls=30
+                    )
+                    if "error" not in window_info:
+                        self.pending_window_context = self.win_inspector.get_control_info_text(window_info)
+                        self.console_panel.log(
+                            f"대체 윈도우 검사 완료: '{target_win['title']}'",
+                            "INFO"
+                        )
+                return
+
+            # 자기 자신이 아닌 경우 정상 검사
+            window_info = self.win_inspector.inspect_window(
+                handle=hwnd, max_depth=2, max_controls=30
+            )
+            if "error" not in window_info:
+                self.pending_window_context = self.win_inspector.get_control_info_text(window_info)
+                title = window_info.get("window_title", "?")
+                self.console_panel.log(
+                    f"캡처 대상 윈도우 자동 검사: '{title}' "
+                    f"({window_info.get('control_count', 0)}개 컨트롤)",
+                    "INFO"
+                )
+        except Exception as e:
+            self.console_panel.log(f"자동 윈도우 검사 실패 (무시): {e}", "DEBUG")
+
+    # ──────────────────────────────────────────
+    # 스텝 관리 (삭제/삽입/이동)
+    # ──────────────────────────────────────────
+
+    def _on_step_delete(self, step_id: int):
+        """스텝 삭제 처리"""
+        if not self.current_session:
+            return
+
+        success = self.session_manager.delete_step(self.current_session, step_id)
+        if success:
+            self.console_panel.log(f"Step #{step_id} 삭제 완료", "INFO")
+            self._refresh_code_viewer()
+        else:
+            self.console_panel.log(f"Step #{step_id} 삭제 실패", "ERROR")
+
+    def _on_step_insert(self, after_step_id: int):
+        """스텝 삽입 처리"""
+        if not self.current_session:
+            return
+
+        new_id = self.session_manager.insert_step(
+            self.current_session, after_step_id,
+            code="# 여기에 코드를 작성하거나 AI에게 요청하세요\n",
+            description="수동 삽입된 스텝"
+        )
+        self.console_panel.log(
+            f"Step #{after_step_id} 다음에 새 스텝 삽입 (→ Step #{new_id})", "INFO"
+        )
+        self._refresh_code_viewer()
+
+    def _on_step_move(self, step_id: int, direction: str):
+        """스텝 이동 처리"""
+        if not self.current_session:
+            return
+
+        success = self.session_manager.move_step(
+            self.current_session, step_id, direction
+        )
+        if success:
+            dir_text = "위로" if direction == "up" else "아래로"
+            self.console_panel.log(f"Step #{step_id} {dir_text} 이동", "INFO")
+            self.console_panel.log(
+                "⚠ 스텝 이동 시 코드 의존성에 주의하세요 "
+                "(이전 스텝의 변수/결과에 의존하는 코드가 있을 수 있습니다)",
+                "WARNING"
+            )
+            self._refresh_code_viewer()
+        else:
+            self.console_panel.log(
+                f"Step #{step_id} 이동 실패 (더 이상 이동 불가)", "WARNING"
+            )
+
+    def _apply_manual_edit_patches(self, code: str) -> str:
+        """
+        AI가 생성한 코드에서 값이 변조되지 않도록 두 단계로 복원합니다.
+
+        Phase 1 - 수동 편집 복원:
+            사용자가 '수정' 버튼으로 직접 편집한 줄을 강제 복원합니다.
+
+        Phase 2 - AI 공백 변조 자동 복원:
+            수동 편집 없이도, AI가 이전 스텝의 send_keys() 등 인자를
+            공백만 다르게 변경했으면 이전 값으로 자동 복원합니다.
+        """
+        import re as _re
+
+        if not self.current_session:
+            return code
+
+        # ── Phase 1: 수동 편집(manually_edited) 복원 ──
+        for step_data in self.current_session.steps:
+            step = step_data if isinstance(step_data, dict) else {}
+            if not step.get("manually_edited"):
+                continue
+            old_code = step.get("edit_original_code", "")
+            edited_code = step.get("generated_code", "")
+            if not old_code or not edited_code:
+                continue
+
+            changed_map: dict[str, str] = {}
+            for ol, el in zip(old_code.splitlines(), edited_code.splitlines()):
+                ol_s, el_s = ol.strip(), el.strip()
+                if ol_s != el_s and ol_s:
+                    changed_map[ol_s] = el_s
+
+            if not changed_map:
+                continue
+
+            patched = []
+            for line in code.splitlines():
+                stripped = line.strip()
+                if stripped in changed_map:
+                    indent = len(line) - len(line.lstrip())
+                    patched.append(" " * indent + changed_map[stripped])
+                    self.console_panel.log(
+                        f"  [수동복원] '{stripped}' → '{changed_map[stripped]}'", "DEBUG"
+                    )
+                else:
+                    patched.append(line)
+            code = "\n".join(patched)
+
+        # ── Phase 2: AI 공백 변조 자동 복원 ──
+        # 이전 스텝 코드에서 send_keys 인자 목록 추출
+        prev_code = ""
+        for step_data in reversed(self.current_session.steps):
+            s = step_data if isinstance(step_data, dict) else {}
+            c = s.get("generated_code", "")
+            if c.strip():
+                prev_code = c
+                break
+
+        if prev_code:
+            # 패턴: variable.send_keys("value") 또는 variable.send_keys('value')
+            send_keys_pat = _re.compile(
+                r'([ \t]*)(\w+)\.send_keys\((["\'])(.*?)\3\)'
+            )
+
+            # 이전 코드의 send_keys 값 수집: {변수명: (따옴표, 값)}
+            prev_sends: dict[str, tuple[str, str]] = {}
+            for m in send_keys_pat.finditer(prev_code):
+                _, varname, quote, value = m.groups()
+                prev_sends[varname] = (quote, value)
+
+            # 새 코드에서 변수명이 같은 send_keys 호출의 값이 공백만 다르면 복원
+            def _restore(m: _re.Match) -> str:
+                indent, varname, quote, value = m.groups()
+                if varname in prev_sends:
+                    old_quote, old_value = prev_sends[varname]
+                    # 공백 제거 후 동일한 경우 → AI가 공백을 추가/삭제한 것으로 판단
+                    if value.strip() == old_value.strip() and value != old_value:
+                        self.console_panel.log(
+                            f"  [AI변조복원] {varname}.send_keys({repr(value)}) "
+                            f"→ send_keys({repr(old_value)})",
+                            "DEBUG"
+                        )
+                        return f'{indent}{varname}.send_keys({old_quote}{old_value}{old_quote})'
+                return m.group(0)
+
+            code = send_keys_pat.sub(_restore, code)
+
+        return code
+
+    def _on_step_code_edited(self, step_id: int, new_code: str):
+        """사용자가 코드 직접 수정 시 세션에 반영"""
+        if not self.current_session:
+            return
+        # 수정 전 코드를 먼저 가져온 뒤 업데이트
+        old_code = ""
+        for step in self.current_session.steps:
+            s = step if isinstance(step, dict) else {}
+            if s.get("step_id") == step_id:
+                old_code = s.get("generated_code", "")
+                break
+        self.session_manager.update_step(
+            self.current_session, step_id,
+            {"generated_code": new_code, "manually_edited": True,
+             "edit_original_code": old_code}
+        )
+        self.console_panel.log(
+            f"[편집] Step #{step_id} 코드가 수정되었습니다. 다음 AI 요청에 반영됩니다.", "INFO"
+        )
+
+    def _refresh_code_viewer(self):
+        """세션의 스텝 데이터를 CodeViewer에 동기화합니다."""
+        if not self.current_session:
+            return
+
+        steps_data = []
+        for step in self.current_session.steps:
+            s = step if isinstance(step, dict) else {}
+            step_id = s.get("step_id", 0)
+            code = s.get("generated_code", "")
+            captures = s.get("captures", [])
+            capture_path = None
+            if captures:
+                cap = captures[0] if isinstance(captures[0], dict) else {}
+                capture_path = cap.get("path")
+
+            steps_data.append({
+                "step_id": step_id,
+                "code": code,
+                "capture_path": capture_path
+            })
+
+        self.code_viewer.refresh_steps(steps_data)
+
+    # ──────────────────────────────────────────
+    # 코드 실행
+    # ──────────────────────────────────────────
+
+    def _on_run_code(self, code: str):
+        """코드 실행 요청"""
+        if not code.strip():
+            QMessageBox.warning(self, "경고", "실행할 코드가 없습니다.")
+            return
+
+        self.console_panel.log("코드 실행 시작...", "INFO")
+        self.statusBar().showMessage("코드 실행 중...")
+
+        thread = threading.Thread(
+            target=self._execute_code_thread,
+            args=(code,),
+            daemon=True
+        )
+        thread.start()
+
+    def _execute_code_thread(self, code: str):
+        """코드를 백그라운드에서 실행"""
+        try:
+            cwd = None
+            if self.current_session:
+                cwd = str(self.session_manager.get_scripts_dir(
+                    self.current_session.session_id
+                ))
+
+            # Python 실행 경로 결정 (유효성 검증 포함)
+            python_exe = self._get_valid_python_exe()
+            sandbox = CodeSandbox(
+                python_exe=python_exe,
+                timeout=60
+            )
+            self._current_sandbox = sandbox  # F9 강제 중지용 참조 보관
+
+            # UI 자동화 코드 실행 시 우리 창이 대상 창을 가리지 않도록 최소화
+            if sys.platform == "win32":
+                import ctypes as _ctypes
+                is_admin = bool(_ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+                if not is_admin:
+                    logger.info("주의: 현재 프로세스가 일반 권한으로 실행 중입니다. "
+                                "대상 앱이 관리자 권한이면 WM 메시지 클릭이 차단됩니다.")
+
+            def _minimize_self():
+                """스크립트 실행 전 RPA 창 최소화 (대상 창이 가려지지 않도록)"""
+                try:
+                    import ctypes as ct
+                    hwnd = int(self.winId())
+                    ct.windll.user32.ShowWindow(hwnd, 2)  # SW_MINIMIZE  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+
+            def _restore_self():
+                """스크립트 실행 후 RPA 창 복원"""
+                try:
+                    import ctypes as ct
+                    hwnd = int(self.winId())
+                    ct.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+
+            result = sandbox.execute(code, cwd,
+                                     pre_exec_callback=_minimize_self,
+                                     post_exec_callback=_restore_self)
+
+            self.signals.step_executed.emit({
+                "step_id": len(self.current_session.steps) if self.current_session else 0,
+                "success": result.success,
+                "output": result.output,
+                "error": result.error,
+                "duration_ms": result.duration_ms
+            })
+
+        except Exception as e:
+            self.signals.error_occurred.emit(f"코드 실행 오류: {str(e)}")
+        finally:
+            self._current_sandbox = None  # 실행 완료 후 참조 해제
+
+    def _get_valid_python_exe(self) -> str:
+        """유효한 Python 실행 경로 반환 (실행 가능 여부 검증)"""
+        # 1. 프로젝트 venv 확인
+        venv_python = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
+        if venv_python.exists():
+            try:
+                # 실제로 실행 가능한지 테스트
+                result = subprocess.run(
+                    [str(venv_python), "--version"],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    return str(venv_python)
+            except Exception:
+                pass  # 실행 불가 - 다음 옵션으로
+
+        # 2. 환경 스캐너에서 저장된 Python 경로 확인
+        try:
+            from core.environment_scanner import get_scanner
+            scanner = get_scanner()
+            saved_env = scanner.load_saved_environment()
+            if saved_env:
+                python_path = saved_env.get('python_path')
+                if python_path and os.path.exists(python_path):
+                    try:
+                        result = subprocess.run(
+                            [python_path, "--version"],
+                            capture_output=True,
+                            timeout=5
+                        )
+                        if result.returncode == 0:
+                            return python_path
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # 3. 기본 Python (현재 실행 중인 Python)
+        return sys.executable
+
+    def _on_stop_code(self):
+        """코드 실행 강제 중지 (F9 단축키 또는 중지 버튼)"""
+        # 1. 현재 실행 중인 서브프로세스 즉시 kill
+        if self._current_sandbox is not None:
+            self._current_sandbox.stop()
+        # 2. 워크플로우 엔진 중지 플래그 설정
+        self.workflow_engine.stop()
+        # 3. UI 상태 복원
+        self.is_processing = False
+        self.chat_panel.set_input_enabled(True)
+        self.statusBar().showMessage("⛔ 실행 강제 중지 (F9)")
+        self.console_panel.log("⛔ 실행 강제 중지 (F9)", "WARNING")
+
+    def _run_all_steps(self):
+        """전체 스텝 실행"""
+        if not self.current_session or not self.current_session.steps:
+            QMessageBox.information(self, "안내", "실행할 스텝이 없습니다.")
+            return
+        self.console_panel.log("전체 워크플로우 실행은 아직 구현 중입니다.", "WARNING")
+
+    # ──────────────────────────────────────────
+    # 설정
+    # ──────────────────────────────────────────
+
+    def _open_settings(self):
+        """설정 다이얼로그 열기"""
+        dialog = SettingsDialog(self.settings, self.prompts_config, self)
+        if dialog.exec():
+            self.settings = dialog.get_settings()
+            self._save_settings()
+            self._apply_theme()
+            self._refresh_ai_combo()
+            self.console_panel.log("설정이 변경되었습니다.", "INFO")
+
+    def _show_about(self):
+        """소개 다이얼로그"""
+        QMessageBox.about(
+            self,
+            "AI RPA Solution",
+            "<h2>AI RPA Solution v2.0</h2>"
+            "<p>AI와 대화하면서 Python RPA 자동화 코드를"
+            " 단계별로 생성·실행하는 솔루션입니다.</p>"
+            "<p><b>기술 스택:</b> PyQt6, Gemini CLI, PyAutoGUI, Selenium</p>"
+            "<hr>"
+            "<p>© 2025 AI RPA Solution</p>"
+        )
+
+    # ──────────────────────────────────────────
+    # 윈도우 이벤트
+    # ──────────────────────────────────────────
+
+    def closeEvent(self, event):
+        """윈도우 닫기 시 세션 자동 저장"""
+        if self.current_session:
+            self.session_manager.save_session(self.current_session)
+        event.accept()
+
+    def showEvent(self, event):
+        """윈도우 표시 시 세션 목록 로드"""
+        super().showEvent(event)
+        self._refresh_session_list()
