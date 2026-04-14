@@ -11,12 +11,14 @@ import time
 import logging
 import subprocess
 import tempfile
-import traceback
 import re
 import ctypes
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Callable
+
+# 비주얼 오버레이 스크립트 경로
+_OVERLAY_SCRIPT = Path(__file__).parent / "visual_overlay.py"
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +350,8 @@ class WorkflowEngine:
         sandbox: Optional[CodeSandbox] = None,
         step_delay_ms: int = 500,
         max_retries: int = 3,
-        screenshot_on_error: bool = True
+        screenshot_on_error: bool = True,
+        visual_feedback_enabled: bool = True,
     ):
         """
         Args:
@@ -356,16 +359,19 @@ class WorkflowEngine:
             step_delay_ms: 스텝 간 대기 시간 (밀리초)
             max_retries: 실패 시 최대 재시도 횟수
             screenshot_on_error: 에러 발생 시 스크린샷 자동 저장 여부
+            visual_feedback_enabled: 실행 중 마우스/키보드 시각 효과 오버레이 표시 여부
         """
         self.sandbox = sandbox or CodeSandbox()
         self.step_delay_ms = step_delay_ms
         self.max_retries = max_retries
         self.screenshot_on_error = screenshot_on_error
+        self.visual_feedback_enabled = visual_feedback_enabled
 
         self.is_running = False
         self.is_paused = False
         self.should_stop = False
         self.current_step_index = 0
+        self._overlay_proc: Optional[subprocess.Popen] = None
 
     async def execute_session(
         self,
@@ -393,6 +399,10 @@ class WorkflowEngine:
         self.is_running = True
         self.is_paused = False
         self.should_stop = False
+
+        # 비주얼 피드백 오버레이 시작
+        if self.visual_feedback_enabled:
+            self._start_overlay()
 
         report = ExecutionReport(
             session_id=session.session_id,
@@ -475,6 +485,9 @@ class WorkflowEngine:
         report.total_time_ms = int((time.time() - start_time) * 1000)
         self.is_running = False
 
+        # 비주얼 피드백 오버레이 종료
+        self._stop_overlay()
+
         if on_log:
             on_log(
                 f"워크플로우 완료: {report.successful_steps}/{report.executed_steps} "
@@ -485,7 +498,57 @@ class WorkflowEngine:
 
     async def execute_single_step(self, code: str, cwd: Optional[str] = None) -> StepResult:
         """단일 코드를 실행합니다."""
-        return self.sandbox.execute(code, cwd)
+        if self.visual_feedback_enabled:
+            self._start_overlay()
+        try:
+            return self.sandbox.execute(code, cwd)
+        finally:
+            self._stop_overlay()
+
+    # ── 비주얼 피드백 오버레이 ───────────────────────────────────────────────────
+
+    def _start_overlay(self) -> None:
+        """비주얼 피드백 오버레이 프로세스를 시작합니다."""
+        if not _OVERLAY_SCRIPT.exists():
+            logger.warning("visual_overlay.py 를 찾을 수 없습니다. 오버레이를 건너뜁니다.")
+            return
+        if self._overlay_proc and self._overlay_proc.poll() is None:
+            return  # 이미 실행 중
+
+        try:
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            self._overlay_proc = subprocess.Popen(
+                [sys.executable, str(_OVERLAY_SCRIPT)],
+                creationflags=flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # 오버레이 창이 뜰 시간을 확보
+            time.sleep(0.4)
+            logger.info("비주얼 피드백 오버레이 시작 (PID=%s)", self._overlay_proc.pid)
+        except Exception as exc:
+            logger.warning("비주얼 피드백 오버레이 시작 실패: %s", exc)
+            self._overlay_proc = None
+
+    def _stop_overlay(self) -> None:
+        """비주얼 피드백 오버레이 프로세스를 종료합니다."""
+        proc = self._overlay_proc
+        if proc is None:
+            return
+        self._overlay_proc = None
+        if proc.poll() is not None:
+            return  # 이미 종료됨
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        logger.info("비주얼 피드백 오버레이 종료")
+
+    # ────────────────────────────────────────────────────────────────────────────
 
     def pause(self):
         """실행을 일시정지합니다."""

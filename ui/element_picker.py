@@ -564,9 +564,16 @@ class ElementPickerOverlay(QWidget):
                         if auto_id:
                             locator_candidates.append(("id", auto_id))
                         if name:
-                            # UIA accessible name = title 속성 또는 텍스트 (브라우저에서)
-                            locator_candidates.append(("title", name[:200]))
-                            locator_candidates.append(("text", name[:200]))
+                            # title + text를 하나의 XPath OR 조건으로 합쳐서 불필요한 10초 타임아웃 방지.
+                            # 예: <span class="ax-menu-item-label">실패사례</span> 처럼 @title 속성이
+                            # 없는 SPA 메뉴 아이템도 text 조건으로 즉시 찾을 수 있음.
+                            _safe = name[:200].replace('"', "'")
+                            locator_candidates.append((
+                                "xpath",
+                                f'//*[normalize-space(@title)="{_safe}"'
+                                f' or (not(self::script) and not(self::style)'
+                                f' and normalize-space(.)="{_safe}")]'
+                            ))
 
                     self._current_element_ref = element  # 계층 수집용 레퍼런스 보관
                     self._current_element_info = {
@@ -982,6 +989,133 @@ class ElementPickerOverlay(QWidget):
 
         logger.info(sep)
 
+    def _capture_dom_context(self, name: str, auto_id: str) -> dict:
+        """
+        Chrome CDP(포트 9222)를 통해 현재 페이지의 DOM 컨텍스트를 수집합니다.
+        CDP 포트가 없거나 Selenium 연결 실패 시 빈 dict 반환 (비파괴적).
+
+        반환 키:
+            cdp_available (bool)
+            page_url, page_title (str)
+            xpath, outerHTML, tagName, textContent (str)
+            attributes (dict)  — 실제 HTML 속성 목록 (title 존재 여부 확인용)
+            hasTitle (bool)
+            parentOuterHTML (str)
+        """
+        import urllib.request
+        import json as _json
+
+        # CDP 포트 탐색 (9222 → 9223 → 9224)
+        cdp_port: int | None = None
+        for port in (9222, 9223, 9224):
+            try:
+                with urllib.request.urlopen(
+                    f"http://localhost:{port}/json/version", timeout=1
+                ) as resp:
+                    if resp.status == 200:
+                        cdp_port = port
+                        break
+            except Exception:
+                continue
+
+        if not cdp_port:
+            logger.debug("DOM 컨텍스트 수집 스킵: CDP 포트 없음 (Chrome --remote-debugging-port=9222 필요)")
+            return {"cdp_available": False}
+
+        ctx: dict = {"cdp_available": True, "cdp_port": cdp_port}
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options as _ChromeOptions
+
+            opts = _ChromeOptions()
+            opts.add_experimental_option("debuggerAddress", f"localhost:{cdp_port}")
+            driver = webdriver.Chrome(options=opts)
+
+            try:
+                ctx["page_url"] = driver.current_url
+                ctx["page_title"] = driver.title
+
+                result = driver.execute_script(
+                    """
+(function(elId, elText) {
+    function getXPath(el) {
+        if (!el) return '';
+        if (el.id) return '//*[@id="' + el.id.replace(/"/g,'&quot;') + '"]';
+        var parts = [];
+        while (el && el.nodeType === 1) {
+            var tag = el.tagName.toLowerCase();
+            if (el.parentElement) {
+                var sibs = Array.from(el.parentElement.children)
+                    .filter(function(s){ return s.tagName === el.tagName; });
+                if (sibs.length > 1) tag += '[' + (sibs.indexOf(el) + 1) + ']';
+            }
+            parts.unshift(tag);
+            el = el.parentElement;
+        }
+        return '/' + parts.join('/');
+    }
+    function getAttrs(el) {
+        var obj = {};
+        if (!el || !el.attributes) return obj;
+        Array.from(el.attributes).forEach(function(a){ obj[a.name] = a.value; });
+        return obj;
+    }
+    function elInfo(el) {
+        return {
+            xpath: getXPath(el),
+            outerHTML: el.outerHTML.substring(0, 1000),
+            tagName: el.tagName.toLowerCase(),
+            textContent: (el.textContent || '').trim().substring(0, 300),
+            attributes: getAttrs(el),
+            hasTitle: el.hasAttribute('title'),
+            titleValue: el.getAttribute('title') || '',
+            parentOuterHTML: el.parentElement ? el.parentElement.outerHTML.substring(0, 1500) : ''
+        };
+    }
+    // 1순위: HTML id로 찾기
+    if (elId) {
+        var byId = document.getElementById(elId);
+        if (byId) return elInfo(byId);
+    }
+    // 2순위: 텍스트가 정확히 일치하는 leaf 요소 (script/style 제외)
+    if (elText) {
+        var walker = document.createTreeWalker(
+            document.body, NodeFilter.SHOW_ELEMENT, null, false);
+        var found = null;
+        while (walker.nextNode()) {
+            var node = walker.currentNode;
+            if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE') continue;
+            if ((node.textContent || '').trim() === elText) {
+                found = node;
+                break;
+            }
+        }
+        if (found) return elInfo(found);
+    }
+    return null;
+})(arguments[0], arguments[1]);
+""",
+                    auto_id or "",
+                    name or "",
+                )
+                if result:
+                    ctx.update(result)
+                else:
+                    ctx["dom_note"] = "해당 요소를 DOM에서 찾지 못함 (동적 렌더링 또는 텍스트 불일치)"
+
+            finally:
+                # debuggerAddress 모드: quit()은 chromedriver만 종료, 브라우저는 유지
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            ctx["cdp_error"] = str(e)[:300]
+            logger.debug(f"DOM 컨텍스트 수집 실패: {e}")
+
+        return ctx
+
     def mousePressEvent(self, event):
         """클릭 시 요소 선택 완료"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -990,6 +1124,13 @@ class ElementPickerOverlay(QWidget):
             element_ref = self._current_element_ref
             self.stop_picking()
             if element_info:
+                # 브라우저 요소인 경우 DOM 컨텍스트 수집 (CDP 연결 가능 시)
+                if element_info.get("is_browser"):
+                    dom_ctx = self._capture_dom_context(
+                        element_info.get("name", ""),
+                        element_info.get("automation_id", ""),
+                    )
+                    element_info["dom_context"] = dom_ctx
                 self._log_element_details(element_info, element_ref)
                 self.element_picked.emit(element_info)
             else:

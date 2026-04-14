@@ -152,6 +152,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(widget)
 
         exec_config = self.settings.get("execution", {})
+        vf_config   = self.settings.get("visual_feedback", {})
 
         # 스텝 딜레이
         self.delay_spin = QSpinBox()
@@ -169,6 +170,18 @@ class SettingsDialog(QDialog):
         self.sandbox_cb = QCheckBox("샌드박스 모드 (별도 프로세스 실행)")
         self.sandbox_cb.setChecked(exec_config.get("sandbox_mode", True))
         form.addRow(self.sandbox_cb)
+
+        # 비주얼 피드백 오버레이
+        self.visual_feedback_cb = QCheckBox(
+            "실행 중 시각 피드백 표시 (마우스 클릭 리플 · 좌표 · 키 입력)"
+        )
+        self.visual_feedback_cb.setChecked(vf_config.get("enabled", True))
+        self.visual_feedback_cb.setToolTip(
+            "자동화 코드 실행 중 화면 위에 투명 오버레이를 띄워\n"
+            "마우스가 어디를 클릭하는지, 어떤 키를 입력하는지 확인할 수 있습니다.\n"
+            "DBeaver 등 클릭이 제대로 되지 않는 경우 디버깅에 유용합니다."
+        )
+        form.addRow(self.visual_feedback_cb)
 
         return widget
 
@@ -382,6 +395,11 @@ class SettingsDialog(QDialog):
         self.settings["execution"]["step_delay_ms"] = self.delay_spin.value()
         self.settings["execution"]["screenshot_on_error"] = self.error_screenshot_cb.isChecked()
         self.settings["execution"]["sandbox_mode"] = self.sandbox_cb.isChecked()
+
+        # 비주얼 피드백
+        if "visual_feedback" not in self.settings:
+            self.settings["visual_feedback"] = {}
+        self.settings["visual_feedback"]["enabled"] = self.visual_feedback_cb.isChecked()
 
         # UI
         self.settings["ui"]["theme"] = self.theme_combo.currentText()

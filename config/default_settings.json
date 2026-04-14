@@ -44,6 +44,9 @@
     "screenshot_on_error": true,
     "sandbox_mode": true
   },
+  "visual_feedback": {
+    "enabled": true
+  },
   "ui": {
     "theme": "dark",
     "console_visible": true,

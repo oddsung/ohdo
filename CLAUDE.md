@@ -1,4 +1,4 @@
-# AI RPA Solution
+# ohdo.ai
 
 AI(Gemini CLI)와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성·실행하는 PyQt6 기반 RPA 솔루션.
 

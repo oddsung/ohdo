@@ -131,11 +131,13 @@ class ChatPanel(QWidget):
     message_sent = pyqtSignal(str)          # 사용자 메시지 전송 시그널
     capture_requested = pyqtSignal()        # 화면 캡처 요청 시그널
     element_pick_requested = pyqtSignal()   # UI 요소 선택 요청 시그널
+    cancel_requested = pyqtSignal()         # AI 생성 중지 요청 시그널
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pending_elements: list[dict] = []   # element_info 목록
         self._chip_widgets: list[ElementChip] = []
+        self._is_generating: bool = False          # AI 생성 중 여부
         self._setup_ui()
 
     def _setup_ui(self):
@@ -221,7 +223,7 @@ class ChatPanel(QWidget):
 
         self.send_btn = QPushButton("전송 ▶")
         self.send_btn.setFixedSize(80, 70)
-        self.send_btn.setStyleSheet("""
+        self._send_btn_normal_style = """
             QPushButton {
                 background-color: #89b4fa;
                 color: #1e1e2e;
@@ -231,8 +233,19 @@ class ChatPanel(QWidget):
             }
             QPushButton:hover { background-color: #74c7ec; }
             QPushButton:disabled { background-color: #45475a; color: #6c7086; }
-        """)
-        self.send_btn.clicked.connect(self._send_message)
+        """
+        self._send_btn_stop_style = """
+            QPushButton {
+                background-color: #f38ba8;
+                color: #1e1e2e;
+                font-weight: bold;
+                font-size: 13px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #eba0ac; }
+        """
+        self.send_btn.setStyleSheet(self._send_btn_normal_style)
+        self.send_btn.clicked.connect(self._on_send_btn_clicked)
         input_layout.addWidget(self.send_btn)
 
         bottom_layout.addWidget(input_frame)
@@ -249,10 +262,18 @@ class ChatPanel(QWidget):
             key_event = event
             if (key_event.key() == Qt.Key.Key_Return and
                 not key_event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
-                self._send_message()
+                if not self._is_generating:
+                    self._send_message()
                 return True
             # 백스페이스로 칩 삭제 기능 제거 - 칩의 X 버튼으로만 삭제 가능
         return super().eventFilter(obj, event)
+
+    def _on_send_btn_clicked(self):
+        """전송/중지 버튼 클릭 — 생성 중이면 취소, 아니면 전송"""
+        if self._is_generating:
+            self.cancel_requested.emit()
+        else:
+            self._send_message()
 
     def _send_message(self):
         """메시지 전송"""
@@ -313,12 +334,36 @@ class ChatPanel(QWidget):
         self.capture_status.setText("첨부된 캡처 없음")
         self.capture_status.setStyleSheet("color: #6c7086; font-size: 10px;")
 
+    def set_generating(self, generating: bool):
+        """
+        AI 생성 중 상태 전환.
+        - generating=True : 전송 버튼 → ⏹ 중지 (빨간색), 나머지 입력 비활성화
+        - generating=False: 전송 버튼 → 전송 ▶ (파란색), 나머지 입력 활성화
+        """
+        self._is_generating = generating
+        if generating:
+            self.send_btn.setText("⏹ 중지")
+            self.send_btn.setStyleSheet(self._send_btn_stop_style)
+            self.send_btn.setEnabled(True)   # 중지 버튼은 항상 클릭 가능
+            self.input_box.setEnabled(False)
+            self.capture_btn.setEnabled(False)
+            self.element_pick_btn.setEnabled(False)
+        else:
+            self.send_btn.setText("전송 ▶")
+            self.send_btn.setStyleSheet(self._send_btn_normal_style)
+            self.send_btn.setEnabled(True)
+            self.input_box.setEnabled(True)
+            self.capture_btn.setEnabled(True)
+            self.element_pick_btn.setEnabled(True)
+
     def set_input_enabled(self, enabled: bool):
-        """입력 활성화/비활성화"""
+        """입력 활성화/비활성화 (생성 중 상태와 무관한 일반 제어용)"""
         self.input_box.setEnabled(enabled)
-        self.send_btn.setEnabled(enabled)
         self.capture_btn.setEnabled(enabled)
         self.element_pick_btn.setEnabled(enabled)
+        # send_btn은 생성 중이 아닐 때만 enabled 상태 동기화
+        if not self._is_generating:
+            self.send_btn.setEnabled(enabled)
 
     # ── 요소 칩 관리 ──────────────────────────────────────
 

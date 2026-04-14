@@ -22,8 +22,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFileDialog, QApplication, QComboBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence
-from PyQt6.QtWidgets import QShortcut
+from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence, QShortcut
 
 from .chat_panel import ChatPanel
 from .code_viewer import CodeViewer
@@ -87,7 +86,8 @@ class MainWindow(QMainWindow):
         self.ai_engine = AIEngineManager(self.settings)
         self.prompt_builder = PromptBuilder(self.prompts_config)
         self.workflow_engine = WorkflowEngine(
-            step_delay_ms=self.settings.get("execution", {}).get("step_delay_ms", 500)
+            step_delay_ms=self.settings.get("execution", {}).get("step_delay_ms", 500),
+            visual_feedback_enabled=self.settings.get("visual_feedback", {}).get("enabled", True),
         )
 
         # ── 상태 변수 ──
@@ -188,6 +188,7 @@ class MainWindow(QMainWindow):
         self.chat_panel.message_sent.connect(self._on_user_message)
         self.chat_panel.capture_requested.connect(self._on_capture_request)
         self.chat_panel.element_pick_requested.connect(self._on_element_pick_request)
+        self.chat_panel.cancel_requested.connect(self._on_cancel_ai)
         self.main_splitter.addWidget(self.chat_panel)
 
         # 3. 코드+캡처 뷰어 (오른쪽)
@@ -701,6 +702,12 @@ class MainWindow(QMainWindow):
     # 사용자 입력 처리 (AI 연동)
     # ──────────────────────────────────────────
 
+    def _on_cancel_ai(self):
+        """AI 생성 중지 요청 처리"""
+        self.console_panel.log("사용자가 AI 요청을 취소했습니다.", "INFO")
+        self.statusBar().showMessage("취소 중...")
+        self.ai_engine.cancel()
+
     def _on_user_message(self, message: str):
         """사용자가 대화 패널에서 메시지를 전송"""
         if not message.strip() and not self.pending_images:
@@ -712,7 +719,7 @@ class MainWindow(QMainWindow):
             return
 
         self.is_processing = True
-        self.chat_panel.set_input_enabled(False)
+        self.chat_panel.set_generating(True)
         self.statusBar().showMessage("AI 응답 대기 중...")
         self.console_panel.log(f"사용자 요청: {message[:100]}...", "INFO")
 
@@ -806,7 +813,8 @@ class MainWindow(QMainWindow):
                     "tokens_used": response.tokens_used,
                     "response_time_ms": response.response_time_ms,
                     "success": response.success,
-                    "error": response.error
+                    "error": response.error,
+                    "cancelled": response.cancelled,
                 },
                 "prompt": prompt
             })
@@ -837,6 +845,14 @@ class MainWindow(QMainWindow):
             has_images=bool(data.get("images")),
             element_info=element_info
         )
+
+        # 취소된 경우: 안내 메시지만 표시하고 세션 기록 없이 종료
+        if response.get("cancelled"):
+            self.chat_panel.add_system_message("요청이 취소되었습니다.")
+            self.is_processing = False
+            self.chat_panel.set_generating(False)
+            self.statusBar().showMessage("취소됨")
+            return
 
         # AI 응답을 대화 패널에 표시
         if response["success"]:
@@ -920,7 +936,7 @@ class MainWindow(QMainWindow):
 
         # 상태 복원
         self.is_processing = False
-        self.chat_panel.set_input_enabled(True)
+        self.chat_panel.set_generating(False)
         self.statusBar().showMessage("준비 완료")
 
     def _on_step_executed(self, data: dict):
@@ -1598,6 +1614,10 @@ class MainWindow(QMainWindow):
             self._save_settings()
             self._apply_theme()
             self._refresh_ai_combo()
+            # 런타임 엔진에 즉시 반영
+            self.workflow_engine.visual_feedback_enabled = (
+                self.settings.get("visual_feedback", {}).get("enabled", True)
+            )
             self.console_panel.log("설정이 변경되었습니다.", "INFO")
 
     def _show_about(self):

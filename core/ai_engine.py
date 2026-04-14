@@ -100,6 +100,13 @@ class AIEngineManager:
             })
         return result
 
+    def cancel(self) -> None:
+        """진행 중인 AI 요청을 취소합니다."""
+        try:
+            self.get_adapter().cancel()
+        except Exception:
+            pass
+
     async def generate(
         self,
         prompt: str,

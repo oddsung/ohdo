@@ -33,6 +33,18 @@ class GeminiCLIAdapter(BaseAIAdapter):
         self.command = config.get("command", "gemini")
         self.timeout = config.get("timeout_seconds", 180)
         self.max_retries = config.get("max_retries", 3)
+        self._proc: Optional[subprocess.Popen] = None  # 실행 중인 서브프로세스
+        self._cancelled: bool = False                   # 사용자 취소 플래그
+
+    def cancel(self) -> None:
+        """진행 중인 Gemini CLI 프로세스를 강제 종료합니다."""
+        self._cancelled = True
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
     def get_name(self) -> str:
         return "Gemini CLI"
@@ -49,6 +61,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
         """
         Gemini CLI를 통해 프롬프트를 전송하고 응답을 받습니다.
         """
+        self._cancelled = False
         start_time = time.time()
 
         gemini_exec = shutil.which(self.command)
@@ -76,8 +89,12 @@ class GeminiCLIAdapter(BaseAIAdapter):
                 if img_refs:
                     full_prompt = " ".join(img_refs) + "\n\n" + prompt
 
-            # 방법 1: 프롬프트를 임시 파일에 저장 후 쉘에서 읽기
+            # 프롬프트를 stdin으로 전달 (Popen → communicate로 취소 가능)
             prompt_file = None
+            raw_output = ""
+            stderr_output = ""
+            returncode = -1
+
             try:
                 with tempfile.NamedTemporaryFile(
                     mode='w', suffix='.txt', delete=False,
@@ -86,29 +103,27 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     f.write(full_prompt)
                     prompt_file = f.name
 
-                if sys.platform == "win32":
-                    # Windows: cmd로 type 명령어로 파일 내용을 gemini에 파이프
-                    # 또는 직접 subprocess로 stdin 전달
-                    result = subprocess.run(
-                        [gemini_exec],
-                        input=full_prompt,
-                        capture_output=True,
-                        text=True,
-                        encoding='utf-8',
-                        timeout=self.timeout,
-                        cwd=str(sandbox_dir)
+                self._proc = subprocess.Popen(
+                    [gemini_exec],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    encoding='utf-8',
+                    cwd=str(sandbox_dir)
+                )
+                try:
+                    stdout, stderr = self._proc.communicate(
+                        input=full_prompt, timeout=self.timeout
                     )
-                else:
-                    # Linux/macOS
-                    result = subprocess.run(
-                        [gemini_exec],
-                        input=full_prompt,
-                        capture_output=True,
-                        text=True,
-                        encoding='utf-8',
-                        timeout=self.timeout,
-                        cwd=str(sandbox_dir)
-                    )
+                    returncode = self._proc.returncode
+                    raw_output = (stdout or "").strip()
+                    stderr_output = (stderr or "").strip()
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                    self._proc.communicate()
+                    raise
+                finally:
+                    self._proc = None
 
             finally:
                 if prompt_file and os.path.exists(prompt_file):
@@ -117,30 +132,54 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     except OSError:
                         pass
 
+            # 취소된 경우 즉시 반환
+            if self._cancelled:
+                return AIResponse(
+                    success=False,
+                    cancelled=True,
+                    error="사용자가 요청을 취소했습니다."
+                )
+
             elapsed_ms = int((time.time() - start_time) * 1000)
 
             # 결과 확인: stdin 파이프 실패 시 -p 플래그로 재시도
-            raw_output = result.stdout.strip() if result.stdout else ""
-            stderr_output = result.stderr.strip() if result.stderr else ""
-
             # stdin이 안 되면 (interactive 모드로 빠지면) -p 로 재시도
-            if not raw_output or result.returncode != 0:
+            if not raw_output or returncode != 0:
                 # 짧은 프롬프트는 직접 인자로 전달 가능
                 if len(full_prompt) < 8000:
-                    result = subprocess.run(
+                    self._proc = subprocess.Popen(
                         [gemini_exec, "-p", full_prompt],
-                        capture_output=True,
-                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         encoding='utf-8',
-                        timeout=self.timeout,
                         cwd=str(sandbox_dir)
                     )
-                    raw_output = result.stdout.strip() if result.stdout else ""
-                    stderr_output = result.stderr.strip() if result.stderr else ""
+                    try:
+                        stdout, stderr = self._proc.communicate(timeout=self.timeout)
+                        returncode = self._proc.returncode
+                        raw_output = (stdout or "").strip()
+                        stderr_output = (stderr or "").strip()
+                    except subprocess.TimeoutExpired:
+                        self._proc.kill()
+                        self._proc.communicate()
+                        raise
+                    finally:
+                        self._proc = None
+
+                    if self._cancelled:
+                        return AIResponse(
+                            success=False,
+                            cancelled=True,
+                            error="사용자가 요청을 취소했습니다."
+                        )
                     elapsed_ms = int((time.time() - start_time) * 1000)
 
-            if raw_output and result.returncode == 0:
+            # result 호환 객체 대신 변수 직접 사용
+            if raw_output and returncode == 0:
                 code = self.extract_code_from_response(raw_output)
+                # AI가 문자열 리터럴 내 특수문자 앞뒤에 공백을 삽입하는 버그 교정
+                if code:
+                    code = self.restore_user_strings(code, full_prompt)
                 description = self.extract_description_from_response(raw_output)
                 packages = self.extract_packages_from_code(code) if code else []
 
@@ -159,7 +198,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     raw_response=error_msg,
                     response_time_ms=elapsed_ms,
                     success=False,
-                    error=f"Gemini CLI 오류 (코드 {result.returncode}): {error_msg[:500]}"
+                    error=f"Gemini CLI 오류 (코드 {returncode}): {error_msg[:500]}"
                 )
 
         except subprocess.TimeoutExpired:

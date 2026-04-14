@@ -6,7 +6,6 @@ AI 코드 생성 시 윈도우 컨트롤 정보를 컨텍스트로 제공합니�
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +189,6 @@ class WindowInspector:
         브라우저 요소면 Selenium, 데스크톱 요소면 pywinauto 코드 예시를 생성합니다.
         """
         is_browser = element_info.get("is_browser", False)
-        browser_type = element_info.get("browser_type", "")
 
         if is_browser:
             return self._get_browser_element_info_text(element_info)
@@ -229,6 +227,72 @@ class WindowInspector:
             lines.append(f"- **브라우저 창 제목**: {parent_title}")
 
         lines.append("")
+
+        # DOM 컨텍스트 (CDP 수집 성공 시)
+        dom_ctx: dict = element_info.get("dom_context", {})
+        # 비인터랙티브 태그 목록 (클릭 핸들러가 부모에 있을 가능성 높음)
+        _NON_INTERACTIVE = {"span", "em", "strong", "i", "b", "small", "label",
+                            "p", "td", "th", "li", "dt", "dd", "abbr", "cite"}
+        dom_tag = dom_ctx.get("tagName", "")
+        dom_attrs = dom_ctx.get("attributes", {}) if dom_ctx.get("cdp_available") else {}
+        dom_classes = (dom_attrs.get("class") or "").strip()
+        dom_text = (dom_ctx.get("textContent") or "").strip()
+
+        if dom_ctx.get("cdp_available"):
+            lines.append("### DOM 컨텍스트 (실제 브라우저 DOM 분석 결과):")
+            if dom_ctx.get("page_url"):
+                lines.append(f"- **페이지 URL**: {dom_ctx['page_url']}")
+            if dom_tag:
+                lines.append(f"- **태그**: `<{dom_tag}>`")
+            if dom_attrs:
+                attr_str = ", ".join(f'{k}="{v}"' for k, v in list(dom_attrs.items())[:10])
+                lines.append(f"- **HTML 속성**: {attr_str}")
+            # CSS 선택자 — class 속성에서 자동 도출
+            if dom_classes:
+                css_sel = dom_tag + "." + ".".join(dom_classes.split()) if dom_tag else "." + ".".join(dom_classes.split())
+                lines.append(f"- **CSS 선택자**: `{css_sel}`")
+            if dom_ctx.get("xpath"):
+                lines.append(f"- **절대 XPath**: `{dom_ctx['xpath']}`")
+            has_title = dom_ctx.get("hasTitle", False)
+            title_val = dom_ctx.get("titleValue", "")
+            if has_title:
+                lines.append(f'- **title 속성**: ✅ 있음 (값: "{title_val}")')
+            else:
+                lines.append("- **title 속성**: ❌ 없음 → `@title` XPath 전략은 사용 불가")
+            if dom_ctx.get("outerHTML"):
+                lines.append("")
+                lines.append("**선택 요소 HTML:**")
+                lines.append("```html")
+                lines.append(dom_ctx["outerHTML"][:500])
+                lines.append("```")
+            if dom_ctx.get("parentOuterHTML"):
+                lines.append("")
+                lines.append("**부모 요소 HTML** (클릭 핸들러 위치 파악용):")
+                lines.append("```html")
+                lines.append(dom_ctx["parentOuterHTML"][:1000])
+                lines.append("```")
+            # 비인터랙티브 태그 경고
+            if dom_tag in _NON_INTERACTIVE:
+                lines.append("")
+                lines.append(
+                    f"> ⚠️ **`<{dom_tag}>`는 비인터랙티브 태그**입니다. 클릭 이벤트 핸들러가 "
+                    "부모 요소(`<button>`, `<a>`, `<div data-*>` 등)에 있을 수 있습니다. "
+                    "위 **부모 요소 HTML**을 분석하여 실제 클릭 대상을 결정하세요."
+                )
+            # DOM에 동일 텍스트 요소가 여럿 있을 가능성 경고 (SPA 메뉴 패턴)
+            if dom_classes and dom_tag in _NON_INTERACTIVE:
+                lines.append(
+                    f"> ℹ️ SPA 프레임워크에서는 동일한 CSS 클래스(`{dom_classes.split()[0] if dom_classes else ''}`)와 텍스트를 가진 "
+                    "숨겨진 요소가 DOM에 여럿 존재할 수 있습니다. `getBoundingClientRect()`로 "
+                    "실제 화면에 보이는 요소만 선택하는 방식을 고려하세요."
+                )
+            lines.append("")
+        elif dom_ctx.get("cdp_error"):
+            lines.append(f"> ℹ️ DOM 분석 실패: {dom_ctx['cdp_error'][:100]}")
+            lines.append("")
+        elif not dom_ctx:
+            pass  # CDP 미사용 (비브라우저 또는 포트 없음)
+
         lines.append("### 코드 생성 컨텍스트:")
         lines.append("> **브라우저 요소**: pywinauto 대신 **Selenium**을 사용하세요.")
         lines.append("> Selenium은 좌표 클릭 없이 DOM 요소를 직접 제어하므로 훨씬 안정적입니다.")
@@ -241,7 +305,6 @@ class WindowInspector:
         # - 입력 요소: element_to_be_clickable + .send_keys()
         CLICK_TYPES = {"Button", "CheckBox", "RadioButton", "Hyperlink", "ComboBox", "ListItem", "MenuItem", "TabItem"}
         INPUT_TYPES = {"Edit", "Document"}
-        JS_CLICK_TYPES = {"Text", "Group", "Static", "Header", "Image", "Custom", "Pane", "Unknown"}
 
         if ctrl_type in CLICK_TYPES:
             click_strategy = "direct"
@@ -251,17 +314,63 @@ class WindowInspector:
             # Text, Group, Static 등 비인터랙티브 요소 → JS click
             click_strategy = "js"
 
-        # 로케이터 후보 목록 생성 (피커 제공 우선, 없으면 name/id로 직접 구성)
-        if picker_locators:
-            locator_items = [f'("{s}", "{v.replace(chr(34), chr(92)+chr(34))}")' for s, v in picker_locators]
+        # ── 로케이터 후보 목록 생성 ──────────────────────────────────────
+        # 우선순위: DOM 실측(id > CSS클래스+텍스트 > 절대XPath) > 피커(id > XPath OR) > 이름 기반
+        def _fmt_locator(s: str, v: str) -> str:
+            if s == "xpath":
+                # XPath 값은 내부에 큰따옴표 포함 가능 → 작은따옴표 Python 문자열 사용
+                return f'("xpath", \'{v}\')'
+            escaped = v.replace('"', '\\"')
+            return f'("{s}", "{escaped}")'
+
+        # DOM 실측 데이터로 로케이터 도출 (CDP 수집 성공 시)
+        dom_locators: list[tuple[str, str]] = []
+        if dom_ctx.get("cdp_available") and not dom_ctx.get("dom_note"):
+            elem_id = dom_attrs.get("id", "")
+            if elem_id:
+                # HTML id는 가장 안정적인 로케이터
+                dom_locators.append(("id", elem_id))
+            if dom_classes and dom_text:
+                # CSS 클래스 + 텍스트 조합 XPath: 특정 컨테이너 내 텍스트 매칭
+                first_cls = dom_classes.split()[0]
+                safe_text = dom_text[:100].replace('"', "'")
+                tag_sel = dom_tag or "*"
+                dom_locators.append((
+                    "xpath",
+                    f'//{tag_sel}[contains(@class, "{first_cls}") and normalize-space(.)="{safe_text}"]'
+                ))
+            if dom_classes and not elem_id:
+                # CSS selector (클래스 기반) — id 없을 때 유용
+                css_sel = (dom_tag or "") + "." + ".".join(dom_classes.split())
+                dom_locators.append(("css", css_sel))
+            precise_xpath = dom_ctx.get("xpath", "")
+            if precise_xpath and not elem_id:
+                # 절대 XPath는 마지막 수단 (DOM 구조 변경에 취약)
+                dom_locators.append(("xpath", precise_xpath))
+
+        # DOM 실측 + 피커 로케이터 합산 (중복 제거, DOM 실측 우선)
+        seen_locs: set[str] = set()
+        merged_locators: list[tuple[str, str]] = []
+        for s, v in dom_locators + picker_locators:
+            key = f"{s}:{v}"
+            if key not in seen_locs:
+                seen_locs.add(key)
+                merged_locators.append((s, v))
+
+        if merged_locators:
+            locator_items = [_fmt_locator(s, v) for s, v in merged_locators]
         else:
             locator_items = []
             if auto_id:
                 locator_items.append(f'("id", "{auto_id}")')
             if name:
-                safe_name = name.replace('"', '\\"').replace("'", "\\'")
-                locator_items.append(f'("title", "{safe_name}")')
-                locator_items.append(f'("text", "{safe_name}")')
+                safe_name = name.replace('"', "'")
+                xpath_combined = (
+                    f'//*[normalize-space(@title)="{safe_name}"'
+                    f' or (not(self::script) and not(self::style)'
+                    f' and normalize-space(.)="{safe_name}")]'
+                )
+                locator_items.append(f'("xpath", \'{xpath_combined}\')')
             if not locator_items:
                 locator_items.append('("css", "")  # 개발자 도구로 선택자 확인 후 수정')
 
@@ -284,29 +393,57 @@ class WindowInspector:
         lines.append("# driver = webdriver.Chrome(options=options)")
         lines.append("")
         lines.append("")
-        lines.append("def find_and_click(driver, locators, timeout=10):")
-        lines.append("    \"\"\"로케이터 우선순위 순으로 요소를 찾아 클릭. off-canvas 요소는 JS click으로 자동 처리.\"\"\"")
+        lines.append("def find_and_click(driver, locators, timeout=10, visible_only=False):")
+        lines.append("    \"\"\"로케이터 우선순위 순으로 요소를 찾아 클릭.")
+        lines.append("    visible_only=True : 드롭다운/서브메뉴 — 뷰포트 내 보이는 요소만 선택 (필수!)")
+        lines.append("    visible_only=False: 최초 로드 요소 — DOM 존재 시 즉시 반환\"\"\"")
+        lines.append("    import time as _t")
         lines.append("    from selenium.webdriver.support.ui import WebDriverWait")
         lines.append("    from selenium.webdriver.support import expected_conditions as EC")
         lines.append("    from selenium.webdriver.common.by import By")
+        lines.append("    from selenium.webdriver.common.action_chains import ActionChains")
         lines.append("    last_err = None")
+        lines.append("    by_map = {'id': By.ID, 'css': By.CSS_SELECTOR, 'xpath': By.XPATH}")
         lines.append("    for strategy, value in locators:")
         lines.append("        try:")
-        lines.append("            by_map = {'id': By.ID, 'css': By.CSS_SELECTOR, 'xpath': By.XPATH}")
         lines.append("            if strategy == 'title':")
-        lines.append("                by, val = By.XPATH, f'//*[@title=\"{value}\"]'")
+        lines.append("                by, val = By.XPATH, f'//*[normalize-space(@title)=\"{value}\"]'")
         lines.append("            elif strategy == 'text':")
         lines.append("                by, val = By.XPATH, f'//*[not(self::script)][not(self::style)][normalize-space(.)=\"{value}\"]'")
         lines.append("            else:")
         lines.append("                by, val = by_map.get(strategy, By.XPATH), value")
-        lines.append("            el = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, val)))")
+        lines.append("            if visible_only:")
+        lines.append("                # EC.visibility_of_element_located는 CSS hidden만 확인 →")
+        lines.append("                # x<0 위치 사이드바 요소도 통과시켜 잘못 클릭하는 버그 존재")
+        lines.append("                # find_elements + getBoundingClientRect: 뷰포트 내 실제 보이는 요소만 선택")
+        lines.append("                _deadline = _t.time() + timeout")
+        lines.append("                el = None")
+        lines.append("                while _t.time() < _deadline:")
+        lines.append("                    for _c in driver.find_elements(by, val):")
+        lines.append("                        try:")
+        lines.append("                            _r = driver.execute_script(")
+        lines.append("                                'var r=arguments[0].getBoundingClientRect();'")
+        lines.append("                                'return {x:r.x,y:r.y,w:r.width,h:r.height};', _c)")
+        lines.append("                            if _r['w']>0 and _r['h']>0 and _r['x']>=0 and _r['y']>=0:")
+        lines.append("                                el = _c; break")
+        lines.append("                        except Exception:")
+        lines.append("                            continue")
+        lines.append("                    if el: break")
+        lines.append("                    _t.sleep(0.1)")
+        lines.append("                if el is None:")
+        lines.append("                    raise Exception(f'visible 요소 없음: {strategy}={value}')")
+        lines.append("            else:")
+        lines.append("                el = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, val)))")
         lines.append("            rect = driver.execute_script(")
         lines.append("                'var r=arguments[0].getBoundingClientRect(); return {x:r.x,y:r.y};', el)")
         lines.append("            if rect['x'] < 0 or rect['y'] < 0:")
         lines.append("                driver.execute_script('arguments[0].click()', el)")
         lines.append("            else:")
-        lines.append("                try: el.click()")
-        lines.append("                except Exception: driver.execute_script('arguments[0].click()', el)")
+        lines.append("                try:")
+        lines.append("                    ActionChains(driver).move_to_element(el).click().perform()")
+        lines.append("                except Exception:")
+        lines.append("                    try: el.click()")
+        lines.append("                    except Exception: driver.execute_script('arguments[0].click()', el)")
         lines.append("            return el")
         lines.append("        except Exception as e:")
         lines.append("            last_err = e")
@@ -327,9 +464,12 @@ class WindowInspector:
             lines.append('element.send_keys("입력할 텍스트")')
         else:
             lines.append(f"# 클릭할 요소: {name or auto_id or '(선택자 직접 지정 필요)'}")
+            # 비인터랙티브 태그(span, li 등)는 동일 텍스트가 사이드바 등에 중복 존재할 가능성이 높음
+            # → visible_only=True로 뷰포트 내 실제 보이는 요소만 선택
+            visible_arg = ", visible_only=True  # 드롭다운/서브메뉴라면 반드시 True 유지" if dom_tag in _NON_INTERACTIVE else ""
             lines.append(f"find_and_click(driver, [")
             lines.append(f"    {locators_str},")
-            lines.append(f"])")
+            lines.append(f"]{visible_arg})")
 
         lines.append("```")
 
