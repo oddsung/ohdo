@@ -44,7 +44,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core.ai_engine import AIEngineManager
 from core.session_manager import SessionManager, Session, Step
 from core.prompt_builder import PromptBuilder
-from core.workflow_engine import WorkflowEngine, CodeSandbox
+from core.workflow_engine import WorkflowEngine, CodeSandbox, extract_library_block, extract_step_delta_code
+from core.execution_kernel import ExecutionKernel
 from core.win_inspector import WindowInspector
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,10 @@ class AsyncSignals(QObject):
     step_executed = pyqtSignal(dict)         # 스텝 실행 완료
     log_message = pyqtSignal(str)            # 로그 메시지
     error_occurred = pyqtSignal(str)         # 에러 발생
+    # 블럭 실행 전용
+    block_step_started = pyqtSignal(int)     # 블럭 스텝 시작 (step_id)
+    block_step_done = pyqtSignal(dict)       # 블럭 스텝 완료
+    kernel_status_changed = pyqtSignal()     # 커널 상태 변경
 
 
 class MainWindow(QMainWindow):
@@ -97,6 +102,9 @@ class MainWindow(QMainWindow):
         self.pending_images: list[str] = []
         self._current_sandbox: Optional[CodeSandbox] = None  # F9 강제 중지용
 
+        # ── 블럭 실행 커널 (세션별 유지) ──
+        self._kernels: dict[str, ExecutionKernel] = {}  # session_id → ExecutionKernel
+
         # ── 영역 캡처 오버레이 ──
         self.capture_overlay = ScreenCaptureOverlay()
         self.capture_overlay.capture_completed.connect(self._on_region_captured)
@@ -124,6 +132,9 @@ class MainWindow(QMainWindow):
         self.signals.step_executed.connect(self._on_step_executed)
         self.signals.log_message.connect(self._on_log_message)
         self.signals.error_occurred.connect(self._on_error)
+        self.signals.block_step_started.connect(self._on_block_step_started)
+        self.signals.block_step_done.connect(self._on_block_step_done)
+        self.signals.kernel_status_changed.connect(self._on_kernel_status_changed)
 
         # ── UI 구성 ──
         self._setup_ui()
@@ -199,6 +210,11 @@ class MainWindow(QMainWindow):
         self.code_viewer.step_insert_requested.connect(self._on_step_insert)
         self.code_viewer.step_move_requested.connect(self._on_step_move)
         self.code_viewer.step_code_edited.connect(self._on_step_code_edited)
+        # 블럭 뷰 전용
+        self.code_viewer.run_from_step_requested.connect(self._on_run_from_step)
+        self.code_viewer.kernel_reset_requested.connect(self._on_kernel_reset)
+        self.code_viewer.block_step_code_edited.connect(self._on_block_step_code_edited)
+        self.code_viewer.block_step_delete_requested.connect(self._on_step_delete)
         self.main_splitter.addWidget(self.code_viewer)
 
         # 스플리터 비율 설정 (세션:대화:코드 = 1:2:2)
@@ -582,6 +598,7 @@ class MainWindow(QMainWindow):
     def _on_session_selected(self, session_id: str):
         """세션 목록에서 세션 선택"""
         try:
+            # 이전 세션의 커널은 유지 (다시 돌아올 수 있으므로 stop하지 않음)
             self.current_session = self.session_manager.load_session(session_id)
             self._restore_session_ui()
             self.statusBar().showMessage(f"세션 로드: {self.current_session.title}")
@@ -633,6 +650,9 @@ class MainWindow(QMainWindow):
                     c = captures[0] if isinstance(captures[0], dict) else {}
                     capture_path = c.get("path")
                 self.code_viewer.add_step(step.get("step_id", 0), code, capture_path)
+
+        # 블럭 뷰 갱신
+        self._refresh_block_view()
 
     def _save_current_session(self):
         """현재 세션 저장"""
@@ -933,6 +953,10 @@ class MainWindow(QMainWindow):
             step_imports=delta_imports,
         )
         self.session_manager.add_step(self.current_session, step)
+
+        # 블럭 뷰 갱신 — add_step 이후에 호출해야 step_code가 포함됨
+        if response.get("code"):
+            self._refresh_block_view()
 
         # 상태 복원
         self.is_processing = False
@@ -1417,6 +1441,24 @@ class MainWindow(QMainWindow):
 
         return code
 
+    def _on_block_step_code_edited(self, step_id: int, new_code: str):
+        """블럭 뷰에서 step_code 수정 시 세션에 반영"""
+        if not self.current_session:
+            return
+        if step_id == 0:
+            # 라이브러리 블럭 수정 — 세션에 저장할 위치가 없으므로 알림만
+            self.console_panel.log(
+                "[편집] 라이브러리 블럭은 실행 시에만 적용됩니다 (세션 저장 대상 아님).", "INFO"
+            )
+            return
+        self.session_manager.update_step(
+            self.current_session, step_id,
+            {"step_code": new_code, "manually_edited": True}
+        )
+        self.console_panel.log(
+            f"[블럭 편집] Step #{step_id} delta 코드가 수정되었습니다.", "INFO"
+        )
+
     def _on_step_code_edited(self, step_id: int, new_code: str):
         """사용자가 코드 직접 수정 시 세션에 반영"""
         if not self.current_session:
@@ -1460,6 +1502,7 @@ class MainWindow(QMainWindow):
             })
 
         self.code_viewer.refresh_steps(steps_data)
+        self._refresh_block_view()
 
     # ──────────────────────────────────────────
     # 코드 실행
@@ -1540,6 +1583,203 @@ class MainWindow(QMainWindow):
             self.signals.error_occurred.emit(f"코드 실행 오류: {str(e)}")
         finally:
             self._current_sandbox = None  # 실행 완료 후 참조 해제
+
+    # ──────────────────────────────────────────
+    # 블럭 기반 실행 (Colab-style)
+    # ──────────────────────────────────────────
+
+    def _get_or_create_kernel(self) -> Optional[ExecutionKernel]:
+        """현재 세션의 ExecutionKernel을 반환합니다 (없으면 생성)."""
+        if not self.current_session:
+            return None
+        sid = self.current_session.session_id
+        if sid not in self._kernels or not self._kernels[sid].is_alive:
+            kernel = ExecutionKernel(
+                python_exe=self._get_valid_python_exe(),
+                default_timeout=60
+            )
+            kernel.start()
+            self._kernels[sid] = kernel
+            logger.info("세션 %s 용 ExecutionKernel 생성", sid)
+        return self._kernels[sid]
+
+    def _on_run_from_step(self, start_step_id: int):
+        """블럭 뷰: N번 스텝부터 실행 요청"""
+        if not self.current_session:
+            QMessageBox.warning(self, "경고", "세션이 없습니다.")
+            return
+        if not self.current_session.steps:
+            QMessageBox.warning(self, "경고", "실행할 스텝이 없습니다.")
+            return
+
+        self.console_panel.log(f"블럭 실행 시작 (Step {start_step_id}부터)...", "INFO")
+        self.code_viewer.set_running(True)
+        self.statusBar().showMessage(f"블럭 실행 중 (Step {start_step_id}~)...")
+
+        kernel = self._get_or_create_kernel()
+        if kernel is None:
+            self.signals.error_occurred.emit("커널 생성 실패")
+            return
+
+        thread = threading.Thread(
+            target=self._run_blocks_thread,
+            args=(kernel, start_step_id),
+            daemon=True
+        )
+        thread.start()
+
+    def _on_kernel_reset(self):
+        """커널 재시작 요청"""
+        if not self.current_session:
+            return
+        sid = self.current_session.session_id
+        if sid in self._kernels:
+            self._kernels[sid].stop()
+            del self._kernels[sid]
+        self.console_panel.log("커널 재시작 완료 — 변수 상태가 초기화되었습니다.", "INFO")
+        self.signals.kernel_status_changed.emit()
+
+    def _run_blocks_thread(self, kernel: ExecutionKernel, start_step_id: int):
+        """블럭 기반 실행을 백그라운드 스레드에서 실행"""
+        import asyncio
+
+        def on_step_start(step_id):
+            self.signals.block_step_started.emit(step_id)
+            self.signals.log_message.emit(f"▶ 블럭 스텝 #{step_id} 실행 중...")
+
+        def on_step_complete(step_id, result):
+            self.signals.block_step_done.emit({
+                "step_id": step_id,
+                "success": result.success,
+                "output": result.output,
+                "error": result.error,
+                "duration_ms": result.duration_ms,
+            })
+
+        def on_error(step_id, error_msg):
+            self.signals.log_message.emit(f"❌ 스텝 #{step_id} 실패: {error_msg}")
+
+        def on_log(msg):
+            self.signals.log_message.emit(msg)
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                self.workflow_engine.execute_session_blocks(
+                    session=self.current_session,
+                    kernel=kernel,
+                    start_from_step_id=start_step_id,
+                    silent_replay=True,
+                    on_step_start=on_step_start,
+                    on_step_complete=on_step_complete,
+                    on_error=on_error,
+                    on_log=on_log,
+                )
+            )
+        except Exception as e:
+            self.signals.error_occurred.emit(f"블럭 실행 오류: {e}")
+        finally:
+            self.signals.log_message.emit("블럭 실행 완료")
+            # 실행 완료 후 UI 복원 (메인 스레드로)
+            QTimer.singleShot(0, lambda: self._on_blocks_finished())
+
+    def _on_blocks_finished(self):
+        """블럭 실행 완료 후 UI 복원"""
+        self.code_viewer.set_running(False)
+        self.statusBar().showMessage("블럭 실행 완료")
+        self._on_kernel_status_changed()
+
+    def _on_block_step_started(self, step_id: int):
+        """블럭 스텝 시작 — UI 상태 표시"""
+        self.code_viewer.update_block_step_status(step_id, "🔄")
+
+    def _on_block_step_done(self, data: dict):
+        """블럭 스텝 완료 — UI 상태 갱신 및 콘솔 출력"""
+        step_id = data.get("step_id", 0)
+        success = data.get("success", False)
+        output = data.get("output", "")
+        error = data.get("error", "")
+        duration = data.get("duration_ms", 0)
+
+        status = "✅" if success else "❌"
+        self.code_viewer.update_block_step_status(step_id, status)
+
+        if success:
+            self.console_panel.log(f"✅ 블럭 Step #{step_id} 완료 ({duration}ms)", "SUCCESS")
+            if output:
+                self.console_panel.log(f"  출력: {output[:300]}", "INFO")
+        else:
+            self.console_panel.log(f"❌ 블럭 Step #{step_id} 실패 ({duration}ms)", "ERROR")
+            if error:
+                for line in error.splitlines():
+                    if line.strip():
+                        self.console_panel.log(f"  {line}", "ERROR")
+
+        self._on_kernel_status_changed()
+
+    def _on_kernel_status_changed(self):
+        """커널 상태를 블럭 뷰 UI에 반영"""
+        if not self.current_session:
+            self.code_viewer.update_kernel_status(False, [])
+            return
+        sid = self.current_session.session_id
+        kernel = self._kernels.get(sid)
+        if kernel and kernel.is_alive:
+            self.code_viewer.update_kernel_status(True, kernel.executed_steps)
+        else:
+            self.code_viewer.update_kernel_status(False, [])
+
+    def _refresh_block_view(self):
+        """현재 세션의 블럭 뷰를 갱신합니다."""
+        if not self.current_session or not self.current_session.steps:
+            self.code_viewer.refresh_block_view("", [])
+            return
+
+        library_code = extract_library_block(self.current_session)
+        steps_data = []
+        for step in self.current_session.steps:
+            step_dict = step if isinstance(step, dict) else {}
+            step_id = step_dict.get("step_id", 0)
+            # 스텝 제목: 대화 내역 첫 번째 user 메시지 요약
+            conv = step_dict.get("conversation", [])
+            title = ""
+            for msg in conv:
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    title = str(msg.get("content", ""))[:40]
+                    break
+            if not title:
+                title = f"Step {step_id}"
+
+            delta_code = extract_step_delta_code(step_dict)
+            steps_data.append({
+                "step_id": step_id,
+                "title": title,
+                "delta_code": delta_code,
+                "status": "",
+            })
+
+        self.code_viewer.refresh_block_view(library_code, steps_data)
+        self._on_kernel_status_changed()
+
+    def _stop_session_kernels(self):
+        """현재 세션의 커널을 정지합니다 (세션 전환 시 호출)."""
+        if not self.current_session:
+            return
+        sid = self.current_session.session_id
+        if sid in self._kernels:
+            self._kernels[sid].stop()
+            del self._kernels[sid]
+
+    def closeEvent(self, event):
+        """앱 종료 시 모든 커널 정리"""
+        for kernel in list(self._kernels.values()):
+            try:
+                kernel.stop()
+            except Exception:
+                pass
+        self._kernels.clear()
+        super().closeEvent(event)
 
     def _get_valid_python_exe(self) -> str:
         """유효한 Python 실행 경로 반환 (실행 가능 여부 검증)"""

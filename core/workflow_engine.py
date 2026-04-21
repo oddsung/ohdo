@@ -595,3 +595,201 @@ class WorkflowEngine:
         """비동기 sleep (asyncio 호환)"""
         import asyncio
         await asyncio.sleep(seconds)
+
+    # ── 블럭 기반 실행 (Colab-style) ─────────────────────────────────────────
+
+    async def execute_session_blocks(
+        self,
+        session,
+        kernel,
+        start_from_step_id: int = 1,
+        silent_replay: bool = True,
+        on_step_start: Optional[Callable] = None,
+        on_step_complete: Optional[Callable] = None,
+        on_error: Optional[Callable] = None,
+        on_log: Optional[Callable] = None,
+    ) -> "ExecutionReport":
+        """
+        블럭 기반 실행 모드 (Colab-style).
+
+        ExecutionKernel을 사용하여 각 스텝의 델타 코드만 순차 실행합니다.
+        커널이 살아있는 한 변수 상태(driver, app 등)가 유지됩니다.
+
+        Args:
+            session: Session 객체
+            kernel: ExecutionKernel 인스턴스 (이미 start() 호출된 상태)
+            start_from_step_id: 이 스텝 ID부터 실행 (이전 스텝은 silent replay)
+            silent_replay: True이면 start_from 이전 스텝을 조용히 재실행
+            on_step_start: 스텝 시작 콜백 (step_id)
+            on_step_complete: 스텝 완료 콜백 (step_id, StepResult)
+            on_error: 에러 콜백 (step_id, error_msg)
+            on_log: 로그 콜백 (message)
+        """
+        from .execution_kernel import LIBRARY_BLOCK_STEP_ID
+
+        self.is_running = True
+        self.is_paused = False
+        self.should_stop = False
+
+        report = ExecutionReport(
+            session_id=session.session_id,
+            total_steps=len(session.steps)
+        )
+        start_time = time.time()
+
+        # ── 라이브러리 블럭 실행 (커널에 없을 때만) ──
+        if LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps:
+            lib_block = extract_library_block(session)
+            if lib_block.strip():
+                if on_log:
+                    on_log("📦 라이브러리 블럭 초기화 중...")
+                lib_result = kernel.execute_block(
+                    lib_block,
+                    step_id=LIBRARY_BLOCK_STEP_ID,
+                    timeout=30
+                )
+                if not lib_result.success:
+                    if on_log:
+                        on_log(f"⚠️ 라이브러리 블럭 실행 오류: {lib_result.error}")
+
+        # ── 스텝 실행 루프 ──
+        for step_data in session.steps:
+            if self.should_stop:
+                if on_log:
+                    on_log("워크플로우 실행이 중지되었습니다.")
+                break
+
+            while self.is_paused:
+                await self._async_sleep(0.1)
+                if self.should_stop:
+                    break
+
+            step = step_data if isinstance(step_data, dict) else {}
+            step_id = step.get("step_id", 0)
+            delta_code = extract_step_delta_code(step)
+
+            if not delta_code.strip():
+                if on_log:
+                    on_log(f"스텝 #{step_id}: 실행할 코드 없음, 건너뜀")
+                continue
+
+            is_silent = (step_id < start_from_step_id) and silent_replay
+            already_done = step_id in kernel.executed_steps
+
+            # start_from 이전이면서 커널에 이미 있으면 건너뜀
+            if step_id < start_from_step_id and already_done:
+                continue
+
+            # start_from 이전이면서 커널에 없으면 silent replay
+            if is_silent:
+                if on_log:
+                    on_log(f"⏩ 스텝 #{step_id} silent replay...")
+                kernel.execute_block(delta_code, step_id=step_id, silent=True)
+                continue
+
+            # 정상 실행
+            if on_step_start:
+                on_step_start(step_id)
+            if on_log:
+                on_log(f"스텝 #{step_id} 실행 시작...")
+
+            result = kernel.execute_block(delta_code, step_id=step_id)
+            result.step_id = step_id
+            report.executed_steps += 1
+
+            if result.success:
+                report.successful_steps += 1
+                if on_log:
+                    on_log(f"스텝 #{step_id} 완료 ({result.duration_ms}ms)")
+                    if result.output:
+                        on_log(f"  출력: {result.output[:300]}")
+            else:
+                report.failed_steps += 1
+                if on_error:
+                    on_error(step_id, result.error)
+                if on_log:
+                    on_log(f"스텝 #{step_id} 실패")
+                    if result.error:
+                        on_log("─" * 50)
+                        for line in result.error.splitlines():
+                            if line.strip():
+                                on_log(f"  {line}")
+                        on_log("─" * 50)
+
+            if on_step_complete:
+                on_step_complete(step_id, result)
+            report.step_results.append(result)
+
+            if self.step_delay_ms > 0:
+                await self._async_sleep(self.step_delay_ms / 1000.0)
+
+        report.total_time_ms = int((time.time() - start_time) * 1000)
+        self.is_running = False
+
+        if on_log:
+            on_log(
+                f"블럭 실행 완료: {report.successful_steps}/{report.executed_steps} "
+                f"성공 ({report.total_time_ms}ms)"
+            )
+        return report
+
+
+# ── 블럭 추출 헬퍼 함수 ────────────────────────────────────────────────────────
+
+def extract_library_block(session) -> str:
+    """
+    세션의 마지막 스텝 generated_code에서 라이브러리 블럭을 추출합니다.
+
+    라이브러리 블럭 = '# === Step 1:' 마커 이전의 모든 코드
+    (imports + DPI 설정 + 헬퍼 함수 등)
+    """
+    if not session.steps:
+        return ""
+    last_step = session.steps[-1]
+    code = last_step.get("generated_code", "") if isinstance(last_step, dict) else ""
+    if not code:
+        return ""
+    match = re.search(r'^# === Step 1:', code, re.MULTILINE)
+    if match:
+        return code[:match.start()].strip()
+    # Step 1 마커가 없으면 imports 라인만 추출
+    import_lines = [
+        ln for ln in code.splitlines()
+        if ln.startswith("import ") or ln.startswith("from ")
+    ]
+    return "\n".join(import_lines)
+
+
+def extract_step_delta_code(step: dict) -> str:
+    """
+    스텝의 델타 코드를 반환합니다.
+
+    우선순위:
+    1. step_code 필드 (이미 추출된 델타)
+    2. generated_code에서 스텝 경계 마커로 파싱
+    3. fallback: generated_code 전체
+    """
+    step_code = step.get("step_code", "").strip()
+    if step_code:
+        return step_code
+
+    step_id = step.get("step_id", 0)
+    generated_code = step.get("generated_code", "")
+    if not generated_code:
+        return ""
+
+    # 스텝 경계 마커 파싱: "# === Step N: ... (시작) ===" ~ "# === Step N: ... (끝) ==="
+    # 시작 마커가 두 번 나올 수 있으므로 마지막 것 기준으로 추출
+    start_pattern = rf'# === Step {step_id}:.*?\(시작\) ==='
+    end_pattern = rf'# === Step {step_id}:.*?\(끝\) ==='
+
+    starts = [m.end() for m in re.finditer(start_pattern, generated_code)]
+    ends = [m.start() for m in re.finditer(end_pattern, generated_code)]
+
+    if starts and ends:
+        # 마지막 시작 마커 이후 ~ 첫 끝 마커 이전
+        content_start = starts[-1]
+        content_end = ends[0] if ends[0] > content_start else (ends[-1] if ends else len(generated_code))
+        return generated_code[content_start:content_end].strip()
+
+    return generated_code
