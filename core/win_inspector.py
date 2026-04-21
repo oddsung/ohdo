@@ -6,8 +6,23 @@ AI 코드 생성 시 윈도우 컨트롤 정보를 컨텍스트로 제공합니�
 """
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_pua(text: str) -> str:
+    """PUA(Private Use Area) 문자 및 이모지 제거.
+
+    아이콘 폰트(FontAwesome, Material Icons 등)는 U+E000–U+F8FF 범위의
+    PUA 문자를 CSS ::before 가상 요소 또는 <i> 태그로 삽입합니다.
+    이 문자가 XPath 텍스트 매칭에 포함되면 실제 DOM textContent와
+    불일치하여 요소를 찾지 못하는 원인이 됩니다.
+    """
+    # BMP PUA: U+E000–U+F8FF
+    # Supplementary PUA-A/B: U+F0000–U+10FFFF
+    cleaned = re.sub(r'[\uE000-\uF8FF\U000F0000-\U0010FFFF]', '', text)
+    return cleaned.strip()
 
 # pywinauto가 없어도 앱 실행은 가능하도록 lazy import
 _pywinauto_available = False
@@ -332,13 +347,16 @@ class WindowInspector:
                 dom_locators.append(("id", elem_id))
             if dom_classes and dom_text:
                 # CSS 클래스 + 텍스트 조합 XPath: 특정 컨테이너 내 텍스트 매칭
+                # PUA(아이콘 폰트) 문자 제거 후 매칭 — CSS ::before 가상 요소 문자는
+                # DOM textContent에 포함되지 않아 exact match 실패 방지
                 first_cls = dom_classes.split()[0]
-                safe_text = dom_text[:100].replace('"', "'")
+                safe_text = _strip_pua(dom_text[:100]).replace('"', "'")
                 tag_sel = dom_tag or "*"
-                dom_locators.append((
-                    "xpath",
-                    f'//{tag_sel}[contains(@class, "{first_cls}") and normalize-space(.)="{safe_text}"]'
-                ))
+                if safe_text:
+                    dom_locators.append((
+                        "xpath",
+                        f'//{tag_sel}[contains(@class, "{first_cls}") and ./text()[contains(normalize-space(), "{safe_text}")]]'
+                    ))
             if dom_classes and not elem_id:
                 # CSS selector (클래스 기반) — id 없을 때 유용
                 css_sel = (dom_tag or "") + "." + ".".join(dom_classes.split())
@@ -364,13 +382,16 @@ class WindowInspector:
             if auto_id:
                 locator_items.append(f'("id", "{auto_id}")')
             if name:
-                safe_name = name.replace('"', "'")
-                xpath_combined = (
-                    f'//*[normalize-space(@title)="{safe_name}"'
-                    f' or (not(self::script) and not(self::style)'
-                    f' and normalize-space(.)="{safe_name}")]'
-                )
-                locator_items.append(f'("xpath", \'{xpath_combined}\')')
+                # PUA 아이콘 문자 제거 후 XPath 생성
+                # CSS ::before 가상 요소 또는 <i> 아이콘 폰트 문자는
+                # DOM textContent에 없을 수 있어 contains()로 부분 매칭
+                safe_name = _strip_pua(name).replace('"', "'")
+                if safe_name:
+                    xpath_combined = (
+                        f'//*[contains(normalize-space(@title),"{safe_name}")'
+                        f' or ./text()[contains(normalize-space(),"{safe_name}")]]'
+                    )
+                    locator_items.append(f'("xpath", \'{xpath_combined}\')')
             if not locator_items:
                 locator_items.append('("css", "")  # 개발자 도구로 선택자 확인 후 수정')
 
@@ -394,59 +415,62 @@ class WindowInspector:
         lines.append("")
         lines.append("")
         lines.append("def find_and_click(driver, locators, timeout=10, visible_only=False):")
-        lines.append("    \"\"\"로케이터 우선순위 순으로 요소를 찾아 클릭.")
-        lines.append("    visible_only=True : 드롭다운/서브메뉴 — 뷰포트 내 보이는 요소만 선택 (필수!)")
-        lines.append("    visible_only=False: 최초 로드 요소 — DOM 존재 시 즉시 반환\"\"\"")
-        lines.append("    import time as _t")
+        lines.append("    \"\"\"로케이터 우선순위로 요소를 찾아 클릭. iframe 내부 자동 탐색 지원.\"\"\"")
+        lines.append("    import time as _t, re as _re")
         lines.append("    from selenium.webdriver.support.ui import WebDriverWait")
         lines.append("    from selenium.webdriver.support import expected_conditions as EC")
         lines.append("    from selenium.webdriver.common.by import By")
         lines.append("    from selenium.webdriver.common.action_chains import ActionChains")
+        lines.append("    def _bv(strategy, value):")
+        lines.append("        bm = {'id': By.ID, 'css': By.CSS_SELECTOR, 'xpath': By.XPATH}")
+        lines.append("        if strategy == 'title':")
+        lines.append("            v = _re.sub(r'[\\uE000-\\uF8FF]', '', value).strip()")
+        lines.append("            return By.XPATH, f'//*[contains(normalize-space(@title),\"{v}\")]'")
+        lines.append("        elif strategy == 'text':")
+        lines.append("            v = _re.sub(r'[\\uE000-\\uF8FF]', '', value).strip()")
+        lines.append("            return By.XPATH, f'//*[not(self::script)][not(self::style)][./text()[contains(normalize-space(),\"{v}\")]]'")
+        lines.append("        if strategy == 'xpath':  # xpath 전략: contains() 내부 값 앞뒤 공백 자동 제거")
+        lines.append("            value = _re.sub(r'contains\\(([^,]+),\"([^\"]+)\"\\)',")
+        lines.append("                            lambda m: f'contains({m.group(1)},\"{m.group(2).strip()}\")', value)")
+        lines.append("        return bm.get(strategy, By.XPATH), value")
+        lines.append("    def _click(ctx, by, val, visible_only, t):")
+        lines.append("        if visible_only:")
+        lines.append("            dl = _t.time()+t; el = None")
+        lines.append("            while _t.time()<dl:")
+        lines.append("                for _c in ctx.find_elements(by,val):")
+        lines.append("                    try:")
+        lines.append("                        _r=ctx.execute_script('var r=arguments[0].getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};',_c)")
+        lines.append("                        if _r['w']>0 and _r['h']>0 and _r['x']>-10 and _r['y']>-10: el=_c; break")
+        lines.append("                    except Exception: continue")
+        lines.append("                if el: break")
+        lines.append("                _t.sleep(0.1)")
+        lines.append("            if el is None: raise Exception(f'visible 요소 없음: {by}={val}')")
+        lines.append("        else:")
+        lines.append("            el = WebDriverWait(ctx,t).until(EC.presence_of_element_located((by,val)))")
+        lines.append("        r=ctx.execute_script('var r=arguments[0].getBoundingClientRect();return {x:r.x,y:r.y};',el)")
+        lines.append("        if r['x']<0 or r['y']<0: ctx.execute_script('arguments[0].click()',el)")
+        lines.append("        else:")
+        lines.append("            try: ActionChains(ctx).move_to_element(el).click().perform()")
+        lines.append("            except Exception:")
+        lines.append("                try: el.click()")
+        lines.append("                except Exception: ctx.execute_script('arguments[0].click()',el)")
+        lines.append("        return el")
         lines.append("    last_err = None")
-        lines.append("    by_map = {'id': By.ID, 'css': By.CSS_SELECTOR, 'xpath': By.XPATH}")
         lines.append("    for strategy, value in locators:")
+        lines.append("        by, val = _bv(strategy, value)")
+        lines.append("        try: return _click(driver, by, val, visible_only, timeout)")
+        lines.append("        except Exception as e: last_err = e")
         lines.append("        try:")
-        lines.append("            if strategy == 'title':")
-        lines.append("                by, val = By.XPATH, f'//*[normalize-space(@title)=\"{value}\"]'")
-        lines.append("            elif strategy == 'text':")
-        lines.append("                by, val = By.XPATH, f'//*[not(self::script)][not(self::style)][normalize-space(.)=\"{value}\"]'")
-        lines.append("            else:")
-        lines.append("                by, val = by_map.get(strategy, By.XPATH), value")
-        lines.append("            if visible_only:")
-        lines.append("                # EC.visibility_of_element_located는 CSS hidden만 확인 →")
-        lines.append("                # x<0 위치 사이드바 요소도 통과시켜 잘못 클릭하는 버그 존재")
-        lines.append("                # find_elements + getBoundingClientRect: 뷰포트 내 실제 보이는 요소만 선택")
-        lines.append("                _deadline = _t.time() + timeout")
-        lines.append("                el = None")
-        lines.append("                while _t.time() < _deadline:")
-        lines.append("                    for _c in driver.find_elements(by, val):")
-        lines.append("                        try:")
-        lines.append("                            _r = driver.execute_script(")
-        lines.append("                                'var r=arguments[0].getBoundingClientRect();'")
-        lines.append("                                'return {x:r.x,y:r.y,w:r.width,h:r.height};', _c)")
-        lines.append("                            if _r['w']>0 and _r['h']>0 and _r['x']>=0 and _r['y']>=0:")
-        lines.append("                                el = _c; break")
-        lines.append("                        except Exception:")
-        lines.append("                            continue")
-        lines.append("                    if el: break")
-        lines.append("                    _t.sleep(0.1)")
-        lines.append("                if el is None:")
-        lines.append("                    raise Exception(f'visible 요소 없음: {strategy}={value}')")
-        lines.append("            else:")
-        lines.append("                el = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, val)))")
-        lines.append("            rect = driver.execute_script(")
-        lines.append("                'var r=arguments[0].getBoundingClientRect(); return {x:r.x,y:r.y};', el)")
-        lines.append("            if rect['x'] < 0 or rect['y'] < 0:")
-        lines.append("                driver.execute_script('arguments[0].click()', el)")
-        lines.append("            else:")
+        lines.append("            driver.switch_to.default_content()")
+        lines.append("            for _f in driver.find_elements(By.TAG_NAME,'iframe'):")
         lines.append("                try:")
-        lines.append("                    ActionChains(driver).move_to_element(el).click().perform()")
-        lines.append("                except Exception:")
-        lines.append("                    try: el.click()")
-        lines.append("                    except Exception: driver.execute_script('arguments[0].click()', el)")
-        lines.append("            return el")
+        lines.append("                    driver.switch_to.frame(_f)")
+        lines.append("                    return _click(driver, by, val, visible_only, min(timeout,4))")
+        lines.append("                except Exception: driver.switch_to.default_content()")
         lines.append("        except Exception as e:")
         lines.append("            last_err = e")
+        lines.append("            try: driver.switch_to.default_content()")
+        lines.append("            except Exception: pass")
         lines.append("    raise Exception(f'클릭 실패: {locators} / {last_err}')")
         lines.append("")
         lines.append("")
@@ -456,8 +480,8 @@ class WindowInspector:
             if auto_id:
                 lines.append(f'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "{auto_id}")))')
             elif name:
-                safe_name = name.replace('"', '\\"')
-                lines.append(f'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, \'//*[@title="{safe_name}" or normalize-space(.)="{safe_name}"]\')))')
+                safe_name = _strip_pua(name).replace('"', '\\"')
+                lines.append(f'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, \'//*[@title="{safe_name}" or ./text()[contains(normalize-space(),"{safe_name}")]]\')))')
             else:
                 lines.append('element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "")))')
             lines.append("element.clear()")

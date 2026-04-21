@@ -10,7 +10,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
     QLabel, QPushButton, QFrame, QPlainTextEdit, QSizePolicy,
-    QMessageBox
+    QMessageBox, QTabWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import (
@@ -507,15 +507,471 @@ class StepCard(QFrame):
 # 코드 뷰어 패널
 # ──────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────
+# 블럭 뷰 카드 (라이브러리 블럭 / 스텝 블럭 공통)
+# ──────────────────────────────────────────────────
+
+class BlockCard(QFrame):
+    """Colab 스타일의 블럭 카드 — 라이브러리 블럭 또는 스텝 블럭"""
+
+    # 이 블럭부터 실행 요청 (step_id, 0 = 라이브러리 블럭)
+    run_from_here_requested = pyqtSignal(int)
+    # 코드 수정 완료 (step_id, new_code)
+    block_code_edited = pyqtSignal(int, str)
+    # 블럭 삭제 요청 (step_id)
+    block_delete_requested = pyqtSignal(int)
+
+    _BTN_STYLE = """
+        QPushButton {
+            background-color: transparent;
+            border: 1px solid #45475a;
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-size: 12px;
+            color: #cdd6f4;
+        }
+        QPushButton:hover {
+            background-color: #313244;
+            border-color: #89b4fa;
+        }
+    """
+    _RUN_BTN_STYLE = """
+        QPushButton {
+            background-color: #1e3a1e;
+            color: #a6e3a1;
+            border: 1px solid #a6e3a1;
+            border-radius: 3px;
+            padding: 2px 10px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        QPushButton:hover { background-color: #2d5a2d; }
+        QPushButton:disabled { color: #45475a; border-color: #45475a; background: transparent; }
+    """
+    _READONLY_CODE_STYLE = """
+        QPlainTextEdit {
+            background-color: #11111b;
+            color: #cdd6f4;
+            border: 1px solid #313244;
+            border-radius: 4px;
+        }
+    """
+    _EDITING_CODE_STYLE = """
+        QPlainTextEdit {
+            background-color: #1a1a2e;
+            color: #cdd6f4;
+            border: 2px solid #89b4fa;
+            border-radius: 4px;
+        }
+    """
+
+    def __init__(self, step_id: int, title: str, code: str,
+                 status: str = "", parent=None):
+        """
+        Args:
+            step_id: 스텝 ID (0 = 라이브러리 블럭)
+            title:   헤더에 표시할 제목
+            code:    표시할 코드 (델타 코드 또는 import 목록)
+            status:  "✅" / "❌" / "🔄" / "" 등 실행 상태 아이콘
+        """
+        super().__init__(parent)
+        self.step_id = step_id
+        self._expanded = True
+        self._editing = False
+
+        border_color = "#89b4fa" if step_id == 0 else "#313244"
+        self.setStyleSheet(f"""
+            BlockCard {{
+                background-color: #181825;
+                border: 1px solid {border_color};
+                border-radius: 6px;
+                margin: 3px 4px;
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setSpacing(3)
+
+        # ── 헤더 ──
+        header_frame = QFrame()
+        header_frame.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_frame.setStyleSheet("QFrame { background: transparent; }")
+        header_frame.mousePressEvent = self._on_header_click
+
+        h_layout = QHBoxLayout(header_frame)
+        h_layout.setContentsMargins(0, 0, 0, 0)
+        h_layout.setSpacing(4)
+
+        self._expand_icon_label = QLabel("▼")
+        self._expand_icon_label.setStyleSheet("color: #6c7086; border: none;")
+        h_layout.addWidget(self._expand_icon_label)
+
+        title_color = "#89b4fa" if step_id == 0 else "#cba6f7"
+        self.title_label = QLabel(title)
+        self.title_label.setFont(QFont("Malgun Gothic", 10, QFont.Weight.Bold))
+        self.title_label.setStyleSheet(f"color: {title_color}; border: none;")
+        h_layout.addWidget(self.title_label)
+
+        self.status_label = QLabel(status)
+        self.status_label.setStyleSheet("color: #a6e3a1; border: none; font-size: 13px;")
+        h_layout.addWidget(self.status_label)
+        h_layout.addStretch()
+
+        # ── 수정 버튼 ──
+        self.edit_btn = QPushButton("✏️ 수정")
+        self.edit_btn.setStyleSheet(self._BTN_STYLE.replace("#89b4fa", "#89dceb"))
+        self.edit_btn.setToolTip("코드 직접 수정")
+        self.edit_btn.clicked.connect(self._toggle_edit)
+        # 헤더 클릭으로 편집 토글 안되도록 클릭 이벤트 차단
+        self.edit_btn.mousePressEvent = lambda e: (
+            QPushButton.mousePressEvent(self.edit_btn, e)
+        )
+        h_layout.addWidget(self.edit_btn)
+
+        # ── 삭제 버튼 (라이브러리 블럭=0은 제외) ──
+        if step_id > 0:
+            self.delete_btn = QPushButton("🗑️")
+            del_style = self._BTN_STYLE.replace("#89b4fa", "#f38ba8")
+            self.delete_btn.setStyleSheet(del_style)
+            self.delete_btn.setToolTip(f"Step {step_id} 블럭 삭제")
+            self.delete_btn.clicked.connect(self._on_delete)
+            self.delete_btn.mousePressEvent = lambda e: (
+                QPushButton.mousePressEvent(self.delete_btn, e)
+            )
+            h_layout.addWidget(self.delete_btn)
+
+        # ── 실행 버튼 ──
+        self.run_btn = QPushButton("▶ 여기서 실행")
+        self.run_btn.setStyleSheet(self._RUN_BTN_STYLE)
+        self.run_btn.setToolTip(
+            "라이브러리 블럭 재초기화" if step_id == 0
+            else f"Step {step_id}부터 이어서 실행"
+        )
+        self.run_btn.clicked.connect(lambda: self.run_from_here_requested.emit(self.step_id))
+        self.run_btn.mousePressEvent = lambda e: (
+            QPushButton.mousePressEvent(self.run_btn, e)
+        )
+        h_layout.addWidget(self.run_btn)
+
+        layout.addWidget(header_frame)
+
+        # ── 코드 표시 영역 ──
+        self.content_frame = QFrame()
+        self.content_frame.setStyleSheet("QFrame { background: transparent; }")
+        c_layout = QVBoxLayout(self.content_frame)
+        c_layout.setContentsMargins(0, 2, 0, 0)
+        c_layout.setSpacing(0)
+
+        self.code_edit = QPlainTextEdit()
+        self.code_edit.setPlainText(code)
+        self.code_edit.setFont(QFont("Consolas", 10))
+        self.code_edit.setReadOnly(True)
+        self.code_edit.setStyleSheet(self._READONLY_CODE_STYLE)
+        self.code_edit.setFixedHeight(160)
+        # 참조 보존 필수 (GC 방지)
+        self.highlighter = PythonHighlighter(self.code_edit.document())
+        c_layout.addWidget(self.code_edit)
+
+        resize_handle = ResizeHandle([self.code_edit])
+        c_layout.addWidget(resize_handle)
+
+        layout.addWidget(self.content_frame)
+
+    # ──────────────────────────────────────
+    # 퍼블릭 API
+    # ──────────────────────────────────────
+
+    def set_status(self, status: str):
+        """실행 상태 아이콘 갱신"""
+        self.status_label.setText(status)
+
+    def set_run_enabled(self, enabled: bool):
+        """여기서 실행 버튼 활성화/비활성화"""
+        self.run_btn.setEnabled(enabled)
+
+    def get_code(self) -> str:
+        return self.code_edit.toPlainText()
+
+    # ──────────────────────────────────────
+    # 내부 이벤트
+    # ──────────────────────────────────────
+
+    def _on_header_click(self, _event=None):
+        """헤더 클릭: 접기/펼치기"""
+        self._toggle_expand()
+
+    def _toggle_expand(self):
+        self._expanded = not self._expanded
+        self.content_frame.setVisible(self._expanded)
+        self._expand_icon_label.setText("▼" if self._expanded else "▶")
+
+    def _toggle_edit(self):
+        """편집/저장 토글"""
+        if self._editing:
+            self._exit_edit_mode()
+        else:
+            self._enter_edit_mode()
+
+    def _enter_edit_mode(self):
+        self._editing = True
+        self.code_edit.setReadOnly(False)
+        self.code_edit.setStyleSheet(self._EDITING_CODE_STYLE)
+        self.code_edit.setFixedHeight(300)
+        self.edit_btn.setText("✅ 저장")
+        self.edit_btn.setToolTip("수정 완료 후 저장")
+        if not self._expanded:
+            self._toggle_expand()
+        self.code_edit.setFocus()
+
+    def _exit_edit_mode(self):
+        self._editing = False
+        new_code = self.code_edit.toPlainText()
+        self.code_edit.setReadOnly(True)
+        self.code_edit.setStyleSheet(self._READONLY_CODE_STYLE)
+        self.code_edit.setFixedHeight(160)
+        self.edit_btn.setText("✏️ 수정")
+        self.edit_btn.setToolTip("코드 직접 수정")
+        self.block_code_edited.emit(self.step_id, new_code)
+
+    def _on_delete(self):
+        """삭제 확인 후 시그널 발생"""
+        reply = QMessageBox.question(
+            self, "블럭 삭제",
+            f"Step {self.step_id} 블럭을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.block_delete_requested.emit(self.step_id)
+
+
+# ──────────────────────────────────────────────────
+# 블럭 뷰 위젯 (Colab-style 전체 레이아웃)
+# ──────────────────────────────────────────────────
+
+class BlockViewWidget(QWidget):
+    """
+    Colab 스타일 블럭 뷰.
+
+    - 최상단: 라이브러리 블럭 (imports + 헬퍼 함수)
+    - 이후: 스텝별 델타 코드 블럭
+    - 각 블럭: "▶ 여기서 실행" 버튼으로 해당 스텝부터 실행 가능
+    """
+
+    # 커널 재시작 요청
+    kernel_reset_requested = pyqtSignal()
+    # N번 스텝부터 실행 요청 (0 = 라이브러리 블럭만 재실행)
+    run_from_step_requested = pyqtSignal(int)
+    # 중지 요청
+    stop_requested = pyqtSignal()
+    # 블럭 코드 수정 완료 (step_id, new_code)
+    block_code_edited = pyqtSignal(int, str)
+    # 블럭 삭제 요청 (step_id)
+    block_delete_requested = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._block_cards: list[BlockCard] = []
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # ── 툴바 ──
+        toolbar = QFrame()
+        toolbar.setStyleSheet("QFrame { background: #1e1e2e; border-bottom: 1px solid #313244; }")
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(8, 4, 8, 4)
+        tb_layout.setSpacing(6)
+
+        info_label = QLabel("🧱 Colab 블럭 뷰 — 스텝별 델타 코드")
+        info_label.setFont(QFont("Malgun Gothic", 10))
+        info_label.setStyleSheet("color: #cdd6f4;")
+        tb_layout.addWidget(info_label)
+        tb_layout.addStretch()
+
+        _btn_style = """
+            QPushButton {
+                background-color: transparent;
+                border: 1px solid #45475a;
+                border-radius: 3px;
+                padding: 3px 10px;
+                font-size: 12px;
+                color: #cdd6f4;
+            }
+            QPushButton:hover { background-color: #313244; border-color: #cba6f7; }
+            QPushButton:disabled { color: #45475a; }
+        """
+
+        self.run_all_btn = QPushButton("▶ 처음부터 실행")
+        self.run_all_btn.setStyleSheet(_btn_style.replace("#cba6f7", "#a6e3a1").replace(
+            "color: #cdd6f4;", "color: #a6e3a1; font-weight: bold;"
+        ))
+        self.run_all_btn.setToolTip("라이브러리 블럭부터 모든 스텝 순서대로 실행")
+        self.run_all_btn.clicked.connect(lambda: self.run_from_step_requested.emit(1))
+        tb_layout.addWidget(self.run_all_btn)
+
+        self.stop_btn = QPushButton("■ 중지")
+        self.stop_btn.setStyleSheet(_btn_style.replace("#cba6f7", "#f38ba8").replace(
+            "color: #cdd6f4;", "color: #f38ba8; font-weight: bold;"
+        ))
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.stop_requested.emit)
+        tb_layout.addWidget(self.stop_btn)
+
+        reset_btn = QPushButton("🔄 커널 재시작")
+        reset_btn.setStyleSheet(_btn_style)
+        reset_btn.setToolTip("커널을 재시작하여 모든 변수 초기화")
+        reset_btn.clicked.connect(self.kernel_reset_requested.emit)
+        tb_layout.addWidget(reset_btn)
+
+        self.kernel_status_label = QLabel("● 커널 없음")
+        self.kernel_status_label.setStyleSheet("color: #6c7086; font-size: 11px;")
+        tb_layout.addWidget(self.kernel_status_label)
+
+        layout.addWidget(toolbar)
+
+        # ── 스크롤 영역 (블럭 카드들) ──
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; }")
+
+        self.cards_container = QWidget()
+        self.cards_layout = QVBoxLayout(self.cards_container)
+        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.cards_layout.setSpacing(2)
+        self.cards_layout.setContentsMargins(4, 4, 4, 4)
+        self.cards_layout.addStretch()
+
+        self.scroll_area.setWidget(self.cards_container)
+        layout.addWidget(self.scroll_area)
+
+    def refresh(self, library_code: str, steps_data: list[dict]):
+        """
+        블럭 뷰를 전체 갱신합니다.
+
+        Args:
+            library_code: 라이브러리 블럭 코드 (imports + 헬퍼 함수)
+            steps_data:   [{"step_id": N, "title": "...", "delta_code": "...", "status": ""}, ...]
+        """
+        self.clear()
+
+        # 라이브러리 블럭
+        if library_code.strip():
+            lib_card = BlockCard(
+                step_id=0,
+                title="📦 라이브러리 블럭 (imports + 공통 함수)",
+                code=library_code,
+                status=""
+            )
+            lib_card.run_from_here_requested.connect(self._on_run_from)
+            lib_card.block_code_edited.connect(self.block_code_edited)
+            self._block_cards.append(lib_card)
+            self._remove_stretch()
+            self.cards_layout.addWidget(lib_card)
+            self.cards_layout.addStretch()
+
+        # 스텝 블럭
+        for data in steps_data:
+            self._add_step_block(data)
+
+        self._update_run_buttons()
+
+    def _add_step_block(self, data: dict):
+        step_id = data.get("step_id", 0)
+        title = data.get("title", f"Step {step_id}")
+        delta_code = data.get("delta_code", "")
+        status = data.get("status", "")
+
+        if not delta_code.strip():
+            return
+
+        card = BlockCard(
+            step_id=step_id,
+            title=f"📋 Step {step_id}: {title}",
+            code=delta_code,
+            status=status
+        )
+        card.run_from_here_requested.connect(self._on_run_from)
+        card.block_code_edited.connect(self.block_code_edited)
+        card.block_delete_requested.connect(self.block_delete_requested)
+        self._block_cards.append(card)
+        self._remove_stretch()
+        self.cards_layout.addWidget(card)
+        self.cards_layout.addStretch()
+
+    def _on_run_from(self, step_id: int):
+        """블럭 카드의 '여기서 실행' 버튼 처리"""
+        if step_id == 0:
+            # 라이브러리 블럭 재초기화 → 커널 재시작 후 step 1부터
+            self.kernel_reset_requested.emit()
+        else:
+            self.run_from_step_requested.emit(step_id)
+
+    def update_step_status(self, step_id: int, status: str):
+        """특정 스텝 카드의 상태 아이콘 갱신"""
+        for card in self._block_cards:
+            if card.step_id == step_id:
+                card.set_status(status)
+                break
+
+    def set_running(self, running: bool):
+        """실행 중 UI 상태 전환"""
+        self.run_all_btn.setEnabled(not running)
+        self.stop_btn.setEnabled(running)
+        self._update_run_buttons(disabled=running)
+
+    def set_kernel_status(self, alive: bool, executed_steps: list[int]):
+        """커널 상태 표시 갱신"""
+        if alive:
+            count = len(executed_steps)
+            self.kernel_status_label.setText(f"● 커널 활성 ({count}개 스텝 완료)")
+            self.kernel_status_label.setStyleSheet("color: #a6e3a1; font-size: 11px;")
+        else:
+            self.kernel_status_label.setText("● 커널 없음")
+            self.kernel_status_label.setStyleSheet("color: #6c7086; font-size: 11px;")
+
+    def _update_run_buttons(self, disabled: bool = False):
+        for card in self._block_cards:
+            card.set_run_enabled(not disabled)
+
+    def _remove_stretch(self):
+        if self.cards_layout.count() > 0:
+            last = self.cards_layout.itemAt(self.cards_layout.count() - 1)
+            if last and last.spacerItem():
+                self.cards_layout.removeItem(last)
+
+    def clear(self):
+        self._block_cards.clear()
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.cards_layout.addStretch()
+
+
+# ──────────────────────────────────────────────────
+# 코드 뷰어 패널
+# ──────────────────────────────────────────────────
+
 class CodeViewer(QWidget):
     """코드 + 캡처 뷰어 패널"""
 
-    run_code_requested = pyqtSignal(str)           # 코드 실행 요청
+    run_code_requested = pyqtSignal(str)           # 코드 실행 요청 (기존 모드)
     stop_code_requested = pyqtSignal()             # 코드 중지 요청
     step_delete_requested = pyqtSignal(int)        # 스텝 삭제 요청
     step_insert_requested = pyqtSignal(int)        # 스텝 삽입 요청 (after_step_id)
     step_move_requested = pyqtSignal(int, str)     # 스텝 이동 (step_id, "up"/"down")
     step_code_edited = pyqtSignal(int, str)        # 사용자가 코드 직접 수정 (step_id, new_code)
+    # 블럭 뷰 전용 시그널
+    run_from_step_requested = pyqtSignal(int)      # N번 스텝부터 블럭 실행 요청
+    kernel_reset_requested = pyqtSignal()          # 커널 재시작 요청
+    block_step_code_edited = pyqtSignal(int, str)  # 블럭에서 코드 수정 (step_id, new_code)
+    block_step_delete_requested = pyqtSignal(int)  # 블럭 삭제 요청 (step_id)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -526,13 +982,56 @@ class CodeViewer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # ── 탭 위젯 ──
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane { border: none; }
+            QTabBar::tab {
+                background: #181825;
+                color: #cdd6f4;
+                padding: 6px 14px;
+                border: 1px solid #313244;
+                border-bottom: none;
+                border-radius: 4px 4px 0 0;
+                font-family: 'Malgun Gothic';
+                font-size: 11px;
+            }
+            QTabBar::tab:selected {
+                background: #1e1e2e;
+                color: #89b4fa;
+                border-color: #89b4fa;
+            }
+            QTabBar::tab:hover:!selected { background: #313244; }
+        """)
+
+        # ── 탭 1: 기존 누적 코드 뷰 ──
+        self._classic_tab = QWidget()
+        self._setup_classic_tab(self._classic_tab)
+        self.tab_widget.addTab(self._classic_tab, "💻 코드 뷰어")
+
+        # ── 탭 2: Colab 블럭 뷰 ──
+        self.block_view = BlockViewWidget()
+        self.block_view.run_from_step_requested.connect(self.run_from_step_requested)
+        self.block_view.kernel_reset_requested.connect(self.kernel_reset_requested)
+        self.block_view.stop_requested.connect(self.stop_code_requested)
+        self.block_view.block_code_edited.connect(self.block_step_code_edited)
+        self.block_view.block_delete_requested.connect(self.block_step_delete_requested)
+        self.tab_widget.addTab(self.block_view, "🧱 블럭 뷰")
+
+        layout.addWidget(self.tab_widget)
+
+    def _setup_classic_tab(self, parent: QWidget):
+        """기존 누적 코드 뷰 탭 UI 구성"""
+        tab_layout = QVBoxLayout(parent)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+
         # 헤더 + 실행 버튼
         header_frame = QFrame()
         header_layout = QHBoxLayout(header_frame)
         header_layout.setContentsMargins(5, 5, 5, 5)
 
-        header = QLabel("💻 코드 + 📷 캡처 뷰어")
-        header.setFont(QFont("Malgun Gothic", 12, QFont.Weight.Bold))
+        header = QLabel("💻 누적 코드 + 📷 캡처")
+        header.setFont(QFont("Malgun Gothic", 11, QFont.Weight.Bold))
         header_layout.addWidget(header)
         header_layout.addStretch()
 
@@ -565,7 +1064,7 @@ class CodeViewer(QWidget):
         self.stop_btn.clicked.connect(self.stop_code_requested.emit)
         header_layout.addWidget(self.stop_btn)
 
-        layout.addWidget(header_frame)
+        tab_layout.addWidget(header_frame)
 
         # 스크롤 영역 (스텝 카드들)
         self.scroll_area = QScrollArea()
@@ -581,7 +1080,43 @@ class CodeViewer(QWidget):
         self.cards_layout.addStretch()
 
         self.scroll_area.setWidget(self.cards_container)
-        layout.addWidget(self.scroll_area)
+        tab_layout.addWidget(self.scroll_area)
+
+    # ──────────────────────────────────────
+    # 실행 상태 제어
+    # ──────────────────────────────────────
+
+    def set_running(self, running: bool):
+        """실행 중 UI 상태 전환 (두 탭 모두 적용)"""
+        self.run_btn.setEnabled(not running)
+        self.stop_btn.setEnabled(running)
+        self.block_view.set_running(running)
+
+    # ──────────────────────────────────────
+    # 블럭 뷰 갱신
+    # ──────────────────────────────────────
+
+    def refresh_block_view(self, library_code: str, steps_data: list[dict]):
+        """
+        블럭 뷰를 갱신합니다.
+
+        Args:
+            library_code: 라이브러리 블럭 코드
+            steps_data:   [{"step_id": N, "title": "...", "delta_code": "...", "status": ""}, ...]
+        """
+        self.block_view.refresh(library_code, steps_data)
+
+    def update_block_step_status(self, step_id: int, status: str):
+        """블럭 뷰의 특정 스텝 상태 갱신"""
+        self.block_view.update_step_status(step_id, status)
+
+    def update_kernel_status(self, alive: bool, executed_steps: list[int]):
+        """커널 상태 표시 갱신"""
+        self.block_view.set_kernel_status(alive, executed_steps)
+
+    # ──────────────────────────────────────
+    # 스텝 카드
+    # ──────────────────────────────────────
 
     def add_step(self, step_id: int, code: str, capture_path: str = None):
         """새 스텝 카드 추가"""
@@ -622,7 +1157,7 @@ class CodeViewer(QWidget):
         return ""
 
     def _on_run(self):
-        """실행 버튼 클릭"""
+        """실행 버튼 클릭 (기존 누적 코드 실행)"""
         code = self.get_latest_code()
         if code:
             self.run_code_requested.emit(code)
