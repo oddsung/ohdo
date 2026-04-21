@@ -131,3 +131,32 @@ AI가 생성하는 코드의 품질은 프롬프트와 컨텍스트에 달려 �
 - DPI Awareness 설정이 pywinauto/pyautogui 좌표 일치에 필수
 - 관리자 권한 앱 제어 시 pyautogui.click(x, y) 사용 (UIPI 우회)
 - UWP 앱(Windows 11 메모장 등)은 Desktop().window() 방식으로 연결
+
+## 장기 로드맵 문서 동기화 규칙
+
+[docs/ROADMAP.md](docs/ROADMAP.md) 는 ohdo.ai 의 단계적 SaaS 확장 계획, 기능 우선순위, 리스크, KPI, 개발환경 표준을 담은 살아있는 문서입니다. 타깃 시장은 **B2C 개인 개발자 우선**(오픈코어 전략)으로 확정되어 있습니다.
+
+다음 상황에서는 반드시 `docs/ROADMAP.md` 를 **함께 수정**하세요:
+
+- Phase 순서·범위·마일스톤이 달라질 때
+- 새 기능을 우선순위 매트릭스에 추가하거나 Phase 를 옮길 때
+- 아키텍처 결정 (저장소 스키마, Agent 프로토콜, 인증 방식 등) 이 변경될 때
+- 리스크 또는 KPI 가 추가·수정될 때
+- 개발환경 표준 (의존성 관리자, CI 구성, Dev Container 설정 등) 이 바뀔 때
+- 타깃 시장·요금제·라이선스 전략이 달라질 때
+
+**업데이트 시 지켜야 할 것**:
+1. 문서 맨 위 §0 "마지막 업데이트" 날짜 갱신
+2. §10 변경 로그에 한 줄로 변경 이유 기록
+3. 관련 있다면 이 `CLAUDE.md` 의 상위 섹션들도 함께 조정
+
+Claude Code 에게 로드맵 변경을 지시할 때는 "로드맵 업데이트: <변경 내용>" 형태로 명시적으로 요청하면 문서 동기화를 빠뜨리지 않습니다.
+
+## 개발 환경 표준 (요약)
+
+상세 내용은 `docs/ROADMAP.md` §7 참조. 핵심:
+
+- **의존성**: `pyproject.toml` + `uv` (Phase 0 도입 예정)
+- **재현 환경**: `.devcontainer/` — 코어/백엔드/웹은 Linux 컨테이너·Codespaces·WSL2, Windows 자동화 테스트는 로컬 Windows 또는 GitHub Actions `windows-latest` 에서 분리 실행
+- **품질**: `pre-commit` (`ruff`, `mypy`), GitHub Actions 매트릭스 CI
+- **GitHub 만으로는 부족함** — 소스 동기화만 해결하며, 환경 재현은 위 스택이 필요
