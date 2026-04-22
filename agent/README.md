@@ -38,13 +38,30 @@ python agent_main.py
 - 아이콘 우클릭 → **Open Log Folder** 로 로그 파일 확인: `%APPDATA%\ohdo\agent.log`
 - 30초마다 "ping ok" 또는 "ping failed" 가 로그에 쌓인다.
 
+## 서버 URL 해석 우선순위
+
+Agent 가 매 ping 에 사용하는 URL 은 아래 순서로 결정된다:
+
+1. 환경변수 `OHDO_SERVER_URL` (있으면 최우선 — 개발 오버라이드용)
+2. `%APPDATA%\ohdo\config.json` 의 `server_url` 필드 (M1 Device Flow 가 여기에 기록 예정)
+3. 소스 상수 `DEFAULT_SERVER_URL` — 현재는 Railway 프로덕션 URL `https://ohdo-production.up.railway.app`
+
 ## 환경변수
 
 | 이름 | 기본값 | 설명 |
 |---|---|---|
-| `OHDO_SERVER_URL` | `http://localhost:8000` | Control Plane base URL |
+| `OHDO_SERVER_URL` | (위 해석 순서 2~3) | Control Plane base URL — 명시 시 최우선 |
 | `OHDO_PING_SECONDS` | `30` | 헬스체크 주기(초), 최소 5 |
 | `OHDO_APPDATA` | `%APPDATA%\ohdo` | 로그/설정 폴더 오버라이드 |
+
+## config.json 스키마 (M1 도입 예정)
+
+```json
+{
+  "server_url": "https://ohdo-production.up.railway.app",
+  "agent_token": "<M1 Device Flow 이후 발급>"
+}
+```
 
 ## 인스톨러 빌드 (Windows 에서)
 

@@ -4,6 +4,120 @@
 
 ---
 
+## 2026-04-23 (최종) — M0 전체 완료 🎉
+
+설치 테스트 성공. 사용자 머신에서 인스톨러로 설치된 agent 가 재부팅 없이 트레이에 떴고, `%APPDATA%\ohdo\agent.log` 에 Railway 대상 `ping ok 200` 이 30초 주기로 누적됨.
+
+**실제 로그 (2026-04-23 00:50~51)**:
+```
+ohdo agent starting: version=0.0.1 server=https://ohdo-production.up.railway.app
+pinger started: url=https://ohdo-production.up.railway.app interval=30s
+ping ok: status=200 elapsed=1078ms   (cold)
+ping ok: status=200 elapsed=811ms    (warm)
+ping ok: status=200 elapsed=875ms
+```
+
+**M0 완료 조건 전체 체크**:
+- [x] `uvicorn` 로컬 실행, `/healthz` 200
+- [x] Railway 배포, 퍼블릭 URL `/healthz` 200
+- [x] `python agent_main.py` ping 루프 정상
+- [x] PyInstaller 빌드 → `dist/ohdo-agent.exe` 생성·실행 검증
+- [x] Inno Setup 컴파일 → `ohdo-agent-setup-0.0.1.exe` (14 MB)
+- [x] **인스톨러 실행 → 트레이 + 자동 실행 + Railway ping 성공**
+
+**M0 의 본래 목적 (아키텍처 문서 §"목표") 대응**:
+- ✅ Python 번들링이 실제 Windows 에서 뜨는가
+- ✅ Inno Setup 인스톨러가 정상 설치/제거되는가 (자동 실행 레지스트리 등록 확인)
+- ⏳ Windows 시작 시 자동 실행 — 재부팅 시 확인 권장 (선택)
+- ✅ Railway 에 FastAPI 올라가 외부 HTTPS 로 접근되는가
+- ✅ Agent 가 클라우드 URL 과 통신하는가 (방화벽/프록시 문제 없음)
+
+이 다섯 가지 인프라 리스크가 해소되었으므로 **M1 부터는 프로토콜·인증·DB 같은 앱 레이어 구현에 집중**하면 된다.
+
+---
+
+## 2026-04-23 (후속) — PyInstaller 번들 + Inno Setup 인스톨러 생성, Railway 기본값 적용
+
+**완료 항목**:
+- PyInstaller 빌드 → `dist/ohdo-agent/ohdo-agent.exe` (3.85 MB, 번들 총 34 MB)
+- 번들 exe 실제 실행 → Railway `/healthz` 에 연속 10회 `ping ok 200` 확인 (780~920ms).
+- Inno Setup 6 컴파일 → `dist-installer/ohdo-agent-setup-0.0.1.exe` (14 MB, lzma 압축)
+- Inno Setup 설치 경로: `%LOCALAPPDATA%\Programs\Inno Setup 6\` (user-scope, 사용자가 기본 옵션으로 설치).
+
+**agent_main.py 개정** (이 세션에서 만든 파일이라 ADR 0001 의 "기존 파일 수정" 조항 비해당):
+- `DEFAULT_SERVER_URL` → Railway 프로덕션 URL. 환경변수 없이 설치된 agent 도 기본으로 클라우드와 통신하도록.
+- 서버 URL 해석 우선순위: `env var > %APPDATA%/ohdo/config.json > default`. `resolve_server_url()` + `_load_config()` 신규.
+- `CONFIG_FILE = %APPDATA%/ohdo/config.json` 경로 추가. M1 Device Flow 가 여기에 `server_url`·`agent_token` 을 쓴다.
+- 재빌드 → 재컴파일 → env var 없이 실행 테스트: `server=https://ohdo-production.up.railway.app` 로 해석되고 ping 200 확인.
+
+**README 보강**: [agent/README.md](../../agent/README.md) 에 "서버 URL 해석 우선순위" + config.json 스키마 섹션 추가.
+
+**M0 완료 조건 재점검**:
+- [x] `uvicorn` 로컬 실행, `/healthz` 200
+- [x] Railway 배포, 퍼블릭 URL `/healthz` 200
+- [x] `python agent_main.py` ping 루프 정상
+- [x] PyInstaller 빌드 → `dist/ohdo-agent.exe` 생성·실행 검증
+- [x] Inno Setup 컴파일 → `ohdo-agent-setup-0.0.1.exe` 생성
+- [ ] **깨끗한 Windows 에 설치 → 자동 실행 + Railway ping 성공 — 사용자 수동 1단계만 남음**
+
+**사용자가 할 마지막 단계**:
+1. `C:\Users\NeodaVinci\ohdo\agent\dist-installer\ohdo-agent-setup-0.0.1.exe` 더블클릭.
+2. Windows SmartScreen 경고 → 추가 정보 → 실행 (코드 사이닝 없음).
+3. 마법사 진행 → "지금 실행" 체크 유지 → 설치 완료.
+4. 시스템 트레이에 ohdo 아이콘 확인.
+5. 10~30초 뒤 `%APPDATA%\ohdo\agent.log` 맨 아래에 `ping ok https://ohdo-production.up.railway.app/healthz status=200` 확인.
+6. (선택) Windows 재시작 → 자동 실행 + 지속 ping 확인.
+
+---
+
+## 2026-04-23 — Railway 배포 성공 (M0 클라우드 경로 완료)
+
+**배포 정보**:
+- 공개 URL: `https://ohdo-production.up.railway.app`
+- 최초 빌드 소요: ~386초 (nixpacks, Python 3.12 감지 → `requirements.txt` 설치 → `Procfile` 시작)
+- 헬스체크: `[1/1] Healthcheck succeeded!` (railway.json 의 `/healthz` 30초 타임아웃 적용)
+- 상태: **Online**
+
+**검증 결과**:
+```
+$ curl https://ohdo-production.up.railway.app/healthz
+{"status":"ok","version":"0.0.1","ts":"2026-04-22T15:20:09.865282+00:00","env":"development"}
+
+$ curl https://ohdo-production.up.railway.app/
+{"service":"ohdo-backend","version":"0.0.1","docs":"/docs"}
+```
+
+**배포 절차 (실제 수행된 순서)**:
+1. Railway 가입 — GitHub `oddsung` 계정으로 OAuth 로그인, 약관 동의.
+2. GitHub App 설치 — `oddsung/ohdo` 레포만 허용 (최소 권한 원칙).
+3. New Project → Deploy from GitHub repo → `oddsung/ohdo` 선택.
+4. Settings → Source → **Root Directory: `packages/backend`** 로 변경 후 재배포.
+5. Networking → Public Networking → Generate Domain, 포트 8080.
+6. 빌드 완료 후 `/healthz` 200 확인.
+
+**다음 정리 항목 (선택)**:
+- [ ] Railway Variables 에 `OHDO_ENV=production` 추가 — `/healthz` 응답의 `env` 필드 값 교정용, 기능에 영향 없음.
+- [ ] 로컬 Agent 를 Railway URL 로 재기동하여 end-to-end ping 확인:
+  ```
+  taskkill /F /IM python.exe
+  cd /d C:\Users\NeodaVinci\ohdo\agent
+  set OHDO_SERVER_URL=https://ohdo-production.up.railway.app
+  .venv\Scripts\python.exe agent_main.py
+  ```
+  `%APPDATA%\ohdo\agent.log` 에 원격 URL 기준 `ping ok` 가 쌓이면 성공.
+
+**M0 완료 조건 재점검**:
+- [x] `uvicorn` 로컬 실행, `/healthz` 200
+- [x] **Railway 배포, 퍼블릭 URL `/healthz` 200**
+- [x] `python agent_main.py` ping 루프 정상
+- [ ] PyInstaller 빌드 → `dist/ohdo-agent.exe` — 사용자 수동
+- [ ] Inno Setup 컴파일 → `ohdo-agent-setup-0.0.1.exe` — 사용자 수동
+- [ ] 깨끗한 Windows 에 설치 → 자동 실행 + Railway ping 성공 — 사용자 수동
+
+**다음 세션**: PyInstaller 번들 + Inno Setup 컴파일 진행 ([agent/README.md](../../agent/README.md) §"인스톨러 빌드"). 이게 끝나면 M0 전체 종료. 그 뒤 M1 (Device Flow + WebSocket + PostgreSQL) 착수.
+
+---
+
 ## 2026-04-22 (밤) — M0 로컬 검증 완료 + agent_main.py 버그 수정
 
 **검증 방식**: Claude 가 사용자 머신에서 Bash 도구로 직접 실행. 기존 `.venv` 들이 고아 Python38-32 를 가리켜 모두 재생성 필요했음 — `py -3.12 -m venv .venv` 로 해결.

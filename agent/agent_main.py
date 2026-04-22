@@ -15,6 +15,7 @@ M0 범위: 백그라운드 스레드가 30초마다 ``OHDO_SERVER_URL/healthz`` 
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -36,7 +37,10 @@ __version__ = "0.0.1"
 # 설정
 # ──────────────────────────────────────────────
 
-DEFAULT_SERVER_URL = "http://localhost:8000"
+# 기본값은 Railway 에 배포된 Control Plane. 설치된 agent 가 추가 설정 없이도
+# 클라우드와 통신하도록 하기 위함. 로컬 개발 시에는 OHDO_SERVER_URL 환경변수로
+# 오버라이드. M1 Device Flow 는 %APPDATA%/ohdo/config.json 에 값을 쓴다.
+DEFAULT_SERVER_URL = "https://ohdo-production.up.railway.app"
 DEFAULT_PING_SECONDS = 30
 
 
@@ -56,6 +60,28 @@ def _resolve_appdata_dir() -> Path:
 
 APPDATA_DIR: Path = _resolve_appdata_dir()
 LOG_FILE: Path = APPDATA_DIR / "agent.log"
+CONFIG_FILE: Path = APPDATA_DIR / "config.json"
+
+
+def _load_config() -> dict:
+    """``%APPDATA%/ohdo/config.json`` 을 읽어 dict 반환. 없으면 빈 dict."""
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def resolve_server_url() -> str:
+    """서버 URL 해석 우선순위: 환경변수 > config.json > 기본값."""
+    if env_url := os.getenv("OHDO_SERVER_URL"):
+        return env_url
+    cfg = _load_config()
+    if url := cfg.get("server_url"):
+        return str(url)
+    return DEFAULT_SERVER_URL
 
 
 # ──────────────────────────────────────────────
@@ -196,7 +222,7 @@ def _quit(icon: Icon, _item: MenuItem, pinger: HealthPinger) -> None:
 # ──────────────────────────────────────────────
 
 def main() -> int:
-    server_url = os.getenv("OHDO_SERVER_URL", DEFAULT_SERVER_URL)
+    server_url = resolve_server_url()
     ping_seconds = int(os.getenv("OHDO_PING_SECONDS", str(DEFAULT_PING_SECONDS)))
 
     log.info(
