@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-04-23 (M1.1 착수) — Postgres + SQLAlchemy + Alembic 스캐폴딩 + 로컬 마이그레이션 검증
+
+**설계**: [architecture/03-m1.1-postgres-auth-schema.md](architecture/03-m1.1-postgres-auth-schema.md) — 스키마 결정(users, agents), 기술 스택 비교, DATABASE_URL 경로, 자동 마이그레이션 정책.
+
+**추가된 코드** (모두 `packages/backend/` 안):
+- `app/config.py` — Pydantic Settings. `DATABASE_URL` 자동 정규화 (`postgresql://` → `postgresql+asyncpg://`).
+- `app/db.py` — SQLAlchemy async 엔진 + `SessionLocal` + FastAPI Depends 용 `get_session()`.
+- `app/models/` — `Base`, `TimestampMixin`, `User`, `Agent` (SQLAlchemy 2.0 typed `Mapped[]` 스타일).
+- `alembic.ini` + `alembic/env.py` (async 엔진 대응) + `alembic/script.py.mako` + `alembic/versions/20260423_0001_initial_users_agents.py`.
+- `Procfile` — `release: alembic upgrade head` 라인 추가 → Railway 가 배포 직전에 자동으로 스키마 적용.
+- `requirements.txt` — `sqlalchemy[asyncio]`, `alembic`, `asyncpg`, `aiosqlite`, `pydantic-settings` 추가.
+
+**로컬 검증** (SQLite 폴백):
+```
+alembic upgrade head
+→ Running upgrade  -> 0001, initial users and agents tables
+→ 생성 테이블: users, agents, alembic_version
+→ 인덱스: agents_user_id_idx, agents_token_hash_idx
+```
+
+**사용자가 Railway 에서 해야 할 것** (1~2분):
+1. Railway 대시보드 → 기존 `ohdo` 프로젝트 → **+ New** → **Database** → **Add PostgreSQL** 클릭.
+2. 생성된 Postgres 서비스가 `DATABASE_URL` 등 환경변수를 **Postgres 서비스** 자체에만 노출한다. 그걸 backend 서비스로 참조해야 함:
+   - backend 서비스 선택 → **Variables** 탭 → **+ New Variable** 또는 **Reference** 선택
+   - Name: `DATABASE_URL`
+   - Reference: `${{Postgres.DATABASE_URL}}` (Railway 가 자동 완성 제안)
+3. 저장하면 backend 가 자동 재배포되며 release 단계에서 `alembic upgrade head` 실행. Deployments 로그에 `Running upgrade  -> 0001` 이 보이면 성공.
+4. (선택) Postgres 서비스 → **Data** 탭에서 `users`, `agents` 테이블 존재 확인.
+
+**발견 이슈**:
+- `alembic.ini` 의 한국어 주석을 Windows cp949 로 읽으려다 `UnicodeDecodeError`. 영어로 교체. ConfigParser 가 encoding 명시 안 하면 시스템 로케일 쓰기 때문. 이후 `.ini` 계열 파일은 ASCII 만 사용.
+
+**M1.1 완료 조건 체크**:
+- [x] 백엔드에 SQLAlchemy/Alembic 의존성 추가 및 모델·마이그레이션 파일 작성
+- [x] 로컬 SQLite 대상으로 `alembic upgrade head` 성공
+- [ ] Railway 에 Postgres 플러그인 추가 (사용자 수동)
+- [ ] Railway 재배포 후 release 단계에서 마이그레이션 자동 실행 로그 확인
+- [ ] Postgres 에 테이블 존재 확인
+
+**다음 서브마일스톤 (M1.2)** 예정: Device Flow 엔드포인트 + 브라우저 승인 페이지.
+
+---
+
 ## 2026-04-23 (최종) — M0 전체 완료 🎉
 
 설치 테스트 성공. 사용자 머신에서 인스톨러로 설치된 agent 가 재부팅 없이 트레이에 떴고, `%APPDATA%\ohdo\agent.log` 에 Railway 대상 `ping ok 200` 이 30초 주기로 누적됨.
