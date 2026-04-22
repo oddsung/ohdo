@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-04-23 (M1.1 완료) — Railway Postgres 에 스키마 실제 적용
+
+**Railway 인시던트 동안의 디버깅 여정**:
+
+1. 최초 푸시(`c570ae0`) 는 Railway 의 Build Machines(Metal) 인시던트로 빌드 자체가 시작 안 됨 — "No build logs were found".
+2. 사용자가 `railway.json` 의 `startCommand` 를 `alembic upgrade head && uvicorn ...` 로 체이닝 (`df6e17b`, `e354589`) — 올바른 방향이지만 Procfile `release:` 와 중복 상태.
+3. 빌드가 돌기 시작했지만 `[stage-0 8/10] RUN alembic upgrade head` 에서 `socket.gaierror [Errno -2] Name or service not known` — Procfile `release:` 가 **docker build 단계에 RUN 으로 박혀 실행되어** Postgres 사설 네트워크에 붙지 못함 (Railway 는 Heroku 와 달리 release 전용 컨테이너가 없음).
+4. 수정 `0ce29e6`: Procfile 의 `release:` 라인 제거, `web:` 에도 alembic 체이닝 추가.
+5. 추가 수정 `1af5c26`: Procfile 을 완전 삭제하고 `nixpacks.toml` 로 build plan 명시. `phases.install` 만 정의하여 alembic 이 빌드 단계에 들어갈 모든 경로 차단.
+6. 배포 성공 (빌드 47.46s, 헬스체크 `[1/1] Healthcheck succeeded!`).
+7. 사용자 확인: Postgres Data 탭에 `users`, `agents`, `alembic_version` 3 테이블 존재, `alembic_version.version_num = 0001`.
+
+**배운 것 (핵심)**:
+- Railway nixpacks 의 `release` 는 Heroku 의 release phase 와 **다르다**. Heroku: 별도 런타임 컨테이너(env + network 접근 가능). Railway nixpacks: Dockerfile 의 RUN 스텝(빌드 시점, env/network 제한).
+- **Railway 에서 마이그레이션 같은 "배포 직전 런타임 작업"** 은 Procfile `release:` 가 아니라 `railway.json startCommand` 또는 `nixpacks.toml [start].cmd` 에 체이닝해야 한다.
+- Procfile 이 어색하게 개입하는 것을 막으려면 **완전 삭제 + nixpacks.toml 명시** 가 가장 안전.
+
+**결과적 M1.1 상태**:
+- [x] 백엔드 의존성·모델·마이그레이션 작성
+- [x] 로컬 SQLite 마이그레이션 검증
+- [x] Railway 에 Postgres 플러그인 + `DATABASE_URL` 참조
+- [x] Railway 재배포 후 실제 Postgres 에 `users`·`agents`·`alembic_version` 테이블 존재 확인
+- [x] `alembic_version` 레코드 `0001` 확인
+
+다음 서브마일스톤 **M1.2 (Device Flow 엔드포인트 + 브라우저 승인 페이지)** 로 넘어간다.
+
+---
+
 ## 2026-04-23 (M1.1 착수) — Postgres + SQLAlchemy + Alembic 스캐폴딩 + 로컬 마이그레이션 검증
 
 **설계**: [architecture/03-m1.1-postgres-auth-schema.md](architecture/03-m1.1-postgres-auth-schema.md) — 스키마 결정(users, agents), 기술 스택 비교, DATABASE_URL 경로, 자동 마이그레이션 정책.
