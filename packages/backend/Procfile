@@ -1,2 +1,5 @@
-release: alembic upgrade head
-web: uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Railway nixpacks 는 Procfile `release:` 를 docker build 단계에 RUN 으로 박아넣어
+# 런타임 env (DATABASE_URL 등) 에 접근 못한 채로 실행되어 alembic 이 실패한다.
+# 마이그레이션은 railway.json 의 startCommand (컨테이너 기동 시점) 에서 실행하므로
+# 여기서는 web 만 정의한다. railway.json 의 startCommand 가 우선이므로 사실상 폴백.
+web: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
