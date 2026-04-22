@@ -1,0 +1,5 @@
+# ohdo backend — M0 dependencies
+# 루트 requirements.txt 와 독립. 백엔드 전용 venv 에서 설치.
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
