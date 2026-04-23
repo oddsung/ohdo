@@ -40,9 +40,11 @@ from pystray import Icon, Menu, MenuItem
 try:
     import auth as agent_auth  # type: ignore[no-redef]
     import ws_client as agent_ws  # type: ignore[no-redef]
+    import runner as agent_runner  # type: ignore[no-redef]
 except ImportError:  # pragma: no cover
     from agent import auth as agent_auth  # type: ignore[no-redef]
     from agent import ws_client as agent_ws  # type: ignore[no-redef]
+    from agent import runner as agent_runner  # type: ignore[no-redef]
 
 # agent/ 폴더 안에서 스크립트로 직접 실행되는 경로와 PyInstaller 번들 모두를
 # 지원하기 위해 버전은 이 파일 안에 둔다. agent/__init__.py 와 동기화 유지.
@@ -532,10 +534,15 @@ def main() -> int:
     )
     # on_unauthorized 는 icon 이 필요한데 아직 생성 전이므로 아래에서 세팅.
 
+    # M2.3: execution.* 프레임을 받아 WorkflowEngine 에 위임하는 runner.
+    runner = agent_runner.ExecutionRunner()
+
     ws_client = agent_ws.WebSocketClient(
         server_url=server_url,
         auth_state=auth,
+        frame_handler=runner.handle_frame,
     )
+    runner.set_sender(ws_client.send_frame)
     # on_unauthorized 도 icon 필요 → 아래에서 세팅.
 
     menu = Menu(

@@ -111,14 +111,21 @@ class WebSocketClient:
         server_url: str,
         auth_state,
         on_unauthorized: Callable[[], None] | None = None,
+        frame_handler: Callable[[dict], None] | None = None,
     ) -> None:
         self.server_url = server_url.rstrip("/")
         self.ws_url = _http_to_ws(self.server_url) + "/v0/agent"
         self.auth_state = auth_state
         self.on_unauthorized = on_unauthorized
+        # M2.3: 서버가 보내는 execution.* 같은 추가 프레임을 처리할 콜백.
+        # 핸드셰이크 프레임(server.hello) 은 내부에서 소비.
+        self.frame_handler = frame_handler
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._auth_blocked = False  # 4401/4403 수신 시 재연결 중단 플래그.
+        # M2.3: 현재 활성 연결 핸들 (send_frame 에서 사용). lock 은 send 직렬화.
+        self._ws = None
+        self._send_lock = threading.Lock()
 
     # ── lifecycle ──
     def start(self) -> None:
@@ -134,6 +141,15 @@ class WebSocketClient:
 
     def stop(self) -> None:
         self._stop.set()
+        # 활성 연결이 있으면 즉시 닫아 recv 를 깨운다. 아니면 recv(timeout=60) 이
+        # 끝날 때까지 실제 종료가 지연된다.
+        with self._send_lock:
+            ws = self._ws
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
         logger.info("ws client stop requested")
 
     # ── main loop ──
@@ -186,6 +202,8 @@ class WebSocketClient:
 
         logger.info("ws connected: %s", self.ws_url)
         handshake_ok = False
+        with self._send_lock:
+            self._ws = ws
         try:
             server_hello = self._recv_json(ws, HELLO_TIMEOUT_SECONDS)
             if not self._is_server_hello(server_hello):
@@ -207,7 +225,8 @@ class WebSocketClient:
             logger.info("ws agent.hello sent: id=%s", hello["id"])
             handshake_ok = True
 
-            # 이후 M1.5 범위에선 받는 프레임이 없다 — 서버가 close 할 때까지 대기.
+            # M2.3: 이후 서버가 보낼 수 있는 프레임 (execution.start 등) 을
+            # 받아 frame_handler 로 전달.
             self._receive_until_closed(ws)
 
         except ConnectionClosed as exc:
@@ -215,11 +234,31 @@ class WebSocketClient:
         except Exception:  # pragma: no cover
             logger.exception("ws loop unexpected error")
         finally:
+            with self._send_lock:
+                self._ws = None
             try:
                 ws.close()
             except Exception:
                 pass
         return handshake_ok
+
+    def send_frame(self, frame: dict) -> bool:
+        """외부 (runner 등) 에서 현재 연결로 프레임을 송신한다.
+
+        스레드 안전. 연결이 없거나 송신 실패 시 False. 성공 시 True.
+        """
+        with self._send_lock:
+            ws = self._ws
+        if ws is None:
+            logger.debug("send_frame dropped: no active connection type=%s",
+                         frame.get("type"))
+            return False
+        try:
+            ws.send(json.dumps(frame))
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("send_frame failed: %s", exc)
+            return False
 
     # ── helpers ──
     def _recv_json(self, ws, timeout: float) -> dict:
@@ -240,10 +279,25 @@ class WebSocketClient:
             except ConnectionClosed as exc:
                 self._handle_connection_closed(exc)
                 return
-            # M2 에서 execution.* 처리. 지금은 관찰만.
             if isinstance(msg, (bytes, bytearray)):
                 msg = msg.decode("utf-8", errors="replace")
-            logger.debug("ws recv (len=%d)", len(msg))
+            # M2.3: JSON 파싱 후 frame_handler 에 전달.
+            try:
+                frame = json.loads(msg)
+            except json.JSONDecodeError:
+                logger.debug("ws recv non-json (len=%d)", len(msg))
+                continue
+            if not isinstance(frame, dict):
+                continue
+            if self.frame_handler is None:
+                logger.debug("ws recv frame (no handler) type=%s",
+                             frame.get("type"))
+                continue
+            try:
+                self.frame_handler(frame)
+            except Exception:  # pragma: no cover
+                logger.exception("frame_handler raised (type=%s)",
+                                 frame.get("type"))
 
     def _handle_connection_closed(self, exc: ConnectionClosed) -> None:
         code = getattr(getattr(exc, "rcvd", None), "code", None)

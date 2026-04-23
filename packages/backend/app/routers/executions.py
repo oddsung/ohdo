@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import registry
 from ..db import get_session
 from ..dependencies import current_agent
 from ..models import Agent, Execution
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/v0/executions", tags=["executions"])
 EXECUTION_ID_PREFIX = "exec_"
 LIST_LIMIT_DEFAULT = 50
 LIST_LIMIT_MAX = 200
+PROTOCOL_VERSION = 0
 
 ALLOWED_STATUSES = {
     "queued",
@@ -46,6 +48,26 @@ ALLOWED_STATUSES = {
 
 def _new_execution_id() -> str:
     return f"{EXECUTION_ID_PREFIX}{uuid.uuid4().hex}"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_start_frame(execution: Execution, body: "ExecutionCreate") -> dict:
+    """M2.3: execution.start 프레임 빌더 (프로토콜 v0 포맷)."""
+    return {
+        "v": PROTOCOL_VERSION,
+        "type": "execution.start",
+        "id": str(uuid.uuid4()),
+        "ts": _now_iso(),
+        "payload": {
+            "execution_id": execution.execution_id,
+            "session_snapshot": body.session_snapshot,
+            "from_step": body.from_step,
+            "to_step": body.to_step,
+        },
+    }
 
 
 # ── Schemas ─────────────────────────────────────────────────────────────────
@@ -120,6 +142,29 @@ async def create_execution(
         "execution created: execution_id=%s agent_id=%s user_id=%s",
         execution.execution_id, agent.id, agent.user_id,
     )
+
+    # M2.3: 해당 agent 가 WS 로 붙어있으면 execution.start 를 push. 오프라인이면
+    # 조용히 queued 로 유지 (catchup 은 M2.4+).
+    ws = registry.get(agent.id)
+    if ws is not None:
+        frame = _build_start_frame(execution, body)
+        try:
+            await ws.send_json(frame)
+            logger.info(
+                "execution.start pushed: execution_id=%s agent_id=%s",
+                execution.execution_id, agent.id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "execution.start push failed (agent may have disconnected): %s",
+                exc,
+            )
+    else:
+        logger.info(
+            "agent offline at POST time: execution_id=%s agent_id=%s — left queued",
+            execution.execution_id, agent.id,
+        )
+
     return ExecutionRead.model_validate(execution)
 
 

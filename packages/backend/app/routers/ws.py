@@ -1,18 +1,23 @@
 """WebSocket 게이트웨이 — `/v0/agent` (Bearer 인증).
 
-M1.5 범위:
+M1.5 범위 (핸드셰이크):
 - 연결 수락 전에 ``Authorization: Bearer ag_...`` 검증 (auth 실패도 일단 accept
   후 close code 로 통지해 클라이언트가 수신 가능하도록 함).
 - 연결 수락 후 ``server.hello`` 프레임 송신 (agent_id/user_id/server_version).
 - 5초 내 ``agent.hello`` 수신 기대. 수신 시 ``agents.last_seen_at = now()`` 갱신.
-- 이후 프레임은 M1.5 에서 처리하지 않음 (M2 에서 ``execution.*`` 추가 예정).
 
-설계: docs/saas/architecture/07-m1.5-websocket-hello.md
+M2.3 범위 추가:
+- 핸드셰이크 성공 시 ``registry`` 에 agent_id → ws 등록.
+- 이후 수신 프레임 중 ``execution.accepted`` / ``.progress`` / ``.result`` 를
+  파싱해 ``executions`` row 를 상태 전이. 그 외 type 은 debug 로그.
+
+설계: docs/saas/architecture/07-m1.5-websocket-hello.md, 10-m2.3-execution-lifecycle.md
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -23,10 +28,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import Headers
 
-from .. import __version__
+from .. import __version__, registry
 from ..auth import AGENT_TOKEN_PREFIX, hash_token
 from ..db import get_session
-from ..models import Agent
+from ..models import Agent, Execution
 
 logger = logging.getLogger(__name__)
 
@@ -162,13 +167,165 @@ async def ws_agent(
         agent.id, sorted((first.get("payload") or {}).keys()),
     )
 
-    # M1.5 는 여기까지. 추가 프레임은 조용히 소비만. 연결이 끊길 때까지 대기.
+    # M2.3: 핸드셰이크 성공 후 레지스트리 등록. POST /v0/executions 가
+    # execution.start 프레임을 이 소켓으로 push 할 수 있게 된다.
+    registry.register(agent.id, websocket)
+
+    # M2.3 프레임 수신 루프 — execution.* 처리.
     try:
         while True:
-            msg = await websocket.receive_text()
-            # M2 에서 execution.* 파싱 추가. 지금은 소비 후 debug 로그만.
-            logger.debug(
-                "ws unhandled frame (len=%d) agent_id=%s", len(msg), agent.id
-            )
+            raw = await websocket.receive_text()
+            try:
+                frame = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.debug("ws non-json frame (len=%d) agent_id=%s", len(raw), agent.id)
+                continue
+            if not isinstance(frame, dict):
+                continue
+            await _route_agent_frame(frame, agent=agent, session=session)
     except WebSocketDisconnect:
         logger.info("ws disconnected: agent_id=%s", agent.id)
+    finally:
+        registry.unregister(agent.id, websocket)
+
+
+# ── 프레임 라우팅 (M2.3) ────────────────────────────────────────────────────
+
+
+_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+_ALLOWED_RESULT_STATUSES = {"completed", "failed", "cancelled"}
+
+
+async def _route_agent_frame(
+    frame: dict[str, Any], *, agent: Agent, session: AsyncSession
+) -> None:
+    ftype = frame.get("type")
+    payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
+    execution_id = payload.get("execution_id") if isinstance(payload, dict) else None
+
+    if ftype == "execution.accepted":
+        await _handle_accepted(execution_id, agent=agent, session=session)
+    elif ftype == "execution.progress":
+        await _handle_progress(payload, execution_id, agent=agent, session=session)
+    elif ftype == "execution.result":
+        await _handle_result(payload, execution_id, agent=agent, session=session)
+    else:
+        logger.debug("ws unhandled frame type=%s agent_id=%s", ftype, agent.id)
+
+
+async def _fetch_owned_execution(
+    execution_id: str | None, *, agent: Agent, session: AsyncSession
+) -> Execution | None:
+    """agent 소유 execution 만 반환. 없으면 None + WARN 로그."""
+    if not isinstance(execution_id, str) or not execution_id:
+        return None
+    stmt = select(Execution).where(
+        Execution.execution_id == execution_id,
+        Execution.agent_id == agent.id,
+    )
+    result = await session.execute(stmt)
+    execution: Execution | None = result.scalar_one_or_none()
+    if execution is None:
+        logger.warning(
+            "ws frame rejected: execution_id=%s not owned by agent_id=%s",
+            execution_id, agent.id,
+        )
+    return execution
+
+
+async def _handle_accepted(
+    execution_id: str | None, *, agent: Agent, session: AsyncSession
+) -> None:
+    execution = await _fetch_owned_execution(execution_id, agent=agent, session=session)
+    if execution is None:
+        return
+    if execution.status != "queued":
+        logger.info(
+            "execution.accepted ignored (status=%s) execution_id=%s",
+            execution.status, execution_id,
+        )
+        return
+    execution.status = "accepted"
+    execution.started_at = datetime.now(timezone.utc)
+    await session.commit()
+    logger.info("execution accepted: execution_id=%s", execution_id)
+
+
+async def _handle_progress(
+    payload: dict[str, Any],
+    execution_id: str | None,
+    *,
+    agent: Agent,
+    session: AsyncSession,
+) -> None:
+    execution = await _fetch_owned_execution(execution_id, agent=agent, session=session)
+    if execution is None:
+        return
+    if execution.status in _TERMINAL_STATUSES:
+        logger.info(
+            "execution.progress ignored (terminal status=%s) execution_id=%s",
+            execution.status, execution_id,
+        )
+        return
+    # 첫 progress 수신 시 running 으로 전이.
+    if execution.status in ("queued", "accepted"):
+        execution.status = "running"
+        if execution.started_at is None:
+            execution.started_at = datetime.now(timezone.utc)
+
+    for col in ("executed_steps", "successful_steps", "failed_steps"):
+        val = payload.get(col)
+        if isinstance(val, int) and val >= 0:
+            setattr(execution, col, val)
+
+    await session.commit()
+
+
+async def _handle_result(
+    payload: dict[str, Any],
+    execution_id: str | None,
+    *,
+    agent: Agent,
+    session: AsyncSession,
+) -> None:
+    execution = await _fetch_owned_execution(execution_id, agent=agent, session=session)
+    if execution is None:
+        return
+    if execution.status in _TERMINAL_STATUSES:
+        logger.info(
+            "execution.result ignored (already terminal=%s) execution_id=%s",
+            execution.status, execution_id,
+        )
+        return
+
+    final_status = payload.get("status")
+    if final_status not in _ALLOWED_RESULT_STATUSES:
+        logger.warning(
+            "execution.result has invalid status=%r execution_id=%s",
+            final_status, execution_id,
+        )
+        return
+
+    execution.status = final_status
+    execution.finished_at = datetime.now(timezone.utc)
+
+    for col in (
+        "total_steps",
+        "executed_steps",
+        "successful_steps",
+        "failed_steps",
+        "total_time_ms",
+    ):
+        val = payload.get(col)
+        if isinstance(val, int) and val >= 0:
+            setattr(execution, col, val)
+
+    err = payload.get("error_summary")
+    if isinstance(err, str):
+        execution.error_summary = err[:500]  # 과대 로그 방어
+
+    await session.commit()
+    logger.info(
+        "execution completed: execution_id=%s status=%s",
+        execution_id, final_status,
+    )

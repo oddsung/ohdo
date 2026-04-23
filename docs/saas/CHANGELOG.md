@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-04-23 (M2.3 구현·로컬 e2e) — WS `execution.start/.accepted/.progress/.result` + 첫 실제 실행
+
+**설계**: [architecture/10-m2.3-execution-lifecycle.md](architecture/10-m2.3-execution-lifecycle.md) — 프레임 스펙, 서버 상태 머신 (`queued → accepted → running → completed|failed`), agent_id 소유 검증, offline 시 queued 유지 정책. 사용자 결정 7항목 반영.
+
+**추가/수정된 코드** (core 수정 0):
+
+- `packages/backend/app/registry.py` [신규] — `{agent_id: WebSocket}` 단순 레지스트리. 동일 agent 이중 연결 시 "나중 연결 win", unregister 는 현재 ws 와 일치할 때만.
+- `packages/backend/app/routers/ws.py` [수정] — handshake 성공 후 `registry.register` 호출, 수신 루프를 `receive_text + json.loads` 로 변경해 `_route_agent_frame` 로 dispatch. 핸들러 3개 (`execution.accepted`/`.progress`/`.result`) 각각 상태 전이 규칙 + `agent_id` 소유 검증. finally 에서 unregister.
+- `packages/backend/app/routers/executions.py` [수정] — `create_execution` 이 row insert 후 `registry.get(agent.id)` 로 WS 확인 → `execution.start` 프레임 push. 오프라인이면 로그만 남기고 queued 유지.
+- `agent/ws_client.py` [수정] — `frame_handler` 콜백 파라미터 추가. `_connect_once` 에서 활성 소켓 기록 (`self._ws` + `_send_lock`). `send_frame(frame)` 메서드로 외부에서 스레드 안전 송신. `stop()` 이 flag 만 세팅 → 활성 소켓 즉시 close (테스트 분리 + 실무 정상 종료). receive 루프가 JSON 파싱 후 `frame_handler` 로 위임.
+- `agent/runner.py` [신규] — `ExecutionRunner` 클래스. `execution.start` 를 받으면 워커 스레드 spawn → `accepted` 송신 → `SimpleNamespace` 로 session 감싸 → `WorkflowEngine(visual_feedback_enabled=False, screenshot_on_error=False)` 생성 → `asyncio.run(engine.execute_session(on_step_complete=...))`. `on_step_complete` 에서 `.progress` 송신, 종료 후 `.result`. 예외/엔진 실패 모두 `failed` result 로 커버. 같은 `execution_id` 중복 실행 방지 lock.
+- `agent/agent_main.py` [수정] — `ExecutionRunner` 인스턴스 생성 + `WebSocketClient(frame_handler=runner.handle_frame)` + `runner.set_sender(ws_client.send_frame)`.
+
+**로컬 e2e 검증** (SQLite, uvicorn :8773, 실제 `ws_client.WebSocketClient` + `runner.ExecutionRunner` 를 별도 프로세스 아닌 테스트 드라이버 프로세스에서 기동):
+
+| 시나리오 | 결과 |
+|---|---|
+| S1 (스텝 1개 `print('hello')`) | `status=completed`, executed=1, successful=1, total_time_ms 기록, started_at/finished_at 둘 다 세팅 |
+| S2 (스텝 2개, 2번째 `raise RuntimeError`) | `status=failed`, executed=2, successful=1, failed=1, `error_summary` 채워짐 (step 2 에 해당) |
+| S3 (agent offline, WS 연결 없음) | POST 201 후 DB 는 `queued` 유지, executed/started_at 모두 None |
+| S4 (`from_step=2, to_step=2` 슬라이스) | 가운데 성공 스텝만 실행되어 `completed`, executed=1 |
+| Ownership guard (B 에이전트가 A 의 execution_id 에 `execution.accepted` 보내기 시도) | 서버가 `agent_id` 불일치로 거부 → A 의 row 는 `queued` 유지 |
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (21:04).
+
+**M2.3 완료 조건 체크**:
+
+- [x] Registry register/unregister + 같은 agent 재연결 handling
+- [x] WS 수신 루프 JSON 파싱 + 3 프레임 타입 dispatch
+- [x] `agent_id` 소유 검증 (거부 시 조용히 무시 + WARN)
+- [x] 상태 전이 (`queued → accepted → running → completed|failed`) + 터미널 재수신 무시
+- [x] Offline agent POST → `queued` 유지
+- [x] `from_step`/`to_step` 슬라이싱
+- [x] 엔진 예외 시 `execution.result` status=failed + error_summary 커버
+- [x] 코어 회귀 25/25
+- [ ] Railway 대상 e2e — push 후 외부에서 device_flow → ExecutionRunner 로컬 기동 → POST → Postgres row 상태 변화 관찰
+
+**M2.3 범위 밖**: `.log` 스트리밍 (M2.4), `execution.cancel` (M2.5), 스크린샷 업로드 (M2.6), offline catchup (M2.4+), stderr 노이즈 필터 (Windows Python launch noise `Could not find platform independent libraries` 가 error_summary 첫 줄을 점유 — M2.4 에서 `.log` 도입과 함께 개선).
+
+**Core 수정**: 없음. `WorkflowEngine.execute_session()` 의 기존 `on_step_complete` 콜백만 이용. ADR 0001 4조건 미발동.
+
+---
+
 ## 2026-04-23 (M2.2 구현·로컬 e2e) — REST `POST/GET /v0/executions`
 
 **설계**: [architecture/09-m2.2-executions-rest.md](architecture/09-m2.2-executions-rest.md) — A 패턴 (agent self-enqueue, Bearer agent 인증만), `exec_<uuid4.hex>` id 포맷, GET 권한은 `user_id` 스코프 (같은 사용자의 모든 기기 교차 조회 가능, 다른 사용자는 404), M2.2 에서는 status 전이 없음 (모두 `queued` 로 생성).
