@@ -1,11 +1,13 @@
 """FastAPI 진입점.
 
-M0 범위: `/` 루트 + `/healthz` 만. 이후 마일스톤에서 라우터가 추가된다.
+라우터:
+- M0: `/` 루트, `/healthz`
+- M1.2: `/v0/agents/device_code`, `/v0/agents/device_token`, `/link`, `/link/approve`
 
 로컬 실행:
     uvicorn app.main:app --reload --port 8000
 
-Railway 실행: Procfile 에서 자동 시작.
+Railway 실행: `railway.json` startCommand 에서 `alembic upgrade head && uvicorn ...`.
 """
 
 from __future__ import annotations
@@ -16,12 +18,16 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 
 from . import __version__
+from .routers import device_flow, link
 
 app = FastAPI(
     title="ohdo Control Plane",
-    description="ohdo.ai SaaS 백엔드. M0 는 헬스체크만 제공.",
+    description="ohdo.ai SaaS 백엔드.",
     version=__version__,
 )
+
+app.include_router(device_flow.router)
+app.include_router(link.router)
 
 
 @app.get("/")

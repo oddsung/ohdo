@@ -7,5 +7,6 @@
 from .base import Base, TimestampMixin
 from .user import User
 from .agent import Agent
+from .device_code import DeviceCode
 
-__all__ = ["Base", "TimestampMixin", "User", "Agent"]
+__all__ = ["Base", "TimestampMixin", "User", "Agent", "DeviceCode"]

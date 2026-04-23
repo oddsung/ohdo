@@ -27,6 +27,17 @@ class Settings(BaseSettings):
     # Railway 가 주입하거나 .env 로 설정. 기본은 로컬 SQLite.
     DATABASE_URL: str = "sqlite+aiosqlite:///./dev.db"
 
+    # Device Flow 의 verification_uri 에 쓰는 공개 URL (예:
+    # ``https://ohdo-production.up.railway.app``). 설정되지 않으면 요청
+    # ``base_url`` 로부터 유도 — 로컬 개발에서는 자연스럽지만 프록시 뒤에서는
+    # 누락/오표기 위험이 있으므로 Railway Variables 로 명시 권장.
+    PUBLIC_BASE_URL: str | None = None
+
+    # Device Flow TTL — 기본 15 분.
+    DEVICE_CODE_TTL_SECONDS: int = 900
+    # Agent 권장 폴링 간격.
+    DEVICE_CODE_INTERVAL_SECONDS: int = 5
+
     @property
     def async_database_url(self) -> str:
         """SQLAlchemy async 엔진이 바로 쓸 수 있는 형식으로 정규화."""

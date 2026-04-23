@@ -4,6 +4,57 @@
 
 ---
 
+## 2026-04-23 (M1.2 구현) — Device Flow 엔드포인트 + /link 브라우저 승인 페이지
+
+**설계**: [architecture/04-m1.2-device-flow.md](architecture/04-m1.2-device-flow.md) — 3 엔드포인트 + device_codes 스키마 + "이메일 stub" 승인 흐름 결정 근거 (M1 범위 최소화, 이메일 소유 증명은 M2+ 매직링크로 이관).
+
+**추가된 코드** (모두 `packages/backend/`, 기존 core 수정 0):
+
+- `app/auth.py` — `generate_device_code` / `generate_agent_token` / `generate_user_code` / `normalize_user_code` / `hash_token`. token_urlsafe(32) 기반 opaque + SHA-256 해시.
+- `app/models/device_code.py` + `models/__init__.py` 업데이트.
+- `app/routers/device_flow.py` — `POST /v0/agents/device_code`, `POST /v0/agents/device_token`. RFC 8628 §3.5 에러 형식 (`authorization_pending` / `expired_token` / `invalid_grant` / `access_denied`).
+- `app/routers/link.py` + `app/templates/{link.html, link_success.html}` — `GET /link?code=...` 자동 입력 폼 + `POST /link/approve` (email get-or-create + device_code approve).
+- `app/main.py` — 라우터 2 개 include.
+- `app/config.py` — `PUBLIC_BASE_URL`, `DEVICE_CODE_TTL_SECONDS`, `DEVICE_CODE_INTERVAL_SECONDS` 추가.
+- `alembic/versions/20260423_0002_device_codes.py` — device_codes 테이블 + 3 인덱스.
+- `requirements.txt` — `jinja2`, `python-multipart` 추가.
+
+**로컬 e2e 검증** (SQLite):
+```
+POST /v0/agents/device_code → 200 {device_code, user_code: "9B3L-TPF6", ...}
+POST /v0/agents/device_token → 400 {"error":"authorization_pending"}
+GET  /link?code=9B3L-TPF6    → 200 (폼 렌더)
+POST /link/approve (user_code, email) → 200 (성공 페이지) + users/device_codes 업데이트
+POST /v0/agents/device_token → 200 {agent_token, agent_id, user_id}
+POST /v0/agents/device_token → 400 {"error":"invalid_grant"}  # consumed 재사용 차단
+```
+DB 상태: 1 user + 1 agent row (`token_hash` 64 chars, `revoked_at=NULL`) + device_codes approved/consumed.
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (기존 core 변경 없으므로 예상된 결과).
+
+**보안 메모 (stub 한계)**:
+- /link/approve 가 이메일 소유 증명 없이 user 를 생성·매핑. `stub approval: ...` WARN 로그로 식별.
+- CSRF 토큰·rate limit 부재 — M2+ 에서 보강.
+
+**Railway 배포 전 확인 사항**:
+- `alembic upgrade head` 이 기동 시 자동 실행되므로 Postgres 에 device_codes 가 생긴다.
+- Railway Variables 에 `PUBLIC_BASE_URL=https://ohdo-production.up.railway.app` 을 설정해야 `verification_uri` 가 올바르게 발급된다. 미설정 시 `request.base_url` 폴백 사용 (프록시 뒤에서 `http://internal-host` 로 잘못 찍힐 위험).
+
+**M1.2 완료 조건 체크**:
+- [x] 마이그레이션 0002 — 로컬 SQLite 적용 확인
+- [ ] Railway 재배포 → Postgres 에 device_codes 생성 확인 (다음 세션 또는 사용자 수동 확인)
+- [x] `POST /v0/agents/device_code` 200
+- [x] `GET /link?code=...` 렌더
+- [x] `POST /link/approve` 성공
+- [x] 승인 후 `POST /v0/agents/device_token` agent_token 반환
+- [x] 재호출 `invalid_grant` (consumed)
+- [x] 승인 전 폴링 `authorization_pending`
+- [ ] 만료 device_code → `expired_token` (TTL 15 분이라 수동 테스트 대신 단위 테스트 추가 여지)
+
+**다음 서브마일스톤 (M1.3)** 예정: Agent 트레이 메뉴 "Sign In" + `agent/auth.py` 클라이언트 + `%APPDATA%\ohdo\config.json` 에 `agent_token`/`agent_id` 저장.
+
+---
+
 ## 2026-04-23 (M1.1 완료) — Railway Postgres 에 스키마 실제 적용
 
 **Railway 인시던트 동안의 디버깅 여정**:
