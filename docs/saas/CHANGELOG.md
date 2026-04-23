@@ -39,7 +39,7 @@
 - [x] `from_step`/`to_step` 슬라이싱
 - [x] 엔진 예외 시 `execution.result` status=failed + error_summary 커버
 - [x] 코어 회귀 25/25
-- [ ] Railway 대상 e2e — push 후 외부에서 device_flow → ExecutionRunner 로컬 기동 → POST → Postgres row 상태 변화 관찰
+- [x] Railway e2e (커밋 `88e460b` 반영 후) — 단일 wss 연결로 S1 (성공) / S2 (mixed 실패) / S3 (from_step/to_step 슬라이스) / S4 (offline → queued 유지) 모두 1~6초 안에 settled. 예: `exec_b0ec86e6...` status=failed + executed=2 + failed_steps=1. 새 배포 감지용 probe 는 2번째 시도에서 completed 로 전환 (첫 번째는 wss 핸드셰이크 + 배포 타이밍).
 
 **M2.3 범위 밖**: `.log` 스트리밍 (M2.4), `execution.cancel` (M2.5), 스크린샷 업로드 (M2.6), offline catchup (M2.4+), stderr 노이즈 필터 (Windows Python launch noise `Could not find platform independent libraries` 가 error_summary 첫 줄을 점유 — M2.4 에서 `.log` 도입과 함께 개선).
 
