@@ -42,7 +42,7 @@
 - [x] stderr 노이즈 필터 (Windows Python 런치 잡음 2 패턴)
 - [x] error_summary 재구성 — M2.3 의 "step 2: Could not find..." → "step 2: RuntimeError: boom-m24"
 - [x] 코어 회귀 25/25
-- [ ] Railway e2e — push 후 wss 로 동일 플로우 + Postgres 에 execution_logs row 생성 + `GET /logs` 응답 확인
+- [x] Railway e2e (커밋 `eab1c01`) — warm-up 1회 재시도 후 안정. S1 (stdout 2줄 + engine 4줄 persist), S2 (`error_summary='step 2: RuntimeError: rail-boom'` 깔끔하게 정제 + stderr 에 노이즈 라인 0개), S3 (step_id=1 필터) 전부 통과. wss Postgres e2e 확인.
 
 **M2.4 범위 밖**: `execution.cancel` → `WorkflowEngine.stop()` (M2.5), S3/R2 업로드 (M2.6), 실시간 tail / SSE (웹 UI 단계), 페이지네이션 커서.
 
