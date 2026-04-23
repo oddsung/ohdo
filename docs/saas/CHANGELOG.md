@@ -4,6 +4,54 @@
 
 ---
 
+## 2026-04-23 (M2.1 구현·로컬 e2e) — `executions` 테이블 + 마이그레이션 `0003`
+
+**설계**: [architecture/08-m2.1-executions-schema.md](architecture/08-m2.1-executions-schema.md) — 테이블 컬럼·인덱스·상태 머신, JSON 타입 선택 (SQLite/Postgres 양쪽 호환), M2 전체 단계별 범위 분할.
+
+**추가된 코드** (API/라우터/WS 무변경, 순수 스키마만):
+
+- `packages/backend/app/models/execution.py` [신규] — `Execution` SQLAlchemy 모델. `execution_id` (public id, unique), `agent_id`/`user_id` FK (CASCADE), `status` (기본 `queued`), `session_snapshot` (JSON — Postgres 는 JSONB, SQLite 는 TEXT 로 매핑), `from/to_step`, `total_steps`/`executed_steps`/`successful_steps`/`failed_steps`/`total_time_ms` 집계 컬럼, `error_summary`, `started_at`/`finished_at`, `created_at`/`updated_at` Mixin.
+- `packages/backend/app/models/__init__.py` [수정] — `Execution` 등록 (Alembic autogenerate 가 `Base.metadata` 로 보도록).
+- `packages/backend/alembic/versions/20260423_0003_executions.py` [신규] — `0002 → 0003` 마이그레이션. `executions` 테이블 + FK 2개 + 인덱스 4개 (`execution_id` unique / `agent_id` / `user_id` / `status`). `downgrade()` 도 대칭 구현.
+
+**상태 머신** (M2 전체 걸쳐 사용):
+
+```
+queued → accepted → running → completed | failed | cancelled
+```
+
+M2.1 은 컬럼만 허용. 전이 강제 로직은 M2.3 (WS `execution.*` 처리) 에서 추가.
+
+**로컬 e2e 검증** (SQLite):
+
+| 시나리오 | 결과 |
+|---|---|
+| `alembic upgrade head` (0002 → 0003) | ✅ 테이블/인덱스/FK 생성 |
+| `PRAGMA table_info(executions)` | 18 컬럼 모두 설계와 일치 |
+| `PRAGMA foreign_key_list(executions)` | users/agents 양쪽 CASCADE 확인 |
+| ORM insert `execution_id='exec_m21_smoke_1'` + JSON payload | `status='queued'` 기본값·created_at 자동 채움 |
+| select by `execution_id` 라운드트립 | `session_snapshot.steps` 원본 그대로 |
+| 같은 `execution_id` 중복 insert | `IntegrityError` (unique 인덱스 동작) |
+| `alembic downgrade -1` → `upgrade head` | 테이블 재생성 OK, 0003 head 복원 |
+
+**기존 API 회귀 (smoke)**: uvicorn 기동 후 `/`, `/healthz`, `/v0/agents/me` (no auth) 전부 기존 동작 유지.
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (17:03).
+
+**M2.1 완료 조건 체크**:
+
+- [x] `Execution` 모델 + `models/__init__.py` 등록
+- [x] 마이그레이션 `0003` upgrade/downgrade 쌍
+- [x] 로컬 SQLite 테이블 생성 + ORM 라운드트립 + unique 제약 동작
+- [x] 코어 회귀 25/25
+- [ ] Railway Postgres 0003 자동 적용 확인 — push 후 검증
+
+**M2.1 범위 밖**: REST `POST /v0/executions` (M2.2), WS `execution.*` (M2.3), 로그 스트림 (M2.4), 스크린샷 업로드 (M2.6).
+
+**Core 수정**: 없음. ADR 0001 4조건 미발동.
+
+---
+
 ## 2026-04-23 (M1.5 구현·로컬 e2e) — WebSocket `/v0/agent` + `server.hello`/`agent.hello`
 
 **설계**: [architecture/07-m1.5-websocket-hello.md](architecture/07-m1.5-websocket-hello.md) — 인증 방식 (Authorization 헤더), close code 규약 (4400/4401/4403), accept-then-close 이유, 재연결 백오프 정책.
