@@ -34,7 +34,7 @@
 
 **회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (15:43).
 
-**M1.5 완료 조건 체크**:
+**M1.5 완료 조건 체크** (실기 검증 포함):
 
 - [x] `WS /v0/agent` Bearer 인증 + close code taxonomy (4400/4401/4403)
 - [x] `server.hello` → `agent.hello` 핸드셰이크 + `last_seen_at` 갱신
@@ -42,10 +42,16 @@
 - [x] `AuthState.handle_unauthorized` 재사용 (HTTP pinger 와 동일 콜백)
 - [x] 로컬 e2e 6 시나리오 + WebSocketClient 통합 테스트
 - [x] 코어 회귀 25/25
-- [ ] Railway 재배포 후 `wss://ohdo-production.up.railway.app/v0/agent` 핸드셰이크 확인 (다음 단계)
-- [ ] 사용자 기기 agent 재기동 → `ws server.hello received` + `ws agent.hello sent` 로그 확인 (다음 단계)
+- [x] Railway 자동 e2e: 4401 taxonomy 3 종 + happy (last_seen_at 06:51:24→27)
+- [x] **실기 런타임** (HP-Laptop 16:44): `ws connected` / `server.hello received` / `agent.hello sent` 3 줄 + 기존 `ping ok (authenticated)` 병행 확인.
 
 **M1.5 범위 밖**: `execution.*` 메시지 — M2. subprotocol 기반 auth (브라우저 WS) — 웹 UI 도입 시. 로컬 큐 + `last_event_id` 재동기화 — M2+.
+
+## M1 전체 상태
+
+M1.1 (Postgres 스키마) / M1.2 (Device Flow 서버) / M1.3 (Device Flow 에이전트) / M1.4 (Authenticated Ping) / M1.5 (WebSocket 핸드셰이크) — 모두 Railway 배포 + 에이전트 실기 검증 완료.
+
+이로써 **M1 (인증·DB·실시간 통신) 전체 마무리**. 다음 마일스톤 **M2 (실제 RPA 실행 연결)** 로 진입 준비됨.
 
 ---
 
