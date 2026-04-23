@@ -49,7 +49,7 @@
 - [x] `GET /v0/executions` + limit/offset/status 필터
 - [x] 로컬 SQLite 18 시나리오 통과
 - [x] 코어 회귀 25/25
-- [ ] Railway Postgres e2e — push 후 외부에서 POST/GET 으로 실제 row 생성 + M2.1 잔여 row-level 검증 동반 수행
+- [x] Railway e2e (커밋 `9636382`) — device_code → /link/approve → device_token → POST execution → GET detail + LIST + status filter, 전부 200/201. 응답의 `created_at='2026-04-23T11:38:02.150258Z'` (TZ-aware, Postgres `timestamptz`) 확인 = **M2.1 0003 row-level 검증 동반 완료**. 생성된 execution_id=`exec_9162adfa11e241e4ae6b8bfda8821faa`.
 
 **M2.2 범위 밖**: WS `execution.start` push (M2.3), 상태 전이 (M2.3), 로그 스트리밍 (M2.4), cancel (M2.5), 스크린샷 업로드 (M2.6).
 
