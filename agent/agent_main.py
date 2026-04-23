@@ -137,11 +137,29 @@ log = _setup_logging()
 # ──────────────────────────────────────────────
 
 class HealthPinger:
-    """서버 /healthz 를 주기적으로 호출하는 백그라운드 워커."""
+    """서버 헬스체크를 주기적으로 호출하는 백그라운드 워커.
 
-    def __init__(self, server_url: str, interval_seconds: int) -> None:
+    M1.4 부터는 ``AuthState`` 의 현재 credentials 를 매 tick 마다 조회해:
+    - 로그인 상태 (+ 발급받은 서버가 현재 ping 대상과 일치) 면
+      ``GET /v0/agents/me`` 를 ``Authorization: Bearer`` 헤더와 함께 호출.
+      401 수신 시 ``on_unauthorized`` 콜백을 1회 호출하고 다음 tick 부터는
+      자동으로 익명 폴백.
+    - 로그인 안 됐거나 서버 mismatch 면 기존 ``GET /healthz`` 호출.
+    """
+
+    def __init__(
+        self,
+        server_url: str,
+        interval_seconds: int,
+        auth_state: AuthState | None = None,
+        on_unauthorized=None,
+    ) -> None:
         self.server_url = server_url.rstrip("/")
         self.interval = max(5, interval_seconds)
+        self.auth_state = auth_state
+        # 401 수신 시 호출되는 side-effect 콜백. icon 이 생성된 뒤 세팅하는 경우가
+        # 있어 생성자 인자 대신 속성으로 나중에 갱신 가능.
+        self.on_unauthorized = on_unauthorized
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -164,27 +182,64 @@ class HealthPinger:
             # 인터럽트 가능한 sleep
             self._stop.wait(self.interval)
 
+    def _pick_route(self):
+        """이번 tick 에 쓸 URL·헤더·타입 라벨을 결정.
+
+        Returns (url, headers, mode) where mode is 'authenticated' | 'anonymous'.
+        """
+        if self.auth_state is not None:
+            creds = self.auth_state.credentials
+            if creds is not None and creds.token_server_url.rstrip("/") == self.server_url:
+                return (
+                    f"{self.server_url}/v0/agents/me",
+                    {"Authorization": f"Bearer {creds.agent_token}"},
+                    "authenticated",
+                )
+        return (f"{self.server_url}/healthz", {}, "anonymous")
+
     def _ping_once(self) -> None:
-        url = f"{self.server_url}/healthz"
+        url, headers, mode = self._pick_route()
         started = time.monotonic()
         try:
             with httpx.Client(timeout=10.0) as client:
-                resp = client.get(url)
+                resp = client.get(url, headers=headers)
             elapsed_ms = int((time.monotonic() - started) * 1000)
 
             if resp.status_code == 200:
                 log.info(
-                    "ping ok: %s status=200 elapsed=%dms body=%s",
-                    url, elapsed_ms, resp.text[:200],
+                    "ping ok (%s): %s status=200 elapsed=%dms body=%s",
+                    mode, url, elapsed_ms, resp.text[:200],
                 )
-            else:
+                return
+
+            if resp.status_code == 401 and mode == "authenticated":
+                # 토큰이 revoke 되었거나 DB 에서 사라짐.
+                err = None
+                try:
+                    err = resp.json().get("detail", {}).get("error")
+                except ValueError:
+                    pass
                 log.warning(
-                    "ping non-200: %s status=%d elapsed=%dms",
-                    url, resp.status_code, elapsed_ms,
+                    "authenticated ping got 401 error=%r — clearing credentials",
+                    err,
                 )
+                if callable(self.on_unauthorized):
+                    try:
+                        self.on_unauthorized()
+                    except Exception as cb_exc:  # pragma: no cover
+                        log.error("on_unauthorized callback raised: %s", cb_exc)
+                return
+
+            log.warning(
+                "ping non-200 (%s): %s status=%d elapsed=%dms",
+                mode, url, resp.status_code, elapsed_ms,
+            )
         except httpx.RequestError as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
-            log.error("ping failed: %s elapsed=%dms error=%s", url, elapsed_ms, exc)
+            log.error(
+                "ping failed (%s): %s elapsed=%dms error=%s",
+                mode, url, elapsed_ms, exc,
+            )
 
 
 # ──────────────────────────────────────────────
@@ -331,6 +386,25 @@ class AuthState:
         _safe_notify(icon, "Signed out", "ohdo agent")
         icon.update_menu()
 
+    def handle_unauthorized(self, icon: Icon) -> None:
+        """Pinger 가 401 을 받았을 때 호출. credentials 만 제거하고 anonymous 폴백.
+
+        Sign Out 과 달리 사용자 액션이 아니라 서버측 revoke 추정이므로 별도 로그
+        키워드와 메시지를 쓴다. 폴링 중이면 중단. 반복 호출되어도 idempotent.
+        """
+        if not self.is_signed_in():
+            return
+        self.cancel_polling()
+        agent_auth.clear_credentials(CONFIG_FILE)
+        self._set_creds(None)
+        log.warning("session expired: credentials cleared due to 401")
+        _safe_notify(
+            icon,
+            "Session expired — please Sign In again",
+            "ohdo agent",
+        )
+        icon.update_menu()
+
     def _run_device_flow(self, icon: Icon, stop: threading.Event) -> None:
         meta = _collect_agent_metadata()
         log.info("device flow: begin against %s", self.server_url)
@@ -441,8 +515,12 @@ def main() -> int:
     else:
         log.warning("no credentials found — Sign In required")
 
-    pinger = HealthPinger(server_url=server_url, interval_seconds=ping_seconds)
-    pinger.start()
+    pinger = HealthPinger(
+        server_url=server_url,
+        interval_seconds=ping_seconds,
+        auth_state=auth,
+    )
+    # on_unauthorized 는 icon 이 필요한데 아직 생성 전이므로 아래에서 세팅.
 
     menu = Menu(
         MenuItem(f"ohdo agent v{__version__}", None, enabled=False),
@@ -471,6 +549,10 @@ def main() -> int:
         title=f"ohdo agent v{__version__}",
         menu=menu,
     )
+
+    # icon 이 생성된 시점에 비로소 401 콜백을 연결하고 pinger 를 띄운다.
+    pinger.on_unauthorized = lambda: auth.handle_unauthorized(icon)
+    pinger.start()
 
     def _on_ready(icon: Icon) -> None:
         icon.visible = True

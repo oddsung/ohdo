@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-04-23 (M1.4 구현·로컬 e2e) — Authenticated Ping (`GET /v0/agents/me`)
+
+**설계**: [architecture/06-m1.4-authenticated-ping.md](architecture/06-m1.4-authenticated-ping.md) — Bearer dependency 설계, 401 taxonomy, 로그인·서버 mismatch 폴백 규칙.
+
+**추가/수정된 코드** (스키마 변경 없음 — `agents.last_seen_at` 은 마이그레이션 0001 에 이미 존재):
+
+- `packages/backend/app/dependencies.py` [신규] — `current_agent` Bearer dependency. `Authorization: Bearer ag_...` 파싱 → `hash_token` 으로 agents 조회 → `revoked_at` 체크. 실패마다 RFC 6750 스타일 401 + `WWW-Authenticate: Bearer error="..."`. 에러 코드 `missing_token` / `malformed_token` / `invalid_token` / `token_revoked`.
+- `packages/backend/app/routers/agents.py` [신규] — `GET /v0/agents/me` (Bearer 전용). `last_seen_at = now()` 업데이트 + agent 기본 정보 반환. prefix `/v0/agents` 공유, 익명 경로는 기존 `device_flow.py` 에 그대로 유지.
+- `packages/backend/app/main.py` [수정] — `agents` 라우터 include.
+- `agent/agent_main.py` [수정] — `HealthPinger` 가 `auth_state` 참조 + `on_unauthorized` 콜백 보유. 매 tick 에 `AuthState.credentials` 확인, 있고 `token_server_url == server_url` 이면 `GET /v0/agents/me` + Bearer 헤더, 아니면 기존 `GET /healthz`. 401 수신 시 `on_unauthorized` 호출 → `AuthState.handle_unauthorized(icon)` → 인증 키 제거 + "Session expired" 풍선 알림 + 이후 tick 은 anonymous 폴백.
+
+**로컬 e2e 검증** (SQLite, uvicorn :8765):
+
+| 시나리오 | 결과 |
+|---|---|
+| `GET /v0/agents/me` 헤더 없음 | 401 `missing_token` |
+| 스킴이 Bearer 가 아님 | 401 `missing_token` |
+| `Bearer` 뒤 값 없음 | 401 `missing_token` |
+| `Bearer NOT_PREFIXED` | 401 `malformed_token` |
+| `Bearer ag_BADBADBAD` | 401 `invalid_token` |
+| 정상 토큰 | 200, `name/hostname/platform/agent_version/last_seen_at` 반환 |
+| 동일 토큰 1.2s 뒤 재호출 | `last_seen_at` 이 증가 (서버 시각) |
+| DB 에서 `revoked_at = now()` 후 재호출 | 401 `token_revoked`, `WWW-Authenticate` 에도 동일 코드 |
+
+**Agent 측 Pinger 통합 테스트**:
+
+- 로그인 상태 + 서버 일치 → `authenticated` 경로 (`GET /v0/agents/me`) 선택, 200 로그.
+- 서버가 토큰 revoke → 401 → `on_unauthorized` 콜백 1회 발화 → config.json 인증 키 5개 제거 → 다음 tick 은 `anonymous` (`/healthz`) 로 폴백, 신호 200.
+- `creds.token_server_url` 이 현재 `server_url` 과 다르면 (예: 로컬 기동이지만 토큰은 Railway 에서 발급) → anonymous 폴백. 토큰이 엉뚱한 서버로 새 나가지 않도록 방어.
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (15:20).
+
+**M1.4 완료 조건 체크**:
+
+- [x] Bearer dependency + 401 에러 taxonomy
+- [x] `GET /v0/agents/me` 200 + `last_seen_at` 업데이트
+- [x] Pinger 인증/익명 분기 + 401 자동 클리어
+- [x] 서버 mismatch 시 anonymous 폴백
+- [x] 로컬 e2e 전 시나리오
+- [x] 코어 회귀 25/25
+- [ ] Railway 재배포 후 실제 Agent 에서 `ping ok (authenticated): .../v0/agents/me status=200` 확인 (다음 단계)
+
+**Railway 배포 후 남은 검증**:
+
+1. Railway 에서 `/v0/agents/me` 엔드포인트가 200 을 주는지 (커밋 푸시 → auto-deploy).
+2. 사용자 기기에서 트레이 Sign In → agent.log 에 `ping ok (authenticated): ...status=200` 이 찍히는지 (M1.3 이후 Sign Out 된 상태이므로 다시 Sign In 필요).
+3. Railway Postgres `agents.last_seen_at` 이 ping 주기마다 갱신되는지 (선택: 사용자가 Railway Data 탭에서 직접 확인).
+
+---
+
 ## 2026-04-23 (M1.3 구현·검증) — Agent 트레이 "Sign In" + Device Flow 클라이언트
 
 **설계**: [architecture/05-m1.3-agent-device-flow-client.md](architecture/05-m1.3-agent-device-flow-client.md) — 클라이언트 흐름, 에러 매핑, `%APPDATA%\ohdo\config.json` 스키마, 완료 조건.
