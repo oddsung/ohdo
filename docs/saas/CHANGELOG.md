@@ -36,7 +36,7 @@
 
 **회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (15:20).
 
-**M1.4 완료 조건 체크**:
+**M1.4 완료 조건 체크** (실기 검증 포함):
 
 - [x] Bearer dependency + 401 에러 taxonomy
 - [x] `GET /v0/agents/me` 200 + `last_seen_at` 업데이트
@@ -44,13 +44,11 @@
 - [x] 서버 mismatch 시 anonymous 폴백
 - [x] 로컬 e2e 전 시나리오
 - [x] 코어 회귀 25/25
-- [ ] Railway 재배포 후 실제 Agent 에서 `ping ok (authenticated): .../v0/agents/me status=200` 확인 (다음 단계)
-
-**Railway 배포 후 남은 검증**:
-
-1. Railway 에서 `/v0/agents/me` 엔드포인트가 200 을 주는지 (커밋 푸시 → auto-deploy).
-2. 사용자 기기에서 트레이 Sign In → agent.log 에 `ping ok (authenticated): ...status=200` 이 찍히는지 (M1.3 이후 Sign Out 된 상태이므로 다시 Sign In 필요).
-3. Railway Postgres `agents.last_seen_at` 이 ping 주기마다 갱신되는지 (선택: 사용자가 Railway Data 탭에서 직접 확인).
+- [x] Railway `/v0/agents/me` 배포 후 자동 e2e (error taxonomy + happy + last_seen_at 증가)
+- [x] **실기 런타임 3 갈래** (HP-Laptop, 15:30-31):
+  - 재기동 시 `credentials loaded` → 1 tick 뒤 `ping ok (authenticated)` 200 (agent_id `89a3b150...`)
+  - Sign Out → 다음 tick `ping ok (anonymous)` 즉시 폴백 (15:30:44)
+  - 새 Sign In → 다음 tick 다시 `ping ok (authenticated)` 200 (새 agent_id `ec2052e2...`)
 
 ---
 
