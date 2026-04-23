@@ -4,6 +4,43 @@
 
 ---
 
+## 2026-04-23 (M2.5 구현·로컬 e2e) — `execution.cancel` + mid-step subprocess 종료
+
+**설계**: [architecture/12-m2.5-execution-cancel.md](architecture/12-m2.5-execution-cancel.md) — REST `POST /v0/executions/{id}/cancel` → WS `execution.cancel` push → agent 가 `engine.stop()` + `sandbox.stop()` 으로 subprocess 즉시 kill → `execution.result(status='cancelled')` 송신으로 확정. 에러 taxonomy (404/409/503/401). 사용자 결정 7항목 반영.
+
+**추가/수정된 코드** (core 수정 0):
+
+- `packages/backend/app/routers/executions.py` [수정] — `POST /{execution_id}/cancel` 엔드포인트 추가. user_id 스코프 조회 → terminal 게이트 (409 `already_terminal`) → `registry.get(agent_id)` 체크 (503 `agent_offline`) → WS 프레임 push → 202. row status 는 여기서 바꾸지 않음 (agent 가 execution.result 로 확정).
+- `agent/runner.py` [수정] — `handle_frame` 이 `execution.cancel` 도 dispatch. `_active_engines: dict[exec_id, WorkflowEngine]` + `_cancelled: set[exec_id]` + `_active_lock` 추가. `_handle_cancel_frame` 이 cancel flag 세팅 + `engine.stop()` + `engine.sandbox.stop()` 호출. `_run_execution_inner` 에서 engine 등록·해제, 실행 종료 후 `_pop_cancelled` 결과에 따라 final_status 를 `cancelled` 로 덮어쓰고 error_summary 는 None 으로 세팅. engine 예외 경로에서도 동일 처리.
+
+**로컬 e2e 검증** (SQLite, uvicorn :8775):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| S1 | 20 tick / 0.5s 스텝 2초 실행 후 cancel | `202 accepted` → **1초 내** `status=cancelled`, `executed_steps=1`, `error_summary=None`, `finished_at` 세팅 |
+| S2 | 이미 cancelled 된 execution 을 다시 cancel | 409 `already_terminal`, `status=cancelled` |
+| S3 | 다른 user 의 execution 을 cancel 시도 | 404 `execution_not_found` (존재 여부 누설 방지) |
+| S4 | 에이전트 오프라인 (ws.stop) 상태에서 cancel | 503 `agent_offline` |
+| S5 | unauth cancel | 401 `missing_token` |
+| S6 | 존재하지 않는 execution_id cancel | 404 `execution_not_found` |
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (21:42).
+
+**M2.5 완료 조건 체크**:
+
+- [x] `POST /v0/executions/{id}/cancel` (Bearer) + taxonomy (404/409/503)
+- [x] WS `execution.cancel` 프레임 push
+- [x] agent 가 `engine.stop()` + `sandbox.stop()` 조합으로 subprocess 즉시 terminate
+- [x] `execution.result(status='cancelled')` 송신 + 서버 반영
+- [x] 코어 회귀 25/25
+- [ ] Railway e2e — push 후 wss 로 동일 플로우 확인
+
+**M2.5 범위 밖**: 타임아웃 기반 강제 cancelled 확정 (agent 응답 없을 시) → M2.6+. 웹 UI 취소 버튼 → Phase 3.
+
+**Core 수정**: 없음. `WorkflowEngine.stop()` + `CodeSandbox.stop()` 모두 기존 public 메서드 사용. **ADR 0001 4조건 미발동**.
+
+---
+
 ## 2026-04-23 (M2.4 구현·로컬 e2e) — `execution.log` 스트리밍 + `execution_logs` 테이블 + 노이즈 필터
 
 **설계**: [architecture/11-m2.4-execution-log.md](architecture/11-m2.4-execution-log.md) — 테이블 스키마 (`execution_logs` = id/execution_id/seq/step_id/stream/line/created_at, FK CASCADE), 프레임 스펙 (`entries[]` 배치), agent 쪽 버퍼링 (`_LogBuffer` + seq monotonic), 3-stream 분류 (`stdout/stderr/engine`), noise filter 정규식, error_summary 재구성 로직. 사용자 결정 8항목 반영.

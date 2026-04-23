@@ -1,14 +1,15 @@
-"""Executions REST 엔드포인트 (M2.2).
+"""Executions REST 엔드포인트.
 
-- ``POST /v0/executions`` — 현재 Bearer 인증된 Agent 가 자기 자신을 위해 실행을
-  큐에 올린다 (A 패턴: agent self-enqueue). 실제 WS 푸시·실행은 M2.3 이후.
-- ``GET /v0/executions/{execution_id}`` — 같은 ``user_id`` 소유 row 만 조회.
-  다른 사용자의 row 는 존재 여부 누설 없이 404 로 응답.
-- ``GET /v0/executions`` — 같은 ``user_id`` 소유 row 리스트 (최신순).
+- ``POST /v0/executions`` (M2.2) — A 패턴 agent self-enqueue, 201.
+- ``GET /v0/executions/{execution_id}`` (M2.2) — user_id 스코프 단건.
+- ``GET /v0/executions`` (M2.2) — user_id 스코프 리스트.
+- ``GET /v0/executions/{execution_id}/logs`` (M2.4) — 로그 조회.
+- ``POST /v0/executions/{execution_id}/cancel`` (M2.5) — 실행 중 취소.
 
-상태는 항상 ``queued`` 로 생성된다. 전이 로직은 M2.3 (WS ``execution.*``) 에서.
-
-상세 설계: docs/saas/architecture/09-m2.2-executions-rest.md
+상세 설계:
+- M2.2: docs/saas/architecture/09-m2.2-executions-rest.md
+- M2.4: docs/saas/architecture/11-m2.4-execution-log.md
+- M2.5: docs/saas/architecture/12-m2.5-execution-cancel.md
 """
 
 from __future__ import annotations
@@ -290,3 +291,84 @@ async def list_execution_logs(
     return ExecutionLogsResponse(
         items=[ExecutionLogEntry.model_validate(r) for r in rows]
     )
+
+
+# ── M2.5: Cancel ────────────────────────────────────────────────────────────
+
+
+_TERMINAL_STATUSES_FOR_CANCEL = {"completed", "failed", "cancelled"}
+
+
+class CancelResponse(BaseModel):
+    execution_id: str
+    accepted: bool
+
+
+def _build_cancel_frame(execution_id: str) -> dict:
+    return {
+        "v": PROTOCOL_VERSION,
+        "type": "execution.cancel",
+        "id": str(uuid.uuid4()),
+        "ts": _now_iso(),
+        "payload": {"execution_id": execution_id},
+    }
+
+
+@router.post(
+    "/{execution_id}/cancel",
+    response_model=CancelResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_execution(
+    execution_id: str,
+    agent: Agent = Depends(current_agent),
+    session: AsyncSession = Depends(get_session),
+) -> CancelResponse:
+    """M2.5: 실행 중인 execution 을 에이전트에게 cancel 요청.
+
+    서버 자체는 row 상태를 바꾸지 않는다. 에이전트가 ``execution.result`` 에
+    ``status='cancelled'`` 로 응답해야 확정. 타임아웃·오프라인 등으로 에이전트가
+    응답하지 않으면 row 는 running 인 채로 남는다 (이건 M2.6+ 에서 보강).
+    """
+    stmt = select(Execution).where(
+        Execution.execution_id == execution_id,
+        Execution.user_id == agent.user_id,
+    )
+    execution = (await session.execute(stmt)).scalar_one_or_none()
+    if execution is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "execution_not_found"},
+        )
+
+    if execution.status in _TERMINAL_STATUSES_FOR_CANCEL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "already_terminal", "status": execution.status},
+        )
+
+    ws = registry.get(execution.agent_id)
+    if ws is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "agent_offline"},
+        )
+
+    frame = _build_cancel_frame(execution_id)
+    try:
+        await ws.send_json(frame)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "execution.cancel push failed: execution_id=%s agent_id=%s err=%s",
+            execution_id, execution.agent_id, exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "agent_offline"},
+        ) from exc
+
+    logger.info(
+        "execution.cancel pushed: execution_id=%s agent_id=%s",
+        execution_id, execution.agent_id,
+    )
+    return CancelResponse(execution_id=execution_id, accepted=True)

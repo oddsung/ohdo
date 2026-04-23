@@ -1,4 +1,4 @@
-"""ohdo Agent — Execution Runner (M2.3 + M2.4).
+"""ohdo Agent — Execution Runner (M2.3 + M2.4 + M2.5).
 
 서버가 WS 로 ``execution.start`` 를 보내면 그에 대응하는 ``WorkflowEngine``
 실행을 워커 스레드에서 돌리고, 진행 상황을 ``execution.accepted`` /
@@ -9,9 +9,15 @@ M2.4 추가:
 - stderr 의 Windows Python 런치 노이즈 필터링.
 - error_summary 는 필터된 stderr 의 첫 실제 라인을 사용.
 
+M2.5 추가:
+- ``execution.cancel`` 프레임 수신 시 현재 실행 중인 engine.stop() +
+  engine.sandbox.stop() 호출 → 서브프로세스 즉시 terminate.
+- cancel 된 execution 은 ``execution.result`` 를 status='cancelled' 로 송신.
+
 설계:
 - docs/saas/architecture/10-m2.3-execution-lifecycle.md
 - docs/saas/architecture/11-m2.4-execution-log.md
+- docs/saas/architecture/12-m2.5-execution-cancel.md
 """
 
 from __future__ import annotations
@@ -145,12 +151,17 @@ class _LogBuffer:
 
 
 class ExecutionRunner:
-    """WS 프레임 핸들러. ``execution.start`` 만 처리한다."""
+    """WS 프레임 핸들러. ``execution.start`` / ``execution.cancel`` 처리."""
 
     def __init__(self) -> None:
         self._sender: Sender | None = None
         self._lock = threading.Lock()
         self._running: set[str] = set()
+        # M2.5: execution_id → 활성 WorkflowEngine 참조 (cancel 시 stop 용).
+        self._active_engines: dict[str, Any] = {}
+        self._active_lock = threading.Lock()
+        # M2.5: cancel 요청 받은 execution_id 들. engine 종료 후 result 분기에 사용.
+        self._cancelled: set[str] = set()
 
     def set_sender(self, sender: Sender) -> None:
         self._sender = sender
@@ -158,8 +169,17 @@ class ExecutionRunner:
     def handle_frame(self, frame: dict) -> None:
         if not isinstance(frame, dict):
             return
-        if frame.get("type") != "execution.start":
-            return
+        ftype = frame.get("type")
+        if ftype == "execution.start":
+            self._handle_start(frame)
+        elif ftype == "execution.cancel":
+            self._handle_cancel_frame(frame)
+        else:
+            logger.debug("runner ignoring frame type=%s", ftype)
+
+    # ── execution.start ────────────────────────────────────────────────────
+
+    def _handle_start(self, frame: dict) -> None:
         payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else None
         if not payload:
             logger.warning("execution.start missing payload")
@@ -184,6 +204,38 @@ class ExecutionRunner:
         )
         t.start()
 
+    # ── execution.cancel ───────────────────────────────────────────────────
+
+    def _handle_cancel_frame(self, frame: dict) -> None:
+        payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else None
+        if not payload:
+            return
+        execution_id = payload.get("execution_id")
+        if not isinstance(execution_id, str) or not execution_id:
+            return
+        logger.info("execution.cancel received: %s", execution_id)
+
+        with self._active_lock:
+            self._cancelled.add(execution_id)
+            engine = self._active_engines.get(execution_id)
+
+        if engine is None:
+            # 이미 끝났거나 시작 전. 서버가 terminal 게이트로 이걸 걸렀어야 하지만
+            # 경쟁 조건에 대비.
+            logger.info("cancel for unknown/finished execution: %s", execution_id)
+            return
+
+        try:
+            engine.stop()
+        except Exception:  # pragma: no cover
+            logger.exception("engine.stop raised")
+        sandbox = getattr(engine, "sandbox", None)
+        if sandbox is not None:
+            try:
+                sandbox.stop()
+            except Exception:  # pragma: no cover
+                logger.exception("sandbox.stop raised")
+
     # ── 내부 ────────────────────────────────────────────────────────────────
 
     def _send(self, ftype: str, payload: dict, in_reply_to: str | None = None) -> bool:
@@ -194,6 +246,17 @@ class ExecutionRunner:
         if not ok:
             logger.warning("failed to send %s", ftype)
         return ok
+
+    def _pop_cancelled(self, execution_id: str) -> bool:
+        """cancel 요청이 있었는지 확인하면서 플래그 제거. thread-safe."""
+        with self._active_lock:
+            was = execution_id in self._cancelled
+            self._cancelled.discard(execution_id)
+            return was
+
+    def _unregister_engine(self, execution_id: str) -> None:
+        with self._active_lock:
+            self._active_engines.pop(execution_id, None)
 
     def _flush_logs(self, execution_id: str, buffer: _LogBuffer) -> None:
         """버퍼를 비우고 1~N 개의 execution.log 프레임으로 전송."""
@@ -214,12 +277,16 @@ class ExecutionRunner:
             self._run_execution_inner(execution_id, payload, in_reply_to)
         except Exception as exc:  # noqa: BLE001
             logger.exception("runner unexpected error: execution_id=%s", execution_id)
+            # 외부에서 cancel 이 들어온 상태였다면 그걸 우선.
+            was_cancelled = self._pop_cancelled(execution_id)
+            self._unregister_engine(execution_id)
             self._send(
                 "execution.result",
                 {
                     "execution_id": execution_id,
-                    "status": "failed",
-                    "error_summary": f"runner exception: {exc.__class__.__name__}: {exc}"[:500],
+                    "status": "cancelled" if was_cancelled else "failed",
+                    "error_summary": None if was_cancelled
+                        else f"runner exception: {exc.__class__.__name__}: {exc}"[:500],
                 },
             )
         finally:
@@ -262,6 +329,9 @@ class ExecutionRunner:
             screenshot_on_error=False,
             visual_feedback_enabled=False,
         )
+        # M2.5: cancel 요청이 이 engine 을 찾을 수 있도록 등록.
+        with self._active_lock:
+            self._active_engines[execution_id] = engine
 
         counters = {"executed": 0, "successful": 0, "failed": 0}
         last_step_error_lines: dict[int, list[str]] = {}
@@ -329,17 +399,21 @@ class ExecutionRunner:
             elapsed_ms = int((time.time() - t_start) * 1000)
             # 종료 전 잔여 로그 flush.
             self._flush_logs(execution_id, log_buf)
+            # cancel 중 예외면 cancelled 로 보고. 아니면 failed.
+            was_cancelled = self._pop_cancelled(execution_id)
+            self._unregister_engine(execution_id)
             self._send(
                 "execution.result",
                 {
                     "execution_id": execution_id,
-                    "status": "failed",
+                    "status": "cancelled" if was_cancelled else "failed",
                     "total_steps": len(steps),
                     "executed_steps": counters["executed"],
                     "successful_steps": counters["successful"],
                     "failed_steps": counters["failed"],
                     "total_time_ms": elapsed_ms,
-                    "error_summary": f"engine exception: {exc.__class__.__name__}: {exc}"[:500],
+                    "error_summary": None if was_cancelled
+                        else f"engine exception: {exc.__class__.__name__}: {exc}"[:500],
                 },
             )
             return
@@ -347,9 +421,13 @@ class ExecutionRunner:
         # 종료 전 잔여 로그 flush (on_step_complete 이후 엔진이 "완료" 메시지 등 송신).
         self._flush_logs(execution_id, log_buf)
 
-        # 3) result — error_summary 는 필터된 stderr 의 첫 의미있는 라인.
+        # M2.5: cancel 요청이 있었으면 최종 상태는 'cancelled'.
+        was_cancelled = self._pop_cancelled(execution_id)
+        self._unregister_engine(execution_id)
+
+        # 3) result — error_summary 는 필터된 stderr 의 첫 의미있는 라인 (cancelled 면 None).
         error_summary: str | None = None
-        if report.failed_steps > 0:
+        if not was_cancelled and report.failed_steps > 0:
             for r in report.step_results:
                 if getattr(r, "success", True):
                     continue
@@ -373,7 +451,10 @@ class ExecutionRunner:
                     error_summary = f"step {step_id_val}: {picked}"[:500]
                 break
 
-        final_status = "completed" if report.failed_steps == 0 else "failed"
+        if was_cancelled:
+            final_status = "cancelled"
+        else:
+            final_status = "completed" if report.failed_steps == 0 else "failed"
 
         self._send(
             "execution.result",
