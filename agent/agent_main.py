@@ -18,9 +18,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 import sys
 import threading
 import time
+import webbrowser
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -28,6 +30,17 @@ from pathlib import Path
 import httpx
 from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
+
+# agent_main.py 는 스크립트로 직접 실행되기도 하고 (``python agent_main.py``)
+# PyInstaller 번들의 엔트리포인트로 실행되기도 한다. 두 경우 모두 `auth.py` 는
+# 같은 폴더의 sibling 으로 존재하므로 sibling import 를 우선 시도하고, 혹시
+# 패키지 컨텍스트 (``python -m agent.agent_main``) 로 실행되면 패키지 경로로도
+# 찾는다. 이 이중 시도는 M0 의 ``from agent import __version__`` 실패 교훈을
+# 반영한 것.
+try:
+    import auth as agent_auth  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover
+    from agent import auth as agent_auth  # type: ignore[no-redef]
 
 # agent/ 폴더 안에서 스크립트로 직접 실행되는 경로와 PyInstaller 번들 모두를
 # 지원하기 위해 버전은 이 파일 안에 둔다. agent/__init__.py 와 동기화 유지.
@@ -211,10 +224,197 @@ def _reload_config(_icon: Icon, _item: MenuItem) -> None:
     log.info("menu: reload config (M0 stub)")
 
 
-def _quit(icon: Icon, _item: MenuItem, pinger: HealthPinger) -> None:
+def _quit(icon: Icon, _item: MenuItem, auth: AuthState, pinger: HealthPinger) -> None:
     log.info("menu: quit requested")
+    auth.cancel_polling()
     pinger.stop()
     icon.stop()
+
+
+# ──────────────────────────────────────────────
+# 인증 상태 + Sign In/Out 핸들러 (M1.3)
+# ──────────────────────────────────────────────
+
+def _collect_agent_metadata() -> dict:
+    """Device Flow 요청에 실어 보낼 부가 정보."""
+    try:
+        hostname = socket.gethostname()
+    except OSError:
+        hostname = "unknown"
+    return {
+        "agent_name": hostname,
+        "hostname": hostname,
+        "platform": sys.platform,  # win32 / darwin / linux
+        "agent_version": __version__,
+    }
+
+
+class AuthState:
+    """트레이에서 공유되는 인증 상태. 로그인/로그아웃/폴링을 관장."""
+
+    def __init__(self, server_url: str) -> None:
+        self._lock = threading.Lock()
+        self.server_url = server_url.rstrip("/")
+        self._creds: agent_auth.Credentials | None = agent_auth.load_credentials(CONFIG_FILE)
+        self._stop_event: threading.Event | None = None
+        self._polling_thread: threading.Thread | None = None
+
+    # ── 읽기 ──
+    @property
+    def credentials(self) -> agent_auth.Credentials | None:
+        with self._lock:
+            return self._creds
+
+    def is_signed_in(self) -> bool:
+        with self._lock:
+            return self._creds is not None
+
+    def is_polling(self) -> bool:
+        with self._lock:
+            return self._polling_thread is not None and self._polling_thread.is_alive()
+
+    def sign_in_label(self) -> str:
+        if self.is_polling():
+            return "Sign In (waiting for browser...)"
+        return "Sign In"
+
+    def sign_out_label(self) -> str:
+        creds = self.credentials
+        if creds is None:
+            return "Sign Out"
+        short_uid = creds.user_id.split("-", 1)[0]
+        return f"Sign Out ({short_uid}...)"
+
+    # ── 쓰기 ──
+    def cancel_polling(self) -> None:
+        with self._lock:
+            if self._stop_event is not None:
+                self._stop_event.set()
+
+    def _set_creds(self, creds: agent_auth.Credentials | None) -> None:
+        with self._lock:
+            self._creds = creds
+
+    def _set_polling(
+        self, thread: threading.Thread | None, stop: threading.Event | None
+    ) -> None:
+        with self._lock:
+            self._polling_thread = thread
+            self._stop_event = stop
+
+    def begin_sign_in(self, icon: Icon) -> None:
+        """Sign In 클릭 핸들러. 별도 스레드에서 Device Flow 실행."""
+        if self.is_signed_in():
+            log.info("sign in requested but already signed in — ignoring")
+            return
+        if self.is_polling():
+            log.info("sign in already in progress — ignoring")
+            return
+
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=self._run_device_flow,
+            args=(icon, stop),
+            name="ohdo-device-flow",
+            daemon=True,
+        )
+        self._set_polling(thread, stop)
+        thread.start()
+        icon.update_menu()
+
+    def sign_out(self, icon: Icon) -> None:
+        """Sign Out — config.json 의 인증 키만 제거."""
+        self.cancel_polling()
+        agent_auth.clear_credentials(CONFIG_FILE)
+        self._set_creds(None)
+        log.info("signed out")
+        _safe_notify(icon, "Signed out", "ohdo agent")
+        icon.update_menu()
+
+    def _run_device_flow(self, icon: Icon, stop: threading.Event) -> None:
+        meta = _collect_agent_metadata()
+        log.info("device flow: begin against %s", self.server_url)
+        try:
+            info = agent_auth.start_device_flow(self.server_url, **meta)
+        except agent_auth.DeviceFlowError as exc:
+            log.error("device flow start failed: %s", exc)
+            _safe_notify(icon, f"Sign In failed: {exc}", "ohdo agent")
+            self._set_polling(None, None)
+            icon.update_menu()
+            return
+
+        _safe_notify(
+            icon,
+            f"Browser opening — enter code {info.user_code} if prompted",
+            "ohdo agent — Sign In",
+        )
+
+        try:
+            webbrowser.open(info.verification_uri_complete, new=2)
+        except Exception as exc:  # pragma: no cover — 플랫폼 의존
+            log.warning("webbrowser.open failed: %s — user must open URL manually", exc)
+
+        try:
+            creds = agent_auth.poll_for_token(
+                self.server_url,
+                info.device_code,
+                interval=info.interval,
+                expires_in=info.expires_in,
+                stop_event=stop,
+            )
+        except agent_auth.DeviceFlowCancelled:
+            log.info("device flow cancelled")
+            self._set_polling(None, None)
+            icon.update_menu()
+            return
+        except agent_auth.DeviceFlowExpired:
+            log.warning("device flow expired")
+            _safe_notify(icon, "Sign In expired — try again", "ohdo agent")
+            self._set_polling(None, None)
+            icon.update_menu()
+            return
+        except agent_auth.DeviceFlowDenied:
+            log.warning("device flow denied")
+            _safe_notify(icon, "Sign In denied", "ohdo agent")
+            self._set_polling(None, None)
+            icon.update_menu()
+            return
+        except agent_auth.DeviceFlowError as exc:
+            log.error("device flow failed: %s", exc)
+            _safe_notify(icon, f"Sign In failed: {exc}", "ohdo agent")
+            self._set_polling(None, None)
+            icon.update_menu()
+            return
+
+        try:
+            agent_auth.save_credentials(CONFIG_FILE, creds)
+        except OSError as exc:
+            log.error("failed to persist credentials: %s", exc)
+            _safe_notify(icon, f"Could not save credentials: {exc}", "ohdo agent")
+            self._set_polling(None, None)
+            icon.update_menu()
+            return
+
+        self._set_creds(creds)
+        self._set_polling(None, None)
+        log.info(
+            "signed in: agent_id=%s user_id=%s server=%s",
+            creds.agent_id, creds.user_id, creds.token_server_url,
+        )
+        _safe_notify(
+            icon,
+            f"Signed in (user {creds.user_id.split('-', 1)[0]}...)",
+            "ohdo agent",
+        )
+        icon.update_menu()
+
+
+def _safe_notify(icon: Icon, message: str, title: str) -> None:
+    """``icon.notify`` 를 안전하게 호출. 백엔드가 지원하지 않으면 로그만."""
+    try:
+        icon.notify(message, title)
+    except Exception as exc:  # pragma: no cover — 플랫폼 의존
+        log.debug("icon.notify unavailable: %s (message=%s)", exc, message)
 
 
 # ──────────────────────────────────────────────
@@ -230,6 +430,17 @@ def main() -> int:
         __version__, server_url, APPDATA_DIR,
     )
 
+    auth = AuthState(server_url=server_url)
+    if auth.is_signed_in():
+        creds = auth.credentials
+        assert creds is not None
+        log.info(
+            "credentials loaded: agent_id=%s user_id=%s signed_in_at=%s",
+            creds.agent_id, creds.user_id, creds.signed_in_at,
+        )
+    else:
+        log.warning("no credentials found — Sign In required")
+
     pinger = HealthPinger(server_url=server_url, interval_seconds=ping_seconds)
     pinger.start()
 
@@ -237,10 +448,21 @@ def main() -> int:
         MenuItem(f"ohdo agent v{__version__}", None, enabled=False),
         MenuItem(f"server: {server_url}", None, enabled=False),
         Menu.SEPARATOR,
+        MenuItem(
+            lambda _: auth.sign_in_label(),
+            lambda icon, _item: auth.begin_sign_in(icon),
+            enabled=lambda _: not auth.is_signed_in() and not auth.is_polling(),
+        ),
+        MenuItem(
+            lambda _: auth.sign_out_label(),
+            lambda icon, _item: auth.sign_out(icon),
+            enabled=lambda _: auth.is_signed_in(),
+        ),
+        Menu.SEPARATOR,
         MenuItem("Open Log Folder", _open_log_folder),
         MenuItem("Reload Config", _reload_config),
         Menu.SEPARATOR,
-        MenuItem("Quit", lambda icon, item: _quit(icon, item, pinger)),
+        MenuItem("Quit", lambda icon, item: _quit(icon, item, auth, pinger)),
     )
 
     icon = Icon(
@@ -250,9 +472,19 @@ def main() -> int:
         menu=menu,
     )
 
+    def _on_ready(icon: Icon) -> None:
+        icon.visible = True
+        if not auth.is_signed_in():
+            _safe_notify(
+                icon,
+                "Right-click the tray icon and choose Sign In",
+                "ohdo agent — Sign In required",
+            )
+
     try:
-        icon.run()
+        icon.run(setup=_on_ready)
     finally:
+        auth.cancel_polling()
         pinger.stop()
         log.info("ohdo agent stopped at %s", datetime.now(timezone.utc).isoformat())
 

@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-04-23 (M1.3 구현·검증) — Agent 트레이 "Sign In" + Device Flow 클라이언트
+
+**설계**: [architecture/05-m1.3-agent-device-flow-client.md](architecture/05-m1.3-agent-device-flow-client.md) — 클라이언트 흐름, 에러 매핑, `%APPDATA%\ohdo\config.json` 스키마, 완료 조건.
+
+**추가/수정된 코드** (기존 core 수정 0):
+
+- `agent/auth.py` [신규] — `DeviceCodeInfo`·`Credentials` 데이터클래스, `DeviceFlow*` 에러 계층, `start_device_flow` / `poll_for_token` / `load_credentials` / `save_credentials` / `clear_credentials`. FastAPI 의 `{"detail": {"error": "..."}}` 래핑·RFC 8628 의 `{"error": "..."}` 양쪽 파싱. `save_credentials` 는 원자적 교체(`.tmp`→replace)로 `server_url` 등 기존 키 보존.
+- `agent/agent_main.py` [수정] — `AuthState` 클래스, `Sign In` / `Sign Out` 메뉴 (callable label + enabled), Device Flow 실행을 전담하는 `ohdo-device-flow` 데몬 스레드, `icon.notify` 래핑(`_safe_notify`), 기동 시 `auth.load_credentials()` → 없으면 WARN + setup 콜백에서 풍선 알림.
+
+**로컬 e2e 검증** (Railway `https://ohdo-production.up.railway.app`, 실제 Postgres):
+
+```
+start_device_flow                        → user_code=45YW-U33W, expires_in=900, interval=5
+direct POST device_token (unapproved)    → 400 {"detail":{"error":"authorization_pending"}}
+poll with dev_NOT_VALID                  → DeviceFlowInvalid raised
+stop_event cancel mid-poll               → DeviceFlowCancelled raised
+happy path (/link/approve 시뮬 3s 후)    → Credentials(agent_token=ag_8JA..., agent_id=a6fdc2e2..., user_id=a075570c...)
+save_credentials merge                    → config.json 에 server_url 보존 + 신규 키 5개 추가
+device_code replay                       → DeviceFlowInvalid (consumed)
+```
+
+**단위 검증**:
+
+- `load_credentials` — 빈/부분 누락/정상 세 케이스 모두 기대대로.
+- `clear_credentials` — 인증 키 5개만 삭제, `server_url`·기타 키 보존.
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (2026-04-23 13:27).
+
+**M1.3 완료 조건 체크** (실기 검증 포함):
+
+- [x] `agent/auth.py` — 함수·데이터클래스·에러 계층 완비
+- [x] 트레이 메뉴에 Sign In / Sign Out + 동적 enable 상태
+- [x] Device Flow 진행 중 WebBrowser 열기 + 5초 간격 폴링
+- [x] Railway 대상 happy path 토큰 수령 + config.json 저장 확인
+- [x] 기존 `server_url` 등 비-인증 키 보존 (save merge)
+- [x] Sign Out 시 인증 키 5개만 제거 (다른 키 보존)
+- [x] 코어 회귀 25/25
+- [x] **실기 Sign In** (user_code `NV24-56QK`, agent_id `ea2be8bf...`, user_id `b245302a...`, 13:35)
+- [x] **실기 재기동 자동 로드** (`credentials loaded` INFO, 13:53)
+- [x] **실기 Sign Out** (config.json `{agent_token, agent_id, user_id, token_server_url, signed_in_at}` → `{}`)
+
+**실기 UX 이슈 (해결)**:
+
+- 시스템 `python` 이 `C:\Program Files (x86)\Python38-32\python.exe` (오래된 3.8 32-bit, agent venv 아님) 를 가리켜 `python .\agent_main.py` 가 조용히 종료됨. → agent venv 의 python 을 **절대경로** 로 호출해야 함: `C:\Users\NeodaVinci\ohdo\agent\.venv\Scripts\python.exe ...agent_main.py`. 콘솔 없이 트레이만 띄우려면 `pythonw.exe` 바로가기.
+- stderr 의 `Could not find platform independent libraries <prefix>` 경고는 venv 생성 경로 관련, 실행엔 무해.
+
+**M1.3 범위 밖 (의도적 deferred)**:
+
+- 이 토큰으로 ping/요청 인증 — M1.4 에서 `Authorization: Bearer`.
+- WebSocket `/v0/agent` + `agent.hello` — M1.5.
+- 인스톨러 재빌드 — M1.5 마무리 후 한꺼번에.
+
+**다음 서브마일스톤**: **M1.4** — 기존 `HealthPinger` 를 인증 헤더 포함하도록 감싸고, 서버에 `/v0/agents/me` 같은 Bearer 전용 엔드포인트 추가해 토큰 유효성 확인.
+
+---
+
 ## 2026-04-23 (M1.2 완료) — Railway 프로덕션에서 Device Flow 전 시나리오 통과
 
 **배포 커밋**: `8fc311e` — `PUBLIC_BASE_URL` 미설정 시 Railway 가 자동 주입하는 `RAILWAY_PUBLIC_DOMAIN` 을 폴백으로 읽도록 수정. 이로써 **Railway Variables 수동 설정 없이** 바로 동작. 해석 우선순위: `PUBLIC_BASE_URL` → `RAILWAY_PUBLIC_DOMAIN` → `request.base_url`.
