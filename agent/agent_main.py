@@ -39,8 +39,10 @@ from pystray import Icon, Menu, MenuItem
 # 반영한 것.
 try:
     import auth as agent_auth  # type: ignore[no-redef]
+    import ws_client as agent_ws  # type: ignore[no-redef]
 except ImportError:  # pragma: no cover
     from agent import auth as agent_auth  # type: ignore[no-redef]
+    from agent import ws_client as agent_ws  # type: ignore[no-redef]
 
 # agent/ 폴더 안에서 스크립트로 직접 실행되는 경로와 PyInstaller 번들 모두를
 # 지원하기 위해 버전은 이 파일 안에 둔다. agent/__init__.py 와 동기화 유지.
@@ -279,9 +281,17 @@ def _reload_config(_icon: Icon, _item: MenuItem) -> None:
     log.info("menu: reload config (M0 stub)")
 
 
-def _quit(icon: Icon, _item: MenuItem, auth: AuthState, pinger: HealthPinger) -> None:
+def _quit(
+    icon: Icon,
+    _item: MenuItem,
+    auth: AuthState,
+    pinger: HealthPinger,
+    ws_client: "agent_ws.WebSocketClient | None" = None,
+) -> None:
     log.info("menu: quit requested")
     auth.cancel_polling()
+    if ws_client is not None:
+        ws_client.stop()
     pinger.stop()
     icon.stop()
 
@@ -522,6 +532,12 @@ def main() -> int:
     )
     # on_unauthorized 는 icon 이 필요한데 아직 생성 전이므로 아래에서 세팅.
 
+    ws_client = agent_ws.WebSocketClient(
+        server_url=server_url,
+        auth_state=auth,
+    )
+    # on_unauthorized 도 icon 필요 → 아래에서 세팅.
+
     menu = Menu(
         MenuItem(f"ohdo agent v{__version__}", None, enabled=False),
         MenuItem(f"server: {server_url}", None, enabled=False),
@@ -540,7 +556,7 @@ def main() -> int:
         MenuItem("Open Log Folder", _open_log_folder),
         MenuItem("Reload Config", _reload_config),
         Menu.SEPARATOR,
-        MenuItem("Quit", lambda icon, item: _quit(icon, item, auth, pinger)),
+        MenuItem("Quit", lambda icon, item: _quit(icon, item, auth, pinger, ws_client)),
     )
 
     icon = Icon(
@@ -550,9 +566,12 @@ def main() -> int:
         menu=menu,
     )
 
-    # icon 이 생성된 시점에 비로소 401 콜백을 연결하고 pinger 를 띄운다.
+    # icon 이 생성된 시점에 비로소 401 콜백을 연결하고 pinger/ws 를 띄운다.
     pinger.on_unauthorized = lambda: auth.handle_unauthorized(icon)
     pinger.start()
+
+    ws_client.on_unauthorized = lambda: auth.handle_unauthorized(icon)
+    ws_client.start()
 
     def _on_ready(icon: Icon) -> None:
         icon.visible = True
@@ -567,6 +586,7 @@ def main() -> int:
         icon.run(setup=_on_ready)
     finally:
         auth.cancel_polling()
+        ws_client.stop()
         pinger.stop()
         log.info("ohdo agent stopped at %s", datetime.now(timezone.utc).isoformat())
 

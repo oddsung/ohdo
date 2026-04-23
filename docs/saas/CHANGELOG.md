@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-04-23 (M1.5 구현·로컬 e2e) — WebSocket `/v0/agent` + `server.hello`/`agent.hello`
+
+**설계**: [architecture/07-m1.5-websocket-hello.md](architecture/07-m1.5-websocket-hello.md) — 인증 방식 (Authorization 헤더), close code 규약 (4400/4401/4403), accept-then-close 이유, 재연결 백오프 정책.
+
+**추가/수정된 코드**:
+
+- `packages/backend/app/routers/ws.py` [신규] — `WS /v0/agent`. Bearer 파싱 → `Agent` 조회 (REST 경로와 동일 로직) → `accept()` 후 실패 시 close code (4401 missing/malformed/invalid, 4403 revoked). 성공 시 `server.hello` (server_version/agent_id/user_id/heartbeat_seconds) 즉시 송신 → 5초 내 `agent.hello` 수신 기대 → `last_seen_at` 갱신 → 이후 M2 까지 유휴.
+- `packages/backend/app/main.py` [수정] — `ws` 라우터 include.
+- `agent/ws_client.py` [신규] — `WebSocketClient` 데몬 스레드. 매 tick `AuthState.credentials` + `token_server_url` 매칭 확인 → `websockets.sync.client.connect` 로 `Authorization` 헤더 포함 연결 → `server.hello` 수신 + `agent.hello` 송신. 연결 유지 루프는 `recv(timeout=60)` 으로 keep-alive (WS protocol-level ping/pong 은 라이브러리가 자동 처리). `ConnectionClosed` 의 `rcvd.code` 가 4401/4403 이면 `on_unauthorized` 호출 + `_auth_blocked=True` 로 재연결 중단. 그 외 종료는 지수 백오프 1→60초로 재시도.
+- `agent/agent_main.py` [수정] — `WebSocketClient` 생성 + `on_unauthorized=lambda: auth.handle_unauthorized(icon)` 연결, pinger 와 동일한 라이프사이클 (start / stop). Quit 핸들러도 ws_client.stop 추가.
+- `agent/requirements.txt` — `websockets>=12.0` 추가 (sync API 용). agent venv 에 `websockets-16.0` 설치.
+
+**로컬 e2e 검증** (SQLite + uvicorn :8765, raw `websockets.sync` 클라이언트):
+
+| 시나리오 | 결과 |
+|---|---|
+| 헤더 없음 | 4401 `missing_token` close |
+| `Bearer NOT_AG_PREFIX` | 4401 `malformed_token` close |
+| `Bearer ag_BADBADBAD` | 4401 `invalid_token` close |
+| 정상 연결 | `server.hello` 수신, `agent.hello` 송신, `last_seen_at` 0.93s 내 증가 확인 |
+| 5초 내 `agent.hello` 미송신 | 4400 `no_agent_hello` close |
+| DB revoke 후 재연결 | 4403 `token_revoked` close |
+
+**WebSocketClient 통합 테스트**:
+
+- 정상 토큰으로 `start()` → 3초 뒤 로그에 `ws connected` + `ws server.hello received` + `ws agent.hello sent` + `last_seen_at` 증가 확인.
+- DB revoke 후 client 재시작 → 즉시 `rcvd_code=4403 reason='token_revoked'` → `on_unauthorized` 1회 호출 → `_auth_blocked=True` → 재연결 루프 진입 전 종료 → `auth_state.is_signed_in()==False`.
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (15:43).
+
+**M1.5 완료 조건 체크**:
+
+- [x] `WS /v0/agent` Bearer 인증 + close code taxonomy (4400/4401/4403)
+- [x] `server.hello` → `agent.hello` 핸드셰이크 + `last_seen_at` 갱신
+- [x] `WebSocketClient` 재연결 백오프 + 4401/4403 시 auth_blocked
+- [x] `AuthState.handle_unauthorized` 재사용 (HTTP pinger 와 동일 콜백)
+- [x] 로컬 e2e 6 시나리오 + WebSocketClient 통합 테스트
+- [x] 코어 회귀 25/25
+- [ ] Railway 재배포 후 `wss://ohdo-production.up.railway.app/v0/agent` 핸드셰이크 확인 (다음 단계)
+- [ ] 사용자 기기 agent 재기동 → `ws server.hello received` + `ws agent.hello sent` 로그 확인 (다음 단계)
+
+**M1.5 범위 밖**: `execution.*` 메시지 — M2. subprotocol 기반 auth (브라우저 WS) — 웹 UI 도입 시. 로컬 큐 + `last_event_id` 재동기화 — M2+.
+
+---
+
 ## 2026-04-23 (M1.4 구현·로컬 e2e) — Authenticated Ping (`GET /v0/agents/me`)
 
 **설계**: [architecture/06-m1.4-authenticated-ping.md](architecture/06-m1.4-authenticated-ping.md) — Bearer dependency 설계, 401 taxonomy, 로그인·서버 mismatch 폴백 규칙.
