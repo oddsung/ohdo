@@ -6,6 +6,10 @@
 #
 # 산출물: dist/ohdo-agent/ohdo-agent.exe (+ 동반 DLL)
 # Inno Setup 이 이 dist 폴더 전체를 설치 파일로 묶는다.
+#
+# M2.7: runner.py 가 `core.workflow_engine` 을 import 하므로 pathex 에 프로젝트
+# 루트를 추가하고 hiddenimports 에 명시. core.visual_overlay 는 런타임에
+# `visual_feedback_enabled=False` 이므로 제외 (용량 절감).
 
 # -*- mode: python ; coding: utf-8 -*-
 
@@ -14,10 +18,11 @@ from pathlib import Path
 block_cipher = None
 
 AGENT_ROOT = Path(".").resolve()
+PROJECT_ROOT = AGENT_ROOT.parent  # ohdo/ — core/ 가 여기 있다
 
 a = Analysis(
     [str(AGENT_ROOT / "agent_main.py")],
-    pathex=[str(AGENT_ROOT)],
+    pathex=[str(AGENT_ROOT), str(PROJECT_ROOT)],
     binaries=[],
     datas=[],
     hiddenimports=[
@@ -25,6 +30,9 @@ a = Analysis(
         "pystray._win32",
         "PIL.Image",
         "PIL.ImageDraw",
+        # M2.7: runner 가 사용하는 core 모듈. static analysis 가 못 잡을 수 있어 명시.
+        "core",
+        "core.workflow_engine",
     ],
     hookspath=[],
     hooksconfig={},
@@ -40,6 +48,22 @@ a = Analysis(
         "pywinauto",
         "uiautomation",
         "pytesseract",
+        # M2.7: 이하 core 모듈은 runner 가 사용하지 않음. 번들에서 제외해
+        # 트랜지티브 의존성 (PyQt6 등) 이 딸려오는 것 방지.
+        "core.adapters",
+        "core.adapters.base_adapter",
+        "core.adapters.gemini_cli_adapter",
+        "core.ai_engine",
+        "core.app_service",
+        "core.environment_scanner",
+        "core.execution_kernel",
+        "core.import_manager",
+        "core.kernel_worker",
+        "core.prompt_builder",
+        "core.session_manager",
+        "core.storage",
+        "core.visual_overlay",
+        "core.win_inspector",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

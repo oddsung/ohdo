@@ -4,6 +4,59 @@
 
 ---
 
+## 2026-04-24 (M2.7 빌드·번들) — Agent PyInstaller 에 `core.workflow_engine` 포함 + Inno Setup 재빌드 (v0.1.0)
+
+**설계**: [architecture/14-m2.7-agent-bundle-core.md](architecture/14-m2.7-agent-bundle-core.md) — `pathex` 에 프로젝트 루트 추가, `core.workflow_engine` 을 hiddenimports 로 명시, runner 가 쓰지 않는 core 모듈 전부 excludes (트랜지티브로 PyQt6 등 딸려오는 것 차단). 설치본 실기 검증 (device_flow → execution lifecycle → capture 전체) 은 **사용자가 별도 시점에 수행**.
+
+**변경된 파일** (core 수정 0):
+
+- `agent/build.spec` [수정] — `PROJECT_ROOT = AGENT_ROOT.parent`, `pathex=[AGENT_ROOT, PROJECT_ROOT]`, hiddenimports 에 `"core"` / `"core.workflow_engine"` 추가, excludes 에 `core.adapters`·`core.ai_engine`·`core.app_service`·`core.environment_scanner`·`core.execution_kernel`·`core.import_manager`·`core.kernel_worker`·`core.prompt_builder`·`core.session_manager`·`core.storage`·`core.visual_overlay`·`core.win_inspector` 명시 제외.
+- `agent/__init__.py` / `agent/agent_main.py` [수정] — `__version__ = "0.1.0"` (M2 전체 묶음 의미).
+- `agent/installer/ohdo-agent.iss` [수정] — `MyAppVersion = "0.1.0"`.
+
+**빌드 검증**:
+
+- `pyinstaller build.spec --clean --noconfirm` 성공. `PYZ-00.toc` 에 `('core.workflow_engine', ...agent/../core/workflow_engine.py, ...)` 확인.
+- `dist/ohdo-agent/` 총 용량 34 MB (변동 없음 — workflow_engine 자체는 28 KB stdlib only).
+- `dist-installer/ohdo-agent-setup-0.1.0.exe` 14.2 MB (이전 0.0.1 = 13.8 MB, +430 KB).
+
+**Smoke test (번들 exe 기동)**: `OHDO_APPDATA=/tmp/...` 로 격리 기동. 로그에 다음 전부 출력 + ImportError 없음:
+
+```
+ohdo agent starting: version=0.1.0 server=https://ohdo-production.up.railway.app
+no credentials found - Sign In required
+pinger started: url=https://... interval=30s
+ws client starting: url=wss://ohdo-production.up.railway.app/v0/agent
+ping ok (anonymous): .../healthz status=200 elapsed=1000ms
+```
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (06:59).
+
+**알려진 제약 (M2.7 에서 문서화만, 수정은 후속)**:
+
+1. `CodeSandbox` 가 `sys.executable` 을 subprocess 로 호출. 번들 실행 시 `sys.executable == ohdo-agent.exe` 가 되어 **Agent 가 재귀 실행** → M2.8+ 에서 embedded python 동반 혹은 시스템 Python 탐지 필요.
+2. `mss` 는 agent/requirements.txt 에 없음 → `screenshot_on_error=True` 지만 실제 스크린샷은 None 반환 + warn (core 로직). 업로드 파이프라인은 monkey-patch 테스트로 이미 검증. 실 캡처 활성화는 후속.
+
+**M2.7 완료 조건 체크**:
+
+- [x] build.spec 에 core.workflow_engine 번들 포함 + 미사용 core 모듈 excludes
+- [x] 버전 0.0.1 → 0.1.0 세 파일 동기화
+- [x] PyInstaller 빌드 성공 + PYZ 에 core.workflow_engine 수록 확인
+- [x] 번들 exe smoke (version=0.1.0 기동, ws client starting, ping ok (anonymous), ImportError 없음)
+- [x] Inno Setup 으로 `ohdo-agent-setup-0.1.0.exe` 재빌드
+- [x] 코어 회귀 25/25
+- [ ] **설치본 실기 e2e** — 사용자가 별도 시점에 수행 예정 (device_flow → Sign In → 간단 실행 · cancel · 캡처 업로드 확인). 위의 "알려진 제약 1" 때문에 실 RPA 코드는 실패 가능하지만 device flow / WS 핸드셰이크 / 로그·캡처 파이프라인 자체 검증까지는 가능.
+
+**Core 수정**: 없음.
+
+## M2 전체 ✅ 완료 (2026-04-24 빌드 측면)
+
+M2.1 executions 스키마 / M2.2 REST / M2.3 WS lifecycle / M2.4 로그 스트리밍 / M2.5 cancel / M2.6 캡처 업로드 / M2.7 번들 확장 — 모두 로컬 + Railway e2e 통과 (M2.7 은 설치본 실기는 사용자 검증 대기). 백엔드 Railway 배포 유지. Agent `v0.1.0` 번들 + 인스톨러 준비.
+
+다음 마일스톤: **M2.8** 또는 **M3 (결제/요금제 or 웹 UI)** — ROADMAP 재점검 필요.
+
+---
+
 ## 2026-04-23 (M2.6 구현·로컬 e2e) — 캡처 업로드 + `execution_captures` + FS 저장
 
 **설계**: [architecture/13-m2.6-captures-upload.md](architecture/13-m2.6-captures-upload.md) — 로컬 파일시스템 기반 (`packages/backend/data/captures/{execution_id}/{capture_id}.{ext}`), multipart REST 업로드 (pre-signed URL 은 S3/R2 전환 시 도입 예정), agent 가 step 실패 시 자동 업로드, WS `execution.capture` 프레임은 범위 밖. 사용자 결정 9항목 반영.
