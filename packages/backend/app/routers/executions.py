@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import registry
 from ..db import get_session
 from ..dependencies import current_agent
-from ..models import Agent, Execution
+from ..models import Agent, Execution, ExecutionLog
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,11 @@ EXECUTION_ID_PREFIX = "exec_"
 LIST_LIMIT_DEFAULT = 50
 LIST_LIMIT_MAX = 200
 PROTOCOL_VERSION = 0
+
+# M2.4
+LOG_LIMIT_DEFAULT = 500
+LOG_LIMIT_MAX = 2000
+_ALLOWED_LOG_STREAMS = {"stdout", "stderr", "engine"}
 
 ALLOWED_STATUSES = {
     "queued",
@@ -110,6 +115,20 @@ class ExecutionRead(BaseModel):
 
 class ExecutionListResponse(BaseModel):
     items: list[ExecutionRead]
+
+
+class ExecutionLogEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    seq: int
+    stream: str
+    step_id: int | None
+    line: str
+    created_at: datetime
+
+
+class ExecutionLogsResponse(BaseModel):
+    items: list[ExecutionLogEntry]
 
 
 # ── Routes ──────────────────────────────────────────────────────────────────
@@ -217,4 +236,57 @@ async def list_executions(
     rows = result.scalars().all()
     return ExecutionListResponse(
         items=[ExecutionRead.model_validate(r) for r in rows]
+    )
+
+
+@router.get(
+    "/{execution_id}/logs",
+    response_model=ExecutionLogsResponse,
+)
+async def list_execution_logs(
+    execution_id: str,
+    agent: Agent = Depends(current_agent),
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=LOG_LIMIT_DEFAULT, ge=1, le=LOG_LIMIT_MAX),
+    offset: int = Query(default=0, ge=0),
+    stream: str | None = Query(default=None),
+    step_id: int | None = Query(default=None, ge=1),
+) -> ExecutionLogsResponse:
+    """M2.4: ``execution_id`` 에 속한 로그를 ``seq ASC`` 순으로 반환.
+
+    ``user_id`` 스코프 — execution 이 다른 user 소유면 404.
+    """
+    if stream is not None and stream not in _ALLOWED_LOG_STREAMS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_stream_filter"},
+        )
+
+    # execution 소유 검증: user_id 스코프 (detail GET 과 동일).
+    owner_stmt = select(Execution).where(
+        Execution.execution_id == execution_id,
+        Execution.user_id == agent.user_id,
+    )
+    owner_result = await session.execute(owner_stmt)
+    if owner_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "execution_not_found"},
+        )
+
+    stmt = select(ExecutionLog).where(ExecutionLog.execution_id == execution_id)
+    if stream is not None:
+        stmt = stmt.where(ExecutionLog.stream == stream)
+    if step_id is not None:
+        stmt = stmt.where(ExecutionLog.step_id == step_id)
+    stmt = (
+        stmt.order_by(ExecutionLog.seq.asc(), ExecutionLog.created_at.asc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await session.execute(stmt)
+    rows = result.scalars().all()
+    return ExecutionLogsResponse(
+        items=[ExecutionLogEntry.model_validate(r) for r in rows]
     )

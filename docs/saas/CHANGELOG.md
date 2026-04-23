@@ -4,6 +4,52 @@
 
 ---
 
+## 2026-04-23 (M2.4 구현·로컬 e2e) — `execution.log` 스트리밍 + `execution_logs` 테이블 + 노이즈 필터
+
+**설계**: [architecture/11-m2.4-execution-log.md](architecture/11-m2.4-execution-log.md) — 테이블 스키마 (`execution_logs` = id/execution_id/seq/step_id/stream/line/created_at, FK CASCADE), 프레임 스펙 (`entries[]` 배치), agent 쪽 버퍼링 (`_LogBuffer` + seq monotonic), 3-stream 분류 (`stdout/stderr/engine`), noise filter 정규식, error_summary 재구성 로직. 사용자 결정 8항목 반영.
+
+**추가/수정된 코드** (core 수정 0):
+
+- `packages/backend/app/models/execution_log.py` [신규] — `ExecutionLog` 모델. `execution_id` Text FK (executions.execution_id unique → ondelete CASCADE). 3 인덱스 (`execution_id` / `(execution_id, seq)` / `stream`).
+- `packages/backend/alembic/versions/20260423_0004_execution_logs.py` [신규] — 테이블 + FK + 3 인덱스. downgrade 대칭.
+- `packages/backend/app/models/__init__.py` [수정] — `ExecutionLog` 등록.
+- `packages/backend/app/routers/ws.py` [수정] — `execution.log` 프레임 핸들러 추가 (`_handle_log`). entries 배열 bulk insert, agent_id 소유 검증, stream 허용 목록 검증, 라인 길이 4000자 서버 clamp. 터미널 상태 이후 수신도 거부 안 함 (지연 flush 수용).
+- `packages/backend/app/routers/executions.py` [수정] — `ExecutionLogEntry` / `ExecutionLogsResponse` 스키마, `GET /v0/executions/{execution_id}/logs` (user_id 스코프, limit 500/max 2000, offset, stream/step_id 필터, `seq ASC + created_at ASC` 정렬, 잘못된 stream 은 400 `invalid_stream_filter`, 다른 user 의 id 는 404 `execution_not_found`).
+- `agent/runner.py` [수정] — `_LogBuffer` (monotonic seq, thread-safe append/drain), stderr 노이즈 정규식 필터 (`Could not find platform independent libraries`, `Consider setting $PYTHONHOME`), 엔진 `on_log` 훅 추가, `on_step_start` 로 현재 step_id 추적, `on_step_complete` 에서 stdout/stderr 분해 후 progress 송신 + 로그 flush, 실행 종료 직전 최종 flush. error_summary 재구성: 실패 step 의 필터된 stderr 중 `^[A-Za-z_]\w*(Error|Exception|Warning): ` 매치되는 라인을 우선 (traceback 마지막 줄), 없으면 첫 라인.
+
+**로컬 e2e 검증** (SQLite, uvicorn :8774, 실제 `ws_client` + `runner`):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| S1 | 1 step multi-line stdout (`print('line1')\nprint('line2')`) | `status=completed`, logs 6 개 (stdout 2 + engine 4). stdout 라인 그대로 보존. |
+| S2 | 2 steps mixed (2번째 `raise RuntimeError('boom-m24')`) | `status=failed`, **`error_summary='step 2: RuntimeError: boom-m24'`** (M2.3 의 Python 런치 노이즈 사라짐). stderr 4 개 = Traceback 전체 필터 통과 라인. |
+| S3 | `GET .../logs?step_id=1` | step_id 1 만 반환 (stdout 'ok-before' 포함). |
+| S4 | `GET .../logs?stream=stdout` | stdout stream 만. |
+| S5 | `GET .../logs?stream=nope` | 400 `invalid_stream_filter`. |
+| S6 | 다른 user 의 agent 로 `GET .../logs` | 404 `execution_not_found`. |
+| S7 | unauth `GET .../logs` | 401 `missing_token`. |
+| 노이즈 필터 | exec2 stderr 로그에 `Could not find platform independent libraries` 라인 0 개 | ✅ 필터 동작. |
+| DB count | exec2 의 logs 18 rows (engine + stderr) | agent 배치 전송 정상. |
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (21:27).
+
+**M2.4 완료 조건 체크**:
+
+- [x] `execution_logs` 테이블 + 마이그레이션 0004 (upgrade/downgrade, 인덱스 3개, FK CASCADE)
+- [x] WS `execution.log` 핸들러 (agent_id 소유 검증 + bulk insert)
+- [x] `GET /v0/executions/{id}/logs` (user_id 스코프 + limit/offset/stream/step_id 필터)
+- [x] agent 로그 버퍼링 + per-step flush + 종료 직전 final flush
+- [x] stderr 노이즈 필터 (Windows Python 런치 잡음 2 패턴)
+- [x] error_summary 재구성 — M2.3 의 "step 2: Could not find..." → "step 2: RuntimeError: boom-m24"
+- [x] 코어 회귀 25/25
+- [ ] Railway e2e — push 후 wss 로 동일 플로우 + Postgres 에 execution_logs row 생성 + `GET /logs` 응답 확인
+
+**M2.4 범위 밖**: `execution.cancel` → `WorkflowEngine.stop()` (M2.5), S3/R2 업로드 (M2.6), 실시간 tail / SSE (웹 UI 단계), 페이지네이션 커서.
+
+**Core 수정**: 없음. `WorkflowEngine.execute_session()` 의 기존 `on_log`/`on_step_start`/`on_step_complete` 콜백만 이용.
+
+---
+
 ## 2026-04-23 (M2.3 구현·로컬 e2e) — WS `execution.start/.accepted/.progress/.result` + 첫 실제 실행
 
 **설계**: [architecture/10-m2.3-execution-lifecycle.md](architecture/10-m2.3-execution-lifecycle.md) — 프레임 스펙, 서버 상태 머신 (`queued → accepted → running → completed|failed`), agent_id 소유 검증, offline 시 queued 유지 정책. 사용자 결정 7항목 반영.

@@ -31,7 +31,7 @@ from starlette.datastructures import Headers
 from .. import __version__, registry
 from ..auth import AGENT_TOKEN_PREFIX, hash_token
 from ..db import get_session
-from ..models import Agent, Execution
+from ..models import Agent, Execution, ExecutionLog
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,11 @@ async def ws_agent(
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 _ALLOWED_RESULT_STATUSES = {"completed", "failed", "cancelled"}
 
+# M2.4: 로그 프레임 관련
+_ALLOWED_LOG_STREAMS = {"stdout", "stderr", "engine"}
+LOG_LINE_MAX_SERVER = 4000  # 두 번째 방어선 (agent 는 2000 clamp)
+LOG_ENTRIES_MAX_PER_FRAME = 500  # 단일 프레임 내 entries 상한
+
 
 async def _route_agent_frame(
     frame: dict[str, Any], *, agent: Agent, session: AsyncSession
@@ -209,6 +214,8 @@ async def _route_agent_frame(
         await _handle_progress(payload, execution_id, agent=agent, session=session)
     elif ftype == "execution.result":
         await _handle_result(payload, execution_id, agent=agent, session=session)
+    elif ftype == "execution.log":
+        await _handle_log(payload, execution_id, agent=agent, session=session)
     else:
         logger.debug("ws unhandled frame type=%s agent_id=%s", ftype, agent.id)
 
@@ -329,3 +336,52 @@ async def _handle_result(
         "execution completed: execution_id=%s status=%s",
         execution_id, final_status,
     )
+
+
+async def _handle_log(
+    payload: dict[str, Any],
+    execution_id: str | None,
+    *,
+    agent: Agent,
+    session: AsyncSession,
+) -> None:
+    """M2.4: `execution.log` 프레임 수신 → execution_logs 에 bulk insert.
+
+    터미널 상태 이후에도 지연 flush 수용 (거부하지 않음).
+    """
+    execution = await _fetch_owned_execution(execution_id, agent=agent, session=session)
+    if execution is None:
+        return
+    entries = payload.get("entries")
+    if not isinstance(entries, list) or not entries:
+        return
+
+    rows: list[ExecutionLog] = []
+    for entry in entries[:LOG_ENTRIES_MAX_PER_FRAME]:
+        if not isinstance(entry, dict):
+            continue
+        stream = entry.get("stream")
+        line = entry.get("line")
+        if stream not in _ALLOWED_LOG_STREAMS:
+            continue
+        if not isinstance(line, str) or not line:
+            continue
+        seq = entry.get("seq")
+        step_id = entry.get("step_id")
+        rows.append(
+            ExecutionLog(
+                execution_id=execution_id,  # type: ignore[arg-type]
+                seq=seq if isinstance(seq, int) else 0,
+                step_id=step_id if isinstance(step_id, int) and step_id >= 1 else None,
+                stream=stream,
+                line=line[:LOG_LINE_MAX_SERVER],
+            )
+        )
+
+    if rows:
+        session.add_all(rows)
+        await session.commit()
+        logger.debug(
+            "execution.log persisted: execution_id=%s rows=%d",
+            execution_id, len(rows),
+        )

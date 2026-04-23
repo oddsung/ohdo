@@ -9,5 +9,14 @@ from .user import User
 from .agent import Agent
 from .device_code import DeviceCode
 from .execution import Execution
+from .execution_log import ExecutionLog
 
-__all__ = ["Base", "TimestampMixin", "User", "Agent", "DeviceCode", "Execution"]
+__all__ = [
+    "Base",
+    "TimestampMixin",
+    "User",
+    "Agent",
+    "DeviceCode",
+    "Execution",
+    "ExecutionLog",
+]
