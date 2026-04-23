@@ -28,15 +28,26 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./dev.db"
 
     # Device Flow 의 verification_uri 에 쓰는 공개 URL (예:
-    # ``https://ohdo-production.up.railway.app``). 설정되지 않으면 요청
-    # ``base_url`` 로부터 유도 — 로컬 개발에서는 자연스럽지만 프록시 뒤에서는
-    # 누락/오표기 위험이 있으므로 Railway Variables 로 명시 권장.
+    # ``https://ohdo-production.up.railway.app``). 세 소스에서 차례로 해석:
+    #   1. ``PUBLIC_BASE_URL`` (명시적 override — 커스텀 도메인 등)
+    #   2. ``RAILWAY_PUBLIC_DOMAIN`` (Railway 가 자동 주입, 스킴 없음 → https 로 고정)
+    #   3. 미설정 → 호출자가 ``request.base_url`` 폴백 (로컬 개발)
     PUBLIC_BASE_URL: str | None = None
+    RAILWAY_PUBLIC_DOMAIN: str | None = None
 
     # Device Flow TTL — 기본 15 분.
     DEVICE_CODE_TTL_SECONDS: int = 900
     # Agent 권장 폴링 간격.
     DEVICE_CODE_INTERVAL_SECONDS: int = 5
+
+    @property
+    def public_base_url(self) -> str | None:
+        """배포 환경에서 외부 공개 URL. 없으면 ``None`` → 호출자가 ``request.base_url`` 폴백."""
+        if self.PUBLIC_BASE_URL:
+            return self.PUBLIC_BASE_URL.rstrip("/")
+        if self.RAILWAY_PUBLIC_DOMAIN:
+            return f"https://{self.RAILWAY_PUBLIC_DOMAIN.rstrip('/')}"
+        return None
 
     @property
     def async_database_url(self) -> str:

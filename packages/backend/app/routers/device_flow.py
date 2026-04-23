@@ -61,11 +61,12 @@ class DeviceTokenResponse(BaseModel):
 def _resolve_public_base_url(request: Request) -> str:
     """verification_uri 의 base 로 쓸 URL.
 
-    우선순위: Settings.PUBLIC_BASE_URL > request.base_url.
-    프록시 뒤 (Railway) 에서는 env 로 명시하는 것이 가장 안전.
+    우선순위: ``settings.public_base_url`` (PUBLIC_BASE_URL 또는
+    RAILWAY_PUBLIC_DOMAIN 기반) → ``request.base_url`` 폴백.
     """
-    if settings.PUBLIC_BASE_URL:
-        return settings.PUBLIC_BASE_URL.rstrip("/")
+    resolved = settings.public_base_url
+    if resolved:
+        return resolved
     return str(request.base_url).rstrip("/")
 
 
