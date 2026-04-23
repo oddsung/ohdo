@@ -33,7 +33,7 @@
 - [x] agent 가 `engine.stop()` + `sandbox.stop()` 조합으로 subprocess 즉시 terminate
 - [x] `execution.result(status='cancelled')` 송신 + 서버 반영
 - [x] 코어 회귀 25/25
-- [ ] Railway e2e — push 후 wss 로 동일 플로우 확인
+- [x] Railway e2e (커밋 `c3314af`) — S1 (`range(30)` 반복 tick 실행 중 cancel → 1초 내 `status=cancelled`, `error_summary=None`) / S2 (이미 terminal → 409 `already_terminal`) / S3 (ws.stop 후 → 503 `agent_offline`) 전부 wss 에서 통과.
 
 **M2.5 범위 밖**: 타임아웃 기반 강제 cancelled 확정 (agent 응답 없을 시) → M2.6+. 웹 UI 취소 버튼 → Phase 3.
 
