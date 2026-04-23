@@ -4,6 +4,59 @@
 
 ---
 
+## 2026-04-23 (M2.2 구현·로컬 e2e) — REST `POST/GET /v0/executions`
+
+**설계**: [architecture/09-m2.2-executions-rest.md](architecture/09-m2.2-executions-rest.md) — A 패턴 (agent self-enqueue, Bearer agent 인증만), `exec_<uuid4.hex>` id 포맷, GET 권한은 `user_id` 스코프 (같은 사용자의 모든 기기 교차 조회 가능, 다른 사용자는 404), M2.2 에서는 status 전이 없음 (모두 `queued` 로 생성).
+
+**추가/수정된 코드**:
+
+- `packages/backend/app/routers/executions.py` [신규]:
+  - `POST /v0/executions` — Bearer 인증, body `{session_snapshot?, from_step?, to_step?}` 수신 → row insert → 201 + `ExecutionRead` (session_snapshot 은 응답에서 제외).
+  - `GET /v0/executions/{execution_id}` — 본인 `user_id` 스코프, 타 사용자는 404 `execution_not_found` (존재 여부 누설 방지).
+  - `GET /v0/executions` — 같은 `user_id` 리스트 (최신순), `limit`(1~200, default 50)·`offset`·`status` 쿼리 지원. 허용 status 외 400 `invalid_status_filter`.
+  - Pydantic: `ExecutionCreate` (`from_step`/`to_step` 은 `ge=1` 검증), `ExecutionRead` (`from_attributes=True` 로 ORM → 스키마 변환), `ExecutionListResponse`.
+- `packages/backend/app/main.py` [수정] — `executions` 라우터 include.
+
+**로컬 e2e 검증** (SQLite, uvicorn :8772, 사용자 A 의 agent A1/A2 + 사용자 B 의 agent B1):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| 1 | unauth `POST /v0/executions` | 401 `missing_token` |
+| 2 | A1 POST `{}` | 201, `exec_f103…e1cc`, `status=queued`, from/to_step=null |
+| 3 | A1 POST with `session_snapshot` + `from_step=2` | 201, from_step 반영 |
+| 4 | A2 POST (동일 user) | 201, agent_id 는 A2 지만 user_id 는 A 와 동일 |
+| 5 | B1 POST | 201, 독립 user_id |
+| 6 | A1 GET 자기 row | 200 |
+| 7 | A2 GET A1 생성 row (same user) | 200 ✅ user 스코프 동작 |
+| 8 | B1 GET A1 생성 row (other user) | 404 `execution_not_found` ✅ 격리 |
+| 9 | A1 GET 존재하지 않는 `exec_` | 404 |
+| 10 | A1 LIST | 200, items=3, ids 포함 |
+| 11 | A1 LIST `limit=1` | 200, items=1 |
+| 12 | A1 LIST `status=queued` | 200, items=3 |
+| 13 | A1 LIST `status=running` | 200, items=0 |
+| 14 | A1 LIST `status=nope` | 400 `invalid_status_filter` |
+| 15 | B1 LIST | 200, items=1 (B1 것만) |
+| 16 | unauth GET detail | 401 |
+| 17 | POST `from_step=0` | 422 (Pydantic `ge=1`) |
+| 18 | POST `from_step=-3` | 422 |
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (20:34).
+
+**M2.2 완료 조건 체크**:
+
+- [x] `POST /v0/executions` (Bearer) + body 검증 + 201 응답
+- [x] `GET /v0/executions/{id}` + user_id 스코프 404 격리
+- [x] `GET /v0/executions` + limit/offset/status 필터
+- [x] 로컬 SQLite 18 시나리오 통과
+- [x] 코어 회귀 25/25
+- [ ] Railway Postgres e2e — push 후 외부에서 POST/GET 으로 실제 row 생성 + M2.1 잔여 row-level 검증 동반 수행
+
+**M2.2 범위 밖**: WS `execution.start` push (M2.3), 상태 전이 (M2.3), 로그 스트리밍 (M2.4), cancel (M2.5), 스크린샷 업로드 (M2.6).
+
+**Core 수정**: 없음.
+
+---
+
 ## 2026-04-23 (M2.1 구현·로컬 e2e) — `executions` 테이블 + 마이그레이션 `0003`
 
 **설계**: [architecture/08-m2.1-executions-schema.md](architecture/08-m2.1-executions-schema.md) — 테이블 컬럼·인덱스·상태 머신, JSON 타입 선택 (SQLite/Postgres 양쪽 호환), M2 전체 단계별 범위 분할.
