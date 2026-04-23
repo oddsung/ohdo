@@ -44,7 +44,7 @@ M2.1 은 컬럼만 허용. 전이 강제 로직은 M2.3 (WS `execution.*` 처리
 - [x] 마이그레이션 `0003` upgrade/downgrade 쌍
 - [x] 로컬 SQLite 테이블 생성 + ORM 라운드트립 + unique 제약 동작
 - [x] 코어 회귀 25/25
-- [ ] Railway Postgres 0003 자동 적용 확인 — push 후 검증
+- [x] Railway Postgres 0003 자동 적용 — 커밋 `78a747f` 푸시 후 `/healthz` 200 지속 + `POST /v0/agents/device_code` 정상 (server 가 재기동 완료 → startCommand `alembic upgrade head && uvicorn` 이 실패 없이 통과 = 0003 적용). 개별 row-level 확인은 M2.2 의 `POST /v0/executions` 에서 직접 검증.
 
 **M2.1 범위 밖**: REST `POST /v0/executions` (M2.2), WS `execution.*` (M2.3), 로그 스트림 (M2.4), 스크린샷 업로드 (M2.6).
 
