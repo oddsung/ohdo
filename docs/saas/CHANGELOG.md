@@ -49,7 +49,7 @@
 - [x] agent 자동 업로드 (on step failure, screenshot_on_error=True 복귀)
 - [x] user 스코프 격리 + taxonomy (401/404/413/415)
 - [x] 코어 회귀 25/25
-- [ ] Railway e2e — push 후 wss 플로우 + 실제 파일시스템 업로드·다운로드 확인
+- [x] Railway e2e (커밋 `940ce54`) — wss + REST 파이프라인 통과. `RuntimeError('rail-boom')` 실패 스텝에서 monkey-patched PNG (101 bytes) 업로드 → `GET /captures/{id}` 로 다운로드 바이트 일치 확인. 415/401 taxonomy 동일 동작. 예: `capture_id=6ecc59e2-2223-4683-a39d-f0fbadb336c4`, execution=`exec_5aec92b1...`.
 
 **M2.6 범위 밖**: 실제 S3/R2 전환, `execution.capture` WS 프레임, 사용자 수동 캡처, 썸네일.
 
