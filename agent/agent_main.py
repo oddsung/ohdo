@@ -543,6 +543,8 @@ def main() -> int:
         frame_handler=runner.handle_frame,
     )
     runner.set_sender(ws_client.send_frame)
+    # M2.6: capture 업로드를 위한 HTTP 컨텍스트 (server URL + 토큰 공급자).
+    runner.set_http_context(server_url=server_url, auth_state=auth)
     # on_unauthorized 도 icon 필요 → 아래에서 세팅.
 
     menu = Menu(

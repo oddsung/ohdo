@@ -10,6 +10,7 @@ from .agent import Agent
 from .device_code import DeviceCode
 from .execution import Execution
 from .execution_log import ExecutionLog
+from .execution_capture import ExecutionCapture
 
 __all__ = [
     "Base",
@@ -19,4 +20,5 @@ __all__ = [
     "DeviceCode",
     "Execution",
     "ExecutionLog",
+    "ExecutionCapture",
 ]

@@ -1,4 +1,4 @@
-"""ohdo Agent — Execution Runner (M2.3 + M2.4 + M2.5).
+"""ohdo Agent — Execution Runner (M2.3 ~ M2.6).
 
 서버가 WS 로 ``execution.start`` 를 보내면 그에 대응하는 ``WorkflowEngine``
 실행을 워커 스레드에서 돌리고, 진행 상황을 ``execution.accepted`` /
@@ -14,16 +14,22 @@ M2.5 추가:
   engine.sandbox.stop() 호출 → 서브프로세스 즉시 terminate.
 - cancel 된 execution 은 ``execution.result`` 를 status='cancelled' 로 송신.
 
+M2.6 추가:
+- ``screenshot_on_error=True`` 로 복귀. 스텝 실패 시 ``result.error_screenshot``
+  경로를 읽어 ``POST /v0/executions/{id}/captures`` 로 multipart 업로드.
+
 설계:
 - docs/saas/architecture/10-m2.3-execution-lifecycle.md
 - docs/saas/architecture/11-m2.4-execution-log.md
 - docs/saas/architecture/12-m2.5-execution-cancel.md
+- docs/saas/architecture/13-m2.6-captures-upload.md
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import sys
 import threading
@@ -33,6 +39,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
+
+try:
+    import httpx  # used for multipart capture upload (M2.6)
+except ImportError:  # pragma: no cover
+    httpx = None  # type: ignore[assignment]
 
 # core/workflow_engine.py 를 에이전트에서 import — sys.path 에 프로젝트 루트가
 # 없으면 추가. PyInstaller 번들 시엔 이 경로가 번들 내부에 맞춰질 것 (M2.7).
@@ -162,9 +173,17 @@ class ExecutionRunner:
         self._active_lock = threading.Lock()
         # M2.5: cancel 요청 받은 execution_id 들. engine 종료 후 result 분기에 사용.
         self._cancelled: set[str] = set()
+        # M2.6: capture 업로드에 쓰는 서버 URL + auth_state.
+        self._server_url: str | None = None
+        self._auth_state: Any = None
 
     def set_sender(self, sender: Sender) -> None:
         self._sender = sender
+
+    def set_http_context(self, server_url: str, auth_state: Any) -> None:
+        """M2.6: capture upload 등 HTTP 호출을 위한 서버 URL + 토큰 공급자 등록."""
+        self._server_url = server_url.rstrip("/")
+        self._auth_state = auth_state
 
     def handle_frame(self, frame: dict) -> None:
         if not isinstance(frame, dict):
@@ -258,6 +277,62 @@ class ExecutionRunner:
         with self._active_lock:
             self._active_engines.pop(execution_id, None)
 
+    def _upload_capture(
+        self, execution_id: str, step_id: int, path: str
+    ) -> None:
+        """M2.6: 스크린샷 파일을 `POST /v0/executions/{id}/captures` 로 업로드.
+
+        실패는 조용히 swallow — 실행 결과 자체에는 영향 없음.
+        """
+        if httpx is None:
+            logger.debug("capture upload skipped: httpx not available")
+            return
+        if not self._server_url or self._auth_state is None:
+            logger.debug("capture upload skipped: http context not set")
+            return
+        creds = getattr(self._auth_state, "credentials", None)
+        token = getattr(creds, "agent_token", None) if creds else None
+        if not token:
+            logger.debug("capture upload skipped: no agent_token")
+            return
+
+        filename = os.path.basename(path) or "capture.png"
+        content_type = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
+        try:
+            with open(path, "rb") as f:
+                blob = f.read()
+        except OSError as exc:
+            logger.warning("capture file read failed: %s (%s)", path, exc)
+            return
+
+        url = f"{self._server_url}/v0/executions/{execution_id}/captures"
+        try:
+            resp = httpx.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                files={"file": (filename, blob, content_type)},
+                data={"step_id": str(step_id), "kind": "error_screenshot"},
+                timeout=20.0,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("capture upload http error: %s", exc)
+            return
+
+        if resp.status_code == 201:
+            try:
+                cid = resp.json().get("capture_id")
+            except Exception:
+                cid = "<unparsed>"
+            logger.info(
+                "capture uploaded: execution_id=%s step_id=%s capture_id=%s size=%dB",
+                execution_id, step_id, cid, len(blob),
+            )
+        else:
+            logger.warning(
+                "capture upload non-201: status=%s body=%r",
+                resp.status_code, resp.text[:200],
+            )
+
     def _flush_logs(self, execution_id: str, buffer: _LogBuffer) -> None:
         """버퍼를 비우고 1~N 개의 execution.log 프레임으로 전송."""
         entries = buffer.drain()
@@ -324,9 +399,11 @@ class ExecutionRunner:
         current_step_id_ref: dict[str, int | None] = {"sid": None}
 
         # 2) 엔진 실행
+        # M2.6: screenshot_on_error=True 로 복귀. mss 미설치·headless 환경에서는
+        # 기존 core 로직이 None 반환 + warn 로 graceful 처리.
         engine = WorkflowEngine(
             step_delay_ms=0,
-            screenshot_on_error=False,
+            screenshot_on_error=True,
             visual_feedback_enabled=False,
         )
         # M2.5: cancel 요청이 이 engine 을 찾을 수 있도록 등록.
@@ -383,6 +460,12 @@ class ExecutionRunner:
 
             # M2.4: step 완료마다 로그 flush.
             self._flush_logs(execution_id, log_buf)
+
+            # M2.6: 스텝 실패 + 에러 스크린샷 존재 시 업로드.
+            if not success:
+                shot_path = getattr(result, "error_screenshot", None)
+                if isinstance(shot_path, str) and shot_path and os.path.isfile(shot_path):
+                    self._upload_capture(execution_id, step_id, shot_path)
 
         try:
             report = asyncio.run(

@@ -6,6 +6,7 @@
 - M1.4: `/v0/agents/me` (Bearer 인증)
 - M1.5: `WS /v0/agent` (Bearer 인증, server.hello/agent.hello 핸드셰이크)
 - M2.2: `POST/GET /v0/executions` (Bearer 인증)
+- M2.6: `POST/GET /v0/executions/{id}/captures`, `GET /v0/captures/{id}` (Bearer 인증)
 
 로컬 실행:
     uvicorn app.main:app --reload --port 8000
@@ -21,7 +22,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 
 from . import __version__
-from .routers import agents, device_flow, executions, link, ws
+from .routers import agents, captures, device_flow, executions, link, ws
 
 app = FastAPI(
     title="ohdo Control Plane",
@@ -33,6 +34,8 @@ app.include_router(device_flow.router)
 app.include_router(link.router)
 app.include_router(agents.router)
 app.include_router(executions.router)
+app.include_router(captures.exec_captures)
+app.include_router(captures.cap_router)
 app.include_router(ws.router)
 
 

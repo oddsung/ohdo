@@ -4,6 +4,61 @@
 
 ---
 
+## 2026-04-23 (M2.6 구현·로컬 e2e) — 캡처 업로드 + `execution_captures` + FS 저장
+
+**설계**: [architecture/13-m2.6-captures-upload.md](architecture/13-m2.6-captures-upload.md) — 로컬 파일시스템 기반 (`packages/backend/data/captures/{execution_id}/{capture_id}.{ext}`), multipart REST 업로드 (pre-signed URL 은 S3/R2 전환 시 도입 예정), agent 가 step 실패 시 자동 업로드, WS `execution.capture` 프레임은 범위 밖. 사용자 결정 9항목 반영.
+
+**추가/수정된 코드** (core 수정 0):
+
+- `packages/backend/app/models/execution_capture.py` [신규] — `ExecutionCapture` 모델. `id` (capture_id), `execution_id` FK CASCADE, `step_id`, `kind` (`error_screenshot` default), `storage_key`, `content_type`, `size_bytes`, `created_at`.
+- `packages/backend/alembic/versions/20260423_0005_execution_captures.py` [신규] — 테이블 + FK + 인덱스. upgrade/downgrade.
+- `packages/backend/app/models/__init__.py` [수정] — `ExecutionCapture` 등록.
+- `packages/backend/app/routers/captures.py` [신규] — 두 라우터:
+  - `exec_captures` (prefix `/v0/executions`): `POST /{execution_id}/captures` (multipart, 201, 415/413/400/404 taxonomy) + `GET /{execution_id}/captures` (list).
+  - `cap_router` (prefix `/v0/captures`): `GET /{capture_id}` (바이너리 다운로드, user_id 스코프 join, 410 Gone if FS miss).
+  - 상수: `CAPTURE_ROOT = packages/backend/data/captures`, `MAX_CAPTURE_BYTES=10MB`, allowed content_types = `image/png|jpeg`, `_EXECUTION_ID_RE = ^exec_[a-f0-9]{32}$` path traversal 방어.
+- `packages/backend/app/main.py` [수정] — captures 라우터 2개 include.
+- `agent/runner.py` [수정]:
+  - `WorkflowEngine(screenshot_on_error=True)` 로 복귀 (M2.3 에서 False 였음).
+  - `set_http_context(server_url, auth_state)` 메서드 추가.
+  - `on_step_complete` 내에서 `result.error_screenshot` 이 존재하면 `_upload_capture` 호출.
+  - `_upload_capture`: httpx.post multipart → 201 로그, 실패 조용히 swallow.
+- `agent/agent_main.py` [수정] — runner 생성 뒤 `runner.set_http_context(server_url, auth)` 추가.
+
+**로컬 e2e 검증** (SQLite, uvicorn :8776, `WorkflowEngine._capture_error_screen` 을 monkey-patch stub 으로 대체):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| S1 | 실패 스텝 1개 → 자동 업로드 | 1 capture, step_id=1, image/png, **size_bytes=105 정확히 매치** |
+| S2 | `GET /v0/captures/{id}` 다운로드 | 200, bytes 동일, `content-type: image/png` |
+| S3 | 다른 user 가 download/list 시도 | 404 `capture_not_found` / `execution_not_found` |
+| S4 | unauth download | 401 `missing_token` |
+| S5 | 성공 스텝만 | 캡처 0 row |
+| S6 | `text/plain` 업로드 시도 | 415 `unsupported_content_type` |
+| S7 | 10MB 초과 PNG 업로드 | 413 `file_too_large` |
+| S8 | `execution_id=not_an_exec_id` | 404 (regex validation) |
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (22:11).
+
+**M2.6 완료 조건 체크**:
+
+- [x] `execution_captures` 테이블 + 마이그 0005 (FK CASCADE + index)
+- [x] `POST /v0/executions/{id}/captures` multipart + 타입/크기 검증
+- [x] `GET /v0/executions/{id}/captures` list (limit/offset/step_id 필터)
+- [x] `GET /v0/captures/{id}` 바이너리 다운로드 (user_id join 권한 + 410 Gone fallback)
+- [x] agent 자동 업로드 (on step failure, screenshot_on_error=True 복귀)
+- [x] user 스코프 격리 + taxonomy (401/404/413/415)
+- [x] 코어 회귀 25/25
+- [ ] Railway e2e — push 후 wss 플로우 + 실제 파일시스템 업로드·다운로드 확인
+
+**M2.6 범위 밖**: 실제 S3/R2 전환, `execution.capture` WS 프레임, 사용자 수동 캡처, 썸네일.
+
+**Railway 제약 (명시)**: 컨테이너 파일시스템 ephemeral — 재배포 시 캡처 바이너리 소실 (메타 row 는 남지만 `GET /v0/captures/{id}` 는 410 `capture_bytes_missing`). **운영 전 S3/R2 교체 필수**.
+
+**Core 수정**: 없음. `screenshot_on_error` + `StepResult.error_screenshot` 은 이미 public 인터페이스.
+
+---
+
 ## 2026-04-23 (M2.5 구현·로컬 e2e) — `execution.cancel` + mid-step subprocess 종료
 
 **설계**: [architecture/12-m2.5-execution-cancel.md](architecture/12-m2.5-execution-cancel.md) — REST `POST /v0/executions/{id}/cancel` → WS `execution.cancel` push → agent 가 `engine.stop()` + `sandbox.stop()` 으로 subprocess 즉시 kill → `execution.result(status='cancelled')` 송신으로 확정. 에러 taxonomy (404/409/503/401). 사용자 결정 7항목 반영.
