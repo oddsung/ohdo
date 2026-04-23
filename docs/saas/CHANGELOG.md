@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-04-23 (M1.2 완료) — Railway 프로덕션에서 Device Flow 전 시나리오 통과
+
+**배포 커밋**: `8fc311e` — `PUBLIC_BASE_URL` 미설정 시 Railway 가 자동 주입하는 `RAILWAY_PUBLIC_DOMAIN` 을 폴백으로 읽도록 수정. 이로써 **Railway Variables 수동 설정 없이** 바로 동작. 해석 우선순위: `PUBLIC_BASE_URL` → `RAILWAY_PUBLIC_DOMAIN` → `request.base_url`.
+
+**Railway e2e 결과** (`https://ohdo-production.up.railway.app` 대상, 실제 Postgres):
+
+| 단계 | 결과 |
+|---|---|
+| `POST /v0/agents/device_code` | 200, `verification_uri=https://ohdo-production.up.railway.app/link` |
+| `POST /v0/agents/device_token` (승인 전) | 400 `authorization_pending` |
+| `GET /link?code=...` | 폼 렌더 OK |
+| `POST /link/approve` (stub email) | "기기가 연결되었습니다" 성공 페이지 |
+| `POST /v0/agents/device_token` (승인 후) | 200, `agent_token` + `agent_id` + `user_id` 반환 |
+| `POST /v0/agents/device_token` (재시도) | 400 `invalid_grant` (consumed) |
+| 가짜 device_code | 400 `invalid_grant` |
+
+Railway Postgres 에 실제 `users` 1개, `agents` 1개, `device_codes` 1건 생성 확인. 마이그레이션 0002 가 기동 시 자동 적용되는 것도 함께 검증됨.
+
+**M1.2 완료 조건 최종**:
+- [x] 마이그레이션 0002 — 로컬 SQLite + Railway Postgres 양쪽 적용
+- [x] `POST /v0/agents/device_code` 200 + https 스킴
+- [x] `GET /link?code=...` 렌더
+- [x] `POST /link/approve` 성공 + DB 상태 변경
+- [x] 승인 후 `device_token` 교환 → agent_token 발급
+- [x] 재호출 `invalid_grant` (consumed)
+- [x] 승인 전 폴링 `authorization_pending`
+
+다음 서브마일스톤 **M1.3 (Agent 트레이 "Sign In" + Device Flow 클라이언트 + `config.json` 에 agent_token 저장)** 착수 가능.
+
+---
+
 ## 2026-04-23 (M1.2 구현) — Device Flow 엔드포인트 + /link 브라우저 승인 페이지
 
 **설계**: [architecture/04-m1.2-device-flow.md](architecture/04-m1.2-device-flow.md) — 3 엔드포인트 + device_codes 스키마 + "이메일 stub" 승인 흐름 결정 근거 (M1 범위 최소화, 이메일 소유 증명은 M2+ 매직링크로 이관).
