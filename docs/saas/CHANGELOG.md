@@ -42,7 +42,7 @@
 - [x] `sys.path.insert` 주입으로 user code 가 설치 패키지 import 가능
 - [x] requirements 없으면 기존 동작 (회귀 0)
 - [x] 코어 회귀 25/25
-- [ ] **설치본 실기 e2e** — 사용자가 0.4.0 설치 후 `{"requirements":["requests"],"steps":...}` POST → stdout 에 requests 버전 확인 필요
+- [x] **설치본 실기 e2e 완료 (2026-04-24 16:14~)** — HP-Laptop 에 0.4.0 설치 후 `{"requirements":["requests"]}` POST → 25초 내 `status=completed`, `total_time_ms=940`, engine 로그에 pip 설치 5 패키지 (urllib3/idna/certifi/charset_normalizer/requests) + `requirements installed: ...\packages\ec72420df5dfbdce`, stdout `requests 2.33.1`. 예: `exec_db547c8178b94cdf81b7ac6e33f88820`.
 
 **Core 수정**: 없음.
 
