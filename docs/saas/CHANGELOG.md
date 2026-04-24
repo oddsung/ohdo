@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-04-24 (M2.10 구현·로컬 e2e) — per-session `requirements` 자동설치 (v0.4.0)
+
+**설계**: [architecture/17-m2.10-requirements.md](architecture/17-m2.10-requirements.md) — session_snapshot 의 `requirements: list[str]` 해석 → `%APPDATA%/ohdo/packages/<sha256>/` 에 `pip install --target` → `sys.path.insert` 코드 주입으로 격리 실행.
+
+**변경된 파일** (core 수정 0):
+
+- `agent/runner.py` [수정]:
+  - `_BundleCodeSandbox.__init__` 에 `extra_syspath: list[str]` 추가. `execute()` override 로 user code 앞에 `import sys; sys.path.insert(0, <cache_dir>)` 자동 prepend. **PYTHONPATH env 를 쓰지 않아** 멀티 실행 race-free.
+  - `_resolve_agent_appdata()` 신규 — agent_main 의 APPDATA 해석 동일 정책 (OHDO_APPDATA → APPDATA → ~/.ohdo).
+  - `ExecutionRunner._ensure_requirements_installed()` 신규 — sha256 hash 로 디렉터리 이름 결정, `.ok` 마커로 캐시 히트 확인, pip stdout 을 execution.log stream=engine 으로 라인단위 스트리밍, 실패 시 RuntimeError.
+  - `_run_execution_inner` 에 requirements 단계 삽입 (execution.accepted 직후). 설치 실패 시 engine 안 만들고 즉시 `execution.result(failed, error_summary="requirements install failed: ...")`.
+- 버전 `0.3.1 → 0.4.0` (minor bump — 신규 기능).
+
+**로컬 e2e 검증** (SQLite, uvicorn :8777, OHDO_APPDATA 를 `%TEMP%/ohdo_m210_<pid>` 로 격리):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| S1 | `requirements=["six"]` 첫 실행 | **4초** settled, status=completed, engine log 에 `installing...`/`pip:...`/`installed` 3 계열 전부, stdout `six.version= 1.17.0` |
+| S2 | 같은 `["six"]` 로 2번째 실행 | **1초** settled, `cache hit: <digest>` 라인 + 설치 로그 없음 → 캐시 정상 |
+| S3 | `requirements=["nonexistent-xyz-qqqq-pkg"]` | **3초** 만에 status=failed, `error_summary="requirements install failed: RuntimeError: pip install rc=1"`, stdout 비어있음 (step 미실행) |
+| S4 | requirements 없음 | M2.9 회귀 0, install 로그 없음 |
+
+**빌드** (v0.4.0):
+- bundle `dist/ohdo-agent/` 150 MB (변동 없음 — 코드만 추가)
+- `ohdo-agent-setup-0.4.0.exe` **45 MB**
+- smoke: `version=0.4.0` 기동, ImportError 없음
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (16:00).
+
+**M2.10 완료 조건 체크**:
+
+- [x] session_snapshot `requirements` 필드 해석
+- [x] sha256 content-addressed 캐시 + `.ok` 마커
+- [x] pip stdout 을 execution.log stream=engine 으로 스트리밍
+- [x] 설치 실패 시 status=failed + error_summary
+- [x] `sys.path.insert` 주입으로 user code 가 설치 패키지 import 가능
+- [x] requirements 없으면 기존 동작 (회귀 0)
+- [x] 코어 회귀 25/25
+- [ ] **설치본 실기 e2e** — 사용자가 0.4.0 설치 후 `{"requirements":["requests"],"steps":...}` POST → stdout 에 requests 버전 확인 필요
+
+**Core 수정**: 없음.
+
+**알려진 제약 (M3+ 이관)**:
+
+1. 설치 중 cancel 지원 안 함. 설치 타임아웃 120초로 클램프.
+2. 캐시 GC 없음 — 수동 정리 (`%APPDATA%\ohdo\packages\` 폴더 삭제).
+3. requirements 에 로컬 경로·git URL 허용 여부는 보안 검토 후 결정.
+
+---
+
 ## 2026-04-24 (M2.9.1 patch) — capture 업로드 복구 (v0.3.1)
 
 **트리거**: 사용자 실기에서 0.3.0 설치본으로 `raise RuntimeError(...)` 스텝 실행 시 `/captures` 목록이 비어있음 확인. `pyautogui.size()` 등 user code 실행은 정상 (`real screen 1920x1080`) — M2.9 메인 기능은 작동. 캡처 파이프라인만 실패.

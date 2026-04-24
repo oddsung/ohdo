@@ -35,6 +35,15 @@ M2.9.1 수정 (캡처 업로드 복구):
   runner 가 자체적으로 `_capture_desktop_png` 로 screenshot 을 temp 파일에 저장해
   업로드 후 정리. `WorkflowEngine(screenshot_on_error=False)` 로 core 경로는 비활성.
 
+M2.10 추가:
+- session_snapshot 의 `requirements: list[str]` 를 해석해
+  `%APPDATA%/ohdo/packages/<sha256>` 에 `pip install --target` 으로 설치.
+  sha256 기반 content-addressed 캐시로 재실행 시 skip.
+- `_BundleCodeSandbox.execute` 가 user code 앞에 `sys.path.insert(0, cache_dir)` 를
+  prepend 해 설치된 패키지 import 가능.
+- 설치 로그는 `execution.log(stream="engine")` 로 스트리밍.
+- 설치 실패 시 engine 실행 전에 execution.result(failed) 로 즉시 종료.
+
 설계:
 - docs/saas/architecture/10-m2.3-execution-lifecycle.md
 - docs/saas/architecture/11-m2.4-execution-log.md
@@ -42,14 +51,17 @@ M2.9.1 수정 (캡처 업로드 복구):
 - docs/saas/architecture/13-m2.6-captures-upload.md
 - docs/saas/architecture/15-m2.8-embedded-python.md
 - docs/saas/architecture/16-m2.9-python-packages.md
+- docs/saas/architecture/17-m2.10-requirements.md
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -104,11 +116,53 @@ class _BundleCodeSandbox(CodeSandbox):
     달라 이미 설치된 pywinauto/pyautogui/selenium/mss 도 매번 "누락됨 → pip
     install" 로 인식되어 stdout 에 노이즈 + 불필요한 ~500ms 오버헤드. 여기선
     auto-install 을 전부 skip 하고, 누락 패키지는 사용자가 ImportError 로 직접
-    확인하도록 둔다 (per-session 요구사항은 M2.10 에서).
+    확인하도록 둔다.
+
+    M2.10: per-session requirements 를 설치한 캐시 디렉터리를 ``extra_syspath`` 로
+    받아 execute 시점에 user code 앞에 ``sys.path.insert`` 라인을 prepend.
+    ``PYTHONPATH`` env 경쟁을 회피하기 위해 코드 주입 방식을 사용한다.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.extra_syspath: list[str] = []
 
     def _install_missing_packages(self, code: str):  # type: ignore[override]
         return None
+
+    def execute(  # type: ignore[override]
+        self,
+        code: str,
+        cwd: str | None = None,
+        pre_exec_callback: Callable[[], None] | None = None,
+        post_exec_callback: Callable[[], None] | None = None,
+    ):
+        if self.extra_syspath:
+            prelude_lines = ["import sys"]
+            for p in self.extra_syspath:
+                prelude_lines.append(f"sys.path.insert(0, {p!r})")
+            code = "\n".join(prelude_lines) + "\n" + code
+        return super().execute(
+            code,
+            cwd=cwd,
+            pre_exec_callback=pre_exec_callback,
+            post_exec_callback=post_exec_callback,
+        )
+
+
+def _resolve_agent_appdata() -> Path:
+    """agent_main 의 _resolve_appdata_dir 와 동일한 폴백 정책.
+
+    agent_main import 는 순환을 피하기 위해 여기서 독립 구현.
+    """
+    override = os.getenv("OHDO_APPDATA")
+    if override:
+        return Path(override)
+    if sys.platform == "win32":
+        base = os.getenv("APPDATA")
+        if base:
+            return Path(base) / "ohdo"
+    return Path.home() / ".ohdo"
 
 
 def _capture_desktop_png() -> str | None:
@@ -363,6 +417,86 @@ class ExecutionRunner:
         with self._active_lock:
             self._active_engines.pop(execution_id, None)
 
+    def _ensure_requirements_installed(
+        self,
+        execution_id: str,
+        requirements: list[str],
+        log_buf: "_LogBuffer",
+    ) -> Path | None:
+        """M2.10: content-addressed `pip install --target` 캐시.
+
+        같은 requirements 조합 → 같은 hash → 같은 디렉터리 → 재사용.
+        설치 로그는 log_buf 에 engine stream 으로 누적 (호출자가 flush).
+        성공 시 캐시 디렉터리 Path, 빈 목록이면 None. 실패 시 예외.
+        """
+        normalized = sorted(
+            r.strip() for r in requirements
+            if isinstance(r, str) and r.strip()
+        )
+        if not normalized:
+            return None
+
+        digest = hashlib.sha256(
+            "\n".join(normalized).encode("utf-8")
+        ).hexdigest()[:16]
+        cache_dir = _resolve_agent_appdata() / "packages" / digest
+        marker = cache_dir / ".ok"
+
+        if marker.is_file():
+            log_buf.append(
+                stream="engine", step_id=None,
+                line=f"requirements cache hit: {digest}",
+            )
+            return cache_dir
+
+        log_buf.append(
+            stream="engine", step_id=None,
+            line=f"installing requirements (sha256={digest}): {', '.join(normalized)}",
+        )
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        python_exe = _resolve_python_exe()
+        cmd = [
+            python_exe, "-m", "pip", "install",
+            "--target", str(cache_dir),
+            "--no-warn-script-location",
+            *normalized,
+        ]
+        logger.info("pip install starting: %s", cmd)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            assert proc.stdout is not None
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if line:
+                    log_buf.append(
+                        stream="engine", step_id=None,
+                        line=f"pip: {line}"[:LOG_LINE_MAX],
+                    )
+            rc = proc.wait(timeout=120)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise
+
+        if rc != 0:
+            raise RuntimeError(f"pip install rc={rc}")
+
+        marker.write_text("ok", encoding="ascii")
+        log_buf.append(
+            stream="engine", step_id=None,
+            line=f"requirements installed: {cache_dir}",
+        )
+        return cache_dir
+
     def _upload_capture(
         self, execution_id: str, step_id: int, path: str
     ) -> None:
@@ -460,6 +594,9 @@ class ExecutionRunner:
         snapshot = payload.get("session_snapshot") or {}
         from_step = payload.get("from_step")
         to_step = payload.get("to_step")
+        requirements = (
+            snapshot.get("requirements") if isinstance(snapshot, dict) else None
+        )
 
         all_steps = snapshot.get("steps") if isinstance(snapshot, dict) else None
         if not isinstance(all_steps, list):
@@ -483,6 +620,39 @@ class ExecutionRunner:
         # M2.4: 로그 버퍼 + 현재 스텝 추적 (engine on_log 가 어느 스텝에 속한지 tag).
         log_buf = _LogBuffer()
         current_step_id_ref: dict[str, int | None] = {"sid": None}
+        t_start = time.time()
+
+        # M2.10: per-session requirements 설치. 실패 시 engine 실행 없이 즉시 result.
+        cache_dir: Path | None = None
+        if isinstance(requirements, list) and requirements:
+            try:
+                cache_dir = self._ensure_requirements_installed(
+                    execution_id, requirements, log_buf
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "requirements install failed: execution_id=%s", execution_id
+                )
+                self._flush_logs(execution_id, log_buf)
+                elapsed_ms = int((time.time() - t_start) * 1000)
+                was_cancelled = self._pop_cancelled(execution_id)
+                self._send(
+                    "execution.result",
+                    {
+                        "execution_id": execution_id,
+                        "status": "cancelled" if was_cancelled else "failed",
+                        "total_steps": len(steps),
+                        "executed_steps": 0,
+                        "successful_steps": 0,
+                        "failed_steps": 0,
+                        "total_time_ms": elapsed_ms,
+                        "error_summary": None if was_cancelled else (
+                            f"requirements install failed: "
+                            f"{exc.__class__.__name__}: {exc}"[:500]
+                        ),
+                    },
+                )
+                return
 
         # 2) 엔진 실행
         # M2.8: CodeSandbox 에 embedded python.exe 를 명시적으로 주입. 기본
@@ -491,7 +661,11 @@ class ExecutionRunner:
         # M2.9.1: screenshot_on_error=False. core 의 캡처 경로는 agent 런타임에 mss
         # 가 없어 항상 실패했고 경로도 Program Files 쪽을 가리킴. 캡처는 runner 의
         # _capture_desktop_png 가 on_step_complete 에서 자체 수행한다.
+        # M2.10: extra_syspath 에 requirements 캐시 dir 주입 → user code 앞에
+        # sys.path.insert 라인 자동 prepend.
         sandbox = _BundleCodeSandbox(python_exe=_resolve_python_exe())
+        if cache_dir is not None:
+            sandbox.extra_syspath.append(str(cache_dir))
         engine = WorkflowEngine(
             sandbox=sandbox,
             step_delay_ms=0,
@@ -504,7 +678,7 @@ class ExecutionRunner:
 
         counters = {"executed": 0, "successful": 0, "failed": 0}
         last_step_error_lines: dict[int, list[str]] = {}
-        t_start = time.time()
+        # t_start 는 requirements install 전에 이미 set (elapsed 를 install 포함 시점부터 집계)
 
         def on_log(message: str) -> None:
             # engine 자체 상태 메시지 (step 시작/완료, 출력 요약 등).

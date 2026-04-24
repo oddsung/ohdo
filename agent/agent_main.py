@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover
 
 # agent/ 폴더 안에서 스크립트로 직접 실행되는 경로와 PyInstaller 번들 모두를
 # 지원하기 위해 버전은 이 파일 안에 둔다. agent/__init__.py 와 동기화 유지.
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 # ──────────────────────────────────────────────
 # 설정
