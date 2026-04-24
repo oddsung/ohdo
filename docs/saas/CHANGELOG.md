@@ -32,17 +32,16 @@
 
 **회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (15:41).
 
-**사용자 재검증 필요** (0.3.1 설치본으로 재실행):
+**사용자 재검증 완료 (2026-04-24)**:
 
-```powershell
-# 실패 스텝 + captures 목록 확인
-$body = @{ session_snapshot = @{ session_id="m291-verify"; steps = @(@{ step_id=1; generated_code="raise RuntimeError('trigger capture')" }) } } | ConvertTo-Json -Depth 5
-$r = Invoke-RestMethod -Method POST -Uri "https://ohdo-production.up.railway.app/v0/executions" -Headers $headers -ContentType "application/json" -Body $body
-Start-Sleep -Seconds 3
-Invoke-RestMethod -Method GET -Uri ".../v0/executions/$($r.execution_id)/captures" -Headers $headers | Select-Object -ExpandProperty items
+```
+execution_id: exec_ab4abf33066c44a58c3bbfddaaee38b2
+step_id:      1
+size_bytes:   276051   ← 270 KB 실제 HP-Laptop 스크린샷
+content_type: image/png
 ```
 
-**기대**: `items` 길이 1, `size_bytes` 100~500 KB (실제 HP-Laptop 스크린샷), `content_type=image/png`.
+HP-Laptop 에서 0.3.1 설치본 → `raise RuntimeError` 스텝 실행 → `POST /v0/executions/{id}/captures` 정상 → `GET /captures` 에 row 1개. M2.6 의 "monkey-patch 로만 검증" 제약 **실기에서 최종 해소**. M2 전체 + M2.9 체인 완전 종료.
 
 **Core 수정**: 없음.
 
