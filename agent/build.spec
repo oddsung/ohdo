@@ -20,11 +20,24 @@ block_cipher = None
 AGENT_ROOT = Path(".").resolve()
 PROJECT_ROOT = AGENT_ROOT.parent  # ohdo/ — core/ 가 여기 있다
 
+# M2.8: 동반 배포할 Windows embeddable Python. 없으면 빌드 직전에
+# scripts/fetch-embedded-python.ps1 을 돌려 생성해야 한다.
+EMBED_PY_DIR = AGENT_ROOT / "vendor" / "python"
+if not (EMBED_PY_DIR / "python.exe").is_file():
+    raise SystemExit(
+        f"Embedded Python not found at {EMBED_PY_DIR}. "
+        "Run scripts/fetch-embedded-python.ps1 first."
+    )
+
 a = Analysis(
     [str(AGENT_ROOT / "agent_main.py")],
     pathex=[str(AGENT_ROOT), str(PROJECT_ROOT)],
     binaries=[],
-    datas=[],
+    datas=[
+        # M2.8: vendor/python/ 를 bundle 의 _internal/python/ 로 복사. runner.py 의
+        # _resolve_python_exe() 가 sys._MEIPASS/python/python.exe 를 찾는다.
+        (str(EMBED_PY_DIR), "python"),
+    ],
     hiddenimports=[
         # pystray 가 플랫폼별 백엔드를 런타임에 고르므로 명시
         "pystray._win32",

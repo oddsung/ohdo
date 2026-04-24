@@ -52,3 +52,6 @@ logs/
 *.tmp
 *.temp
 .cache/
+
+# M2.8: Agent 가 동반 배포할 Python 임베디드 (빌드 시 scripts/fetch-embedded-python.ps1 로 재생성)
+agent/vendor/

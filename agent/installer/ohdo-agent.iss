@@ -7,7 +7,7 @@
 ; 전제: `pyinstaller build.spec` 이 먼저 실행되어 dist\ohdo-agent\ 가 존재해야 함.
 
 #define MyAppName "ohdo Agent"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "ohdo.ai"
 #define MyAppURL "https://ohdo.ai"
 #define MyAppExeName "ohdo-agent.exe"

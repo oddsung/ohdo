@@ -4,6 +4,75 @@
 
 ---
 
+## 2026-04-24 (M2.8 빌드·번들) — Agent 에 Python 3.12 Embedded 동반 (v0.2.0)
+
+**트리거**: M2.7 실기에서 확인된 3중 문제 — `sys.executable == ohdo-agent.exe` 때문에 `CodeSandbox.subprocess.Popen(...)` 이 (a) user code 가 아닌 트레이 앱을 spawn, (b) 60초 timeout 으로 모든 실행이 `failed`, (c) child agent 가 server registry 를 하이재킹해 cancel/기타 WS push 가 부모에 닿지 못함.
+
+**설계**: [architecture/15-m2.8-embedded-python.md](architecture/15-m2.8-embedded-python.md) — Windows embeddable Python 3.12.7 (~22 MB) 을 PyInstaller datas 로 번들에 동반. runner 가 `sys._MEIPASS/python/python.exe` 를 resolve 해 `CodeSandbox(python_exe=...)` 에 주입. dev run 폴백은 `sys.executable`.
+
+**변경된 파일** (core 수정 0):
+
+- `agent/scripts/fetch-embedded-python.ps1` [신규] — python.org 공식 embeddable zip (3.12.7) 다운로드 + `agent/vendor/python/` 에 추출. 재실행 시 idempotent.
+- `.gitignore` [수정] — `agent/vendor/` 추가 (22 MB 바이너리 제외).
+- `agent/build.spec` [수정] — `EMBED_PY_DIR` 존재 검증 + `datas=[(str(EMBED_PY_DIR), "python")]` 로 번들에 동반. PyInstaller 는 `_internal/python/` 에 복사.
+- `agent/runner.py` [수정]:
+  - `from core.workflow_engine import CodeSandbox, WorkflowEngine` (CodeSandbox 추가).
+  - `_resolve_python_exe()` 신규 — `sys._MEIPASS/python/python.exe` 우선, fallback `sys.executable`.
+  - `_run_execution_inner` 에서 `WorkflowEngine(sandbox=CodeSandbox(python_exe=_resolve_python_exe()), ...)` 로 명시 주입.
+- `agent/__init__.py` / `agent/agent_main.py` / `installer/ohdo-agent.iss` [수정] — `0.1.0 → 0.2.0`.
+
+**빌드 검증**:
+
+- `scripts/fetch-embedded-python.ps1` — Python 3.12.7 22 MB 추출 확인.
+- `pyinstaller build.spec --clean --noconfirm` 성공. `dist/ohdo-agent/` 34 MB → **57 MB** (+23 MB, embedded python).
+- Bundle 내부 python.exe 직접 실행: `py: 3.12.7 exe: ...\_internal\python\python.exe` 정상.
+- `dist-installer/ohdo-agent-setup-0.2.0.exe` **23 MB** (이전 0.1.0=14 MB, +9 MB).
+
+**CodeSandbox 실기 증명** (bundle 내 embedded python 을 `python_exe` 로 직접 주입):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| S1 | `print('hello from embedded python')` | `success=True`, 46 ms, output 일치 |
+| S2 | `raise RuntimeError('boom-m28')` | `success=False`, error 에 `RuntimeError: boom-m28` |
+| S3 | stdlib import (`import json, sys`) | success + `{"ok":true,"py":[3,12,7]}` |
+| S4 | `time.sleep(10)` 중 `sandbox.stop()` | **1.5 초 내 kill 반영** → M2.5 cancel 이 설치본에서도 작동할 근거 |
+
+**Smoke (bundle exe 기동, 격리 appdata)**:
+
+```
+ohdo agent starting: version=0.2.0 ...
+ws client starting: url=wss://ohdo-production.up.railway.app/v0/agent
+ping ok (anonymous): .../healthz status=200 elapsed=766ms
+```
+
+ImportError 없음. 재귀 spawn 흔적 없음.
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (10:00).
+
+**M2.8 완료 조건 체크**:
+
+- [x] embeddable zip fetch 스크립트 + .gitignore
+- [x] build.spec datas 에 vendor/python 포함
+- [x] runner 가 `_resolve_python_exe` 경로 주입
+- [x] 버전 0.1.0 → 0.2.0 세 파일 동기화
+- [x] PyInstaller 빌드 성공 + _internal/python/python.exe 존재
+- [x] Inno Setup → ohdo-agent-setup-0.2.0.exe (23 MB)
+- [x] CodeSandbox via embedded python 단위 검증 (성공·실패·kill 전부)
+- [x] 코어 회귀 25/25
+- [ ] **설치본 실기 e2e** — 사용자가 나중에 `ohdo-agent-setup-0.2.0.exe` 설치 후 재검증. 기대:
+  - `print('hello')` 스텝 → **status=completed** (60초 timeout 아님)
+  - mid-run cancel → **status=cancelled** (60초 timeout 아님)
+  - `cancel for unknown/finished execution` 로그 사라짐
+
+**알려진 제약 (M2.9+ 이관)**:
+
+1. **stdlib 한정** — pip 미포함. `import pywinauto` 등 3rd-party 는 ImportError. 실제 RPA 시나리오에는 ensurepip + per-session venv 필요 (M2.9).
+2. `mss` 미포함 — 실제 화면 스크린샷은 None 반환. M2.6 캡처 파이프라인은 여전히 monkey-patch 로만 검증됨.
+
+**Core 수정**: 없음.
+
+---
+
 ## 2026-04-24 (M2.7 빌드·번들) — Agent PyInstaller 에 `core.workflow_engine` 포함 + Inno Setup 재빌드 (v0.1.0)
 
 **설계**: [architecture/14-m2.7-agent-bundle-core.md](architecture/14-m2.7-agent-bundle-core.md) — `pathex` 에 프로젝트 루트 추가, `core.workflow_engine` 을 hiddenimports 로 명시, runner 가 쓰지 않는 core 모듈 전부 excludes (트랜지티브로 PyQt6 등 딸려오는 것 차단). 설치본 실기 검증 (device_flow → execution lifecycle → capture 전체) 은 **사용자가 별도 시점에 수행**.

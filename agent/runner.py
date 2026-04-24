@@ -1,4 +1,4 @@
-"""ohdo Agent — Execution Runner (M2.3 ~ M2.6).
+"""ohdo Agent — Execution Runner (M2.3 ~ M2.8).
 
 서버가 WS 로 ``execution.start`` 를 보내면 그에 대응하는 ``WorkflowEngine``
 실행을 워커 스레드에서 돌리고, 진행 상황을 ``execution.accepted`` /
@@ -18,11 +18,17 @@ M2.6 추가:
 - ``screenshot_on_error=True`` 로 복귀. 스텝 실패 시 ``result.error_screenshot``
   경로를 읽어 ``POST /v0/executions/{id}/captures`` 로 multipart 업로드.
 
+M2.8 추가:
+- 동반 배포되는 embedded Python (``_internal/python/python.exe``) 을 ``CodeSandbox``
+  에 명시적으로 주입. ``sys.executable`` 이 번들 exe 가 되어 user code subprocess
+  를 재귀 spawn 하던 M2.7 문제 해소.
+
 설계:
 - docs/saas/architecture/10-m2.3-execution-lifecycle.md
 - docs/saas/architecture/11-m2.4-execution-log.md
 - docs/saas/architecture/12-m2.5-execution-cancel.md
 - docs/saas/architecture/13-m2.6-captures-upload.md
+- docs/saas/architecture/15-m2.8-embedded-python.md
 """
 
 from __future__ import annotations
@@ -48,12 +54,12 @@ except ImportError:  # pragma: no cover
 # core/workflow_engine.py 를 에이전트에서 import — sys.path 에 프로젝트 루트가
 # 없으면 추가. PyInstaller 번들 시엔 이 경로가 번들 내부에 맞춰질 것 (M2.7).
 try:
-    from core.workflow_engine import WorkflowEngine  # type: ignore[import-not-found]
+    from core.workflow_engine import CodeSandbox, WorkflowEngine  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover
     _project_root = Path(__file__).resolve().parent.parent
     if str(_project_root) not in sys.path:
         sys.path.insert(0, str(_project_root))
-    from core.workflow_engine import WorkflowEngine  # type: ignore[import-not-found]
+    from core.workflow_engine import CodeSandbox, WorkflowEngine  # type: ignore[import-not-found]
 
 logger = logging.getLogger("ohdo.agent.runner")
 
@@ -74,6 +80,28 @@ _STDERR_NOISE_PATTERNS: list[re.Pattern[str]] = [
 
 def _is_stderr_noise(line: str) -> bool:
     return any(p.search(line) for p in _STDERR_NOISE_PATTERNS)
+
+
+def _resolve_python_exe() -> str:
+    """Code 실행용 python.exe 경로 결정 (M2.8).
+
+    우선순위:
+    1. PyInstaller 번들이면 ``sys._MEIPASS/python/python.exe`` — 동반 배포된
+       embedded Python. 이게 없으면 CodeSandbox 가 ohdo-agent.exe 를 재귀
+       spawn 하는 M2.7 버그가 재발한다.
+    2. dev run (bundle 아님) 이면 ``sys.executable`` — 현재 agent venv python.
+    """
+    mei = getattr(sys, "_MEIPASS", None)
+    if mei:
+        candidate = Path(mei) / "python" / "python.exe"
+        if candidate.is_file():
+            return str(candidate)
+        logger.warning(
+            "embedded python not found at %s — falling back to sys.executable "
+            "(%s). user code subprocess may misbehave in bundled mode.",
+            candidate, sys.executable,
+        )
+    return sys.executable
 
 
 Sender = Callable[[dict], bool]  # returns True on send success
@@ -401,7 +429,11 @@ class ExecutionRunner:
         # 2) 엔진 실행
         # M2.6: screenshot_on_error=True 로 복귀. mss 미설치·headless 환경에서는
         # 기존 core 로직이 None 반환 + warn 로 graceful 처리.
+        # M2.8: CodeSandbox 에 embedded python.exe 를 명시적으로 주입. 기본
+        # sys.executable 은 번들 시 ohdo-agent.exe 가 되어 재귀 spawn 을 일으킨다.
+        sandbox = CodeSandbox(python_exe=_resolve_python_exe())
         engine = WorkflowEngine(
+            sandbox=sandbox,
             step_delay_ms=0,
             screenshot_on_error=True,
             visual_feedback_enabled=False,
