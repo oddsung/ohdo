@@ -62,3 +62,4 @@ packages/web/.next/
 packages/web/out/
 packages/web/next-env.d.ts
 packages/web/.env.local
+packages/web/tsconfig.tsbuildinfo
