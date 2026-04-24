@@ -4,6 +4,67 @@
 
 ---
 
+## 2026-04-24 (M3.1.1 구현·로컬 e2e) — 웹 사용자 인증 (매직링크 + 세션 쿠키)
+
+**설계**: [architecture/18-m3.1.1-web-auth.md](architecture/18-m3.1.1-web-auth.md) — 브라우저 사용자가 이메일로 로그인하고 httpOnly 쿠키로 세션을 유지. dev 에선 SMTP 대신 서버 로그에 verify URL stub. `current_agent` (Bearer ag_...) 와 완전 별개의 `current_user` (cookie sess_...) 의존성.
+
+**변경된 파일** (core 수정 0):
+
+- `packages/backend/app/models/user_session.py` [신규] — 세션 쿠키 메타. `token_hash` unique, `expires_at` (30일 fixed), `last_seen_at`, `revoked_at`.
+- `packages/backend/app/models/magic_link.py` [신규] — 일회성 로그인 토큰. `email`, `token_hash` unique, `expires_at` (15분), `consumed_at`.
+- `packages/backend/alembic/versions/20260424_0006_web_auth.py` [신규] — 두 테이블 + 인덱스 생성 (user_sessions 3개: user_id/token_hash unique; magic_links 2개: token_hash unique/email).
+- `packages/backend/app/models/__init__.py` [수정] — 두 모델 export.
+- `packages/backend/app/auth.py` [수정] — `SESSION_TOKEN_PREFIX = "sess_"`, `generate_session_token()`, `generate_magic_token()` 추가.
+- `packages/backend/app/dependencies.py` [수정] — `SESSION_COOKIE_NAME = "ohdo_session"` 상수 + `current_user(request, session)` async dep. 쿠키 파싱 → token_hash 조회 → expires/revoked 체크 → `last_seen_at` 갱신. 실패 시 401 `not_authenticated` / `session_revoked` / `session_expired`.
+- `packages/backend/app/routers/auth.py` [신규]:
+  - `POST /v0/auth/magic-link {email}` → 202 + 서버 WARNING 로그에 `[MAGIC LINK] http://.../auth/verify?token=<raw>` 출력 (dev stub).
+  - `GET /auth/verify?token=...` → token_hash 조회 → `users` get-or-create → `user_sessions` insert → `consumed_at` 세팅 → `Set-Cookie: ohdo_session=sess_...; HttpOnly; SameSite=Lax; Path=/; Max-Age=30d` → 302 `/`. 실패 시 400 `invalid_or_expired_token` / `missing_token`.
+  - `POST /v0/auth/logout` → 세션 revoke + Set-Cookie Max-Age=0 → 204 (idempotent).
+- `packages/backend/app/routers/users.py` [신규] — `GET /v0/users/me` (쿠키 인증, id/email/created_at 반환).
+- `packages/backend/app/main.py` [수정] — 세 라우터 include.
+- 이메일 validation: `re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")` 로 간단히 — `pydantic[email]` extra 없이 dep 최소.
+
+**보안 결정**:
+- `Secure` 플래그는 `OHDO_ENV=production` 일 때만. dev 는 HTTP 허용.
+- `SameSite=Lax` + `HttpOnly` 로 CSRF/XSS 기본 방어. 별도 CSRF 토큰 없음 (MVP).
+- 매직링크 TTL 15분 + 일회성 (`consumed_at`) 으로 replay 차단.
+- 세션 TTL 30일 fixed. rolling 은 M3.1.3+ 에서.
+
+**로컬 e2e 검증** (SQLite, uvicorn :8778, 쿠키 jar 보관 opener):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| S1 | `POST /v0/auth/magic-link {email}` | 202, `{email, expires_in: 900}` |
+| S2 | DB 에 직접 magic_link row 생성 + raw 반환 (테스트 헬퍼) | OK |
+| S3 | `GET /auth/verify?token=raw` (opener follows 302) | 200 at `/`, 쿠키 jar 에 `ohdo_session` 저장됨 |
+| S4 | `GET /v0/users/me` (쿠키) | 200, `email` 일치 |
+| S5 | DB row 검사 | user=1 / magic_links=2 (S1 + S2) / user_sessions=1 |
+| S6 | 쿠키 없이 `/v0/users/me` | 401 `not_authenticated` |
+| S7 | 잘못된 token 으로 verify | 400 `invalid_or_expired_token` |
+| S8 | token 누락 verify | 400 `missing_token` |
+| S9 | 이미 consumed 된 토큰 재사용 | 400 `invalid_or_expired_token` |
+| S10 | `POST /v0/auth/logout` | 204 |
+| S11 | 로그아웃 후 `/v0/users/me` | 401 |
+| S12 | 잘못된 이메일 (`"not-an-email"`) 으로 magic-link | 422 pydantic validation |
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (16:34).
+
+**M3.1.1 완료 조건 체크**:
+
+- [x] 두 테이블 + 마이그 0006 (인덱스 5개)
+- [x] 3 엔드포인트 (`/v0/auth/magic-link` / `/auth/verify` / `/v0/auth/logout`)
+- [x] `current_user` dep (쿠키 기반, agent_id 스코프와 완전 분리)
+- [x] `GET /v0/users/me` 기본 정보
+- [x] 로컬 12 시나리오 통과
+- [x] 코어 회귀 25/25
+- [ ] Railway e2e — push 후 외부에서 POST → 302 follow → /me 200 확인 필요
+
+**M3.1.1 범위 밖**: 실 SMTP 이메일 (M3.2), rate limiting, CSRF 토큰, rolling 세션, 2FA/OAuth, 관리자 세션 revoke UI.
+
+**Core 수정**: 없음.
+
+---
+
 ## 2026-04-24 (M2.10 구현·로컬 e2e) — per-session `requirements` 자동설치 (v0.4.0)
 
 **설계**: [architecture/17-m2.10-requirements.md](architecture/17-m2.10-requirements.md) — session_snapshot 의 `requirements: list[str]` 해석 → `%APPDATA%/ohdo/packages/<sha256>/` 에 `pip install --target` → `sys.path.insert` 코드 주입으로 격리 실행.

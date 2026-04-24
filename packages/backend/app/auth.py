@@ -16,6 +16,8 @@ import secrets
 
 DEVICE_CODE_PREFIX = "dev_"
 AGENT_TOKEN_PREFIX = "ag_"
+# M3.1.1: 웹 세션 쿠키용 토큰 prefix. 브라우저가 httpOnly 쿠키로 보관.
+SESSION_TOKEN_PREFIX = "sess_"
 
 # 혼동 문자(I, O, 0, 1) 제외. 대문자 + 숫자.
 _USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -54,3 +56,19 @@ def normalize_user_code(raw: str) -> str:
 def hash_token(token: str) -> str:
     """SHA-256 hex. agent_token / 필요 시 device_code 해싱에 사용."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+# ── M3.1.1: 웹 세션 + 매직링크 ──────────────────────────────────────────────
+
+
+def generate_session_token() -> str:
+    """웹 브라우저 세션 쿠키 값. httpOnly 로 보관."""
+    return SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def generate_magic_token() -> str:
+    """매직링크 URL 쿼리에 쓰이는 일회성 토큰.
+
+    prefix 없이 URL-safe base64 만. ``/auth/verify?token=...`` 형식.
+    """
+    return secrets.token_urlsafe(32)

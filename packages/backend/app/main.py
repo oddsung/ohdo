@@ -7,6 +7,7 @@
 - M1.5: `WS /v0/agent` (Bearer 인증, server.hello/agent.hello 핸드셰이크)
 - M2.2: `POST/GET /v0/executions` (Bearer 인증)
 - M2.6: `POST/GET /v0/executions/{id}/captures`, `GET /v0/captures/{id}` (Bearer 인증)
+- M3.1.1: `POST /v0/auth/magic-link`, `GET /auth/verify`, `POST /v0/auth/logout`, `GET /v0/users/me` (웹 쿠키 세션)
 
 로컬 실행:
     uvicorn app.main:app --reload --port 8000
@@ -22,7 +23,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 
 from . import __version__
-from .routers import agents, captures, device_flow, executions, link, ws
+from .routers import agents, auth, captures, device_flow, executions, link, users, ws
 
 app = FastAPI(
     title="ohdo Control Plane",
@@ -37,6 +38,10 @@ app.include_router(executions.router)
 app.include_router(captures.exec_captures)
 app.include_router(captures.cap_router)
 app.include_router(ws.router)
+# M3.1.1
+app.include_router(auth.router)       # GET /auth/verify
+app.include_router(auth.v0_router)    # /v0/auth/magic-link, /v0/auth/logout
+app.include_router(users.router)      # /v0/users/me
 
 
 @app.get("/")

@@ -3,18 +3,27 @@
 M1.4: ``current_agent`` — ``Authorization: Bearer ag_...`` 를 검증해 ``Agent``
 ORM row 를 반환. 실패 시 401 (RFC 6750 스타일 ``WWW-Authenticate`` 헤더 포함).
 
-설계: docs/saas/architecture/06-m1.4-authenticated-ping.md
+M3.1.1: ``current_user`` — ``ohdo_session`` httpOnly 쿠키를 검증해 ``User``
+ORM row 를 반환. 웹 브라우저 세션용.
+
+설계:
+- docs/saas/architecture/06-m1.4-authenticated-ping.md
+- docs/saas/architecture/18-m3.1.1-web-auth.md
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import AGENT_TOKEN_PREFIX, hash_token
+from .auth import AGENT_TOKEN_PREFIX, SESSION_TOKEN_PREFIX, hash_token
 from .db import get_session
-from .models import Agent
+from .models import Agent, User, UserSession
+
+SESSION_COOKIE_NAME = "ohdo_session"
 
 
 def _extract_bearer_token(request: Request) -> str | None:
@@ -61,3 +70,55 @@ async def current_agent(
         raise _unauthorized("token_revoked")
 
     return agent
+
+
+# ── M3.1.1: 웹 사용자 세션 ──────────────────────────────────────────────────
+
+
+def _session_unauthorized(error_code: str) -> HTTPException:
+    """쿠키 기반 401. WWW-Authenticate 는 쿠키 인증엔 관용이 아니라 생략."""
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"error": error_code},
+    )
+
+
+async def current_user(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    """httpOnly 쿠키 ``ohdo_session`` 으로 사용자 인증. 실패 시 401.
+
+    성공 시 ``UserSession.last_seen_at`` 을 now 로 갱신.
+    """
+    raw = request.cookies.get(SESSION_COOKIE_NAME)
+    if not raw:
+        raise _session_unauthorized("not_authenticated")
+    if not raw.startswith(SESSION_TOKEN_PREFIX):
+        raise _session_unauthorized("not_authenticated")
+
+    token_h = hash_token(raw)
+    stmt = (
+        select(UserSession, User)
+        .join(User, User.id == UserSession.user_id)
+        .where(UserSession.token_hash == token_h)
+    )
+    row = (await session.execute(stmt)).first()
+    if row is None:
+        raise _session_unauthorized("not_authenticated")
+    us: UserSession = row[0]
+    user: User = row[1]
+
+    now = datetime.now(timezone.utc)
+    # tz-naive (SQLite) 대응: expires_at 이 naive 면 UTC 로 간주.
+    expires_at = us.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if us.revoked_at is not None:
+        raise _session_unauthorized("session_revoked")
+    if expires_at <= now:
+        raise _session_unauthorized("session_expired")
+
+    us.last_seen_at = now
+    await session.commit()
+    return user

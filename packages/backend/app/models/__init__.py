@@ -11,6 +11,8 @@ from .device_code import DeviceCode
 from .execution import Execution
 from .execution_log import ExecutionLog
 from .execution_capture import ExecutionCapture
+from .user_session import UserSession
+from .magic_link import MagicLink
 
 __all__ = [
     "Base",
@@ -21,4 +23,6 @@ __all__ = [
     "Execution",
     "ExecutionLog",
     "ExecutionCapture",
+    "UserSession",
+    "MagicLink",
 ]
