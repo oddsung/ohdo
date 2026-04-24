@@ -23,12 +23,19 @@ M2.8 추가:
   에 명시적으로 주입. ``sys.executable`` 이 번들 exe 가 되어 user code subprocess
   를 재귀 spawn 하던 M2.7 문제 해소.
 
+M2.9 추가:
+- embedded python 이 이미 pywinauto/pyautogui/selenium/mss 를 가지고 있으므로
+  CodeSandbox 의 런타임 auto-install 을 subclass 로 skip. agent 프로세스의
+  pkg_resources 와 bundle python 의 site-packages 가 서로 달라 매번 pip 를 돌려
+  stdout 에 노이즈가 섞이던 문제 제거. 누락 패키지는 ImportError 로 명확히 노출.
+
 설계:
 - docs/saas/architecture/10-m2.3-execution-lifecycle.md
 - docs/saas/architecture/11-m2.4-execution-log.md
 - docs/saas/architecture/12-m2.5-execution-cancel.md
 - docs/saas/architecture/13-m2.6-captures-upload.md
 - docs/saas/architecture/15-m2.8-embedded-python.md
+- docs/saas/architecture/16-m2.9-python-packages.md
 """
 
 from __future__ import annotations
@@ -80,6 +87,22 @@ _STDERR_NOISE_PATTERNS: list[re.Pattern[str]] = [
 
 def _is_stderr_noise(line: str) -> bool:
     return any(p.search(line) for p in _STDERR_NOISE_PATTERNS)
+
+
+class _BundleCodeSandbox(CodeSandbox):
+    """M2.9: agent 번들 환경용 CodeSandbox.
+
+    부모 클래스의 ``_install_missing_packages`` 는 ``pkg_resources.working_set``
+    로 현재 인터프리터 (= agent 프로세스) 의 패키지 목록을 본다. 하지만 코드는
+    ``python_exe`` (= 번들에 동반된 embedded python) 에서 돌아가므로, 두 목록이
+    달라 이미 설치된 pywinauto/pyautogui/selenium/mss 도 매번 "누락됨 → pip
+    install" 로 인식되어 stdout 에 노이즈 + 불필요한 ~500ms 오버헤드. 여기선
+    auto-install 을 전부 skip 하고, 누락 패키지는 사용자가 ImportError 로 직접
+    확인하도록 둔다 (per-session 요구사항은 M2.10 에서).
+    """
+
+    def _install_missing_packages(self, code: str):  # type: ignore[override]
+        return None
 
 
 def _resolve_python_exe() -> str:
@@ -431,7 +454,8 @@ class ExecutionRunner:
         # 기존 core 로직이 None 반환 + warn 로 graceful 처리.
         # M2.8: CodeSandbox 에 embedded python.exe 를 명시적으로 주입. 기본
         # sys.executable 은 번들 시 ohdo-agent.exe 가 되어 재귀 spawn 을 일으킨다.
-        sandbox = CodeSandbox(python_exe=_resolve_python_exe())
+        # M2.9: _BundleCodeSandbox 로 auto-install 노이즈 제거.
+        sandbox = _BundleCodeSandbox(python_exe=_resolve_python_exe())
         engine = WorkflowEngine(
             sandbox=sandbox,
             step_delay_ms=0,

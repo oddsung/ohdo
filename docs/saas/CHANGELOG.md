@@ -4,6 +4,64 @@
 
 ---
 
+## 2026-04-24 (M2.9 빌드·번들) — embedded python + pip + 핵심 RPA 패키지 4종 (v0.3.0)
+
+**설계**: [architecture/16-m2.9-python-packages.md](architecture/16-m2.9-python-packages.md) — A2 (핵심 4개 `pywinauto`/`pyautogui`/`selenium`/`mss`) + 빌드시점 설치 + `._pth` 자동편집. per-session requirements 자동화는 M2.10+ 로 이관.
+
+**변경된 파일** (core 수정 0):
+
+- `agent/scripts/fetch-embedded-python.ps1` [개편] — 기존 download+extract 뒤에 5단계 추가: `._pth` 에 `import site` 활성화, `get-pip.py` 로 pip 부트스트랩, `pip install pywinauto pyautogui selenium mss`, smoke test. idempotent.
+- `agent/runner.py` [수정] — `_BundleCodeSandbox` 서브클래스 추가. `_install_missing_packages` 를 no-op 으로 재정의. 이유: 부모 CodeSandbox 는 `pkg_resources.working_set` 로 agent 프로세스 자신의 패키지를 보지만, 코드는 `python_exe` (embedded python) 에서 돌아가 두 목록이 다름. 매번 "누락됨→pip install" 노이즈 + ~500ms overhead 가 섞이던 것을 차단. 누락 패키지는 사용자가 ImportError 로 확인.
+- `agent/__init__.py` / `agent/agent_main.py` / `installer/ohdo-agent.iss` [수정] — `0.2.0 → 0.3.0`.
+
+**빌드 결과 (크기)**:
+
+| 단계 | 용량 |
+|---|---|
+| `vendor/python/` (stdlib+pip+4 패키지) | 22 MB → **108 MB** |
+| `dist/ohdo-agent/` 번들 | 57 MB → **150 MB** |
+| `dist-installer/ohdo-agent-setup-0.3.0.exe` | 23 MB → **44 MB** (lzma 압축) |
+
+설치할 수 있는 pro-grade RPA 툴 기준 허용범위.
+
+**CodeSandbox 단위 검증** (`_BundleCodeSandbox` + bundle 내 python):
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| S1 | `import pywinauto` | success, `pywinauto 0.6.9` |
+| S2 | `pyautogui.size()` | success, `screen 1920x1080` (실제 해상도) |
+| S3 | `from selenium import webdriver` | success, `selenium 4.43.0` |
+| S4 | `mss().monitors` | success, `monitors=2` |
+| S5 | **mss 로 실제 스크린샷 저장** | success, **`png_bytes 186013`** (M2.6 의 실 캡처 기능 활성화됨!) |
+| S6 | stdlib | `{"py":[3,12,7]}` |
+| S7 | 누락 패키지 `import nonexistent_pkg_xyz` | `ModuleNotFoundError` 로 clean 실패 |
+| 노이즈 | stdout 에 "자동 설치" / "패키지를 발견" 문자열 | 0 (모든 케이스) |
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (10:59).
+
+**M2.9 완료 조건 체크**:
+
+- [x] fetch 스크립트가 pip + 4 패키지 설치
+- [x] `._pth` 자동편집 (`import site`)
+- [x] bundle 내 python 에서 4 패키지 전부 import 성공
+- [x] `_BundleCodeSandbox` 로 auto-install 노이즈 0
+- [x] **실제 스크린샷 mss 로 저장 확인** (M2.6 의 monkey-patch 제약 해소)
+- [x] 버전 0.2.0 → 0.3.0 동기화
+- [x] PyInstaller 150 MB, installer 44 MB 빌드
+- [x] 누락 패키지는 ImportError 로 노출
+- [x] 코어 회귀 25/25
+- [ ] **설치본 실기 e2e** — 사용자가 `ohdo-agent-setup-0.3.0.exe` 설치 후 `import pyautogui; print(pyautogui.size())` 실행 시 `status=completed` 기대.
+
+**알려진 제약 (M2.10+ 이관)**:
+
+1. 번들 패키지 목록이 빌드 시점 고정. 사용자 추가 패키지는 session_snapshot `requirements` 필드 + runtime install 필요 (M2.10).
+2. Chrome/Edge WebDriver 바이너리 미포함 — selenium 실 실행엔 OS 측 드라이버 필요. `webdriver-manager` 도입 검토.
+3. pywinauto `SyntaxWarning: invalid escape sequence` 는 upstream 이슈.
+
+**Core 수정**: 없음.
+
+---
+
 ## 2026-04-24 (M2.8 빌드·번들) — Agent 에 Python 3.12 Embedded 동반 (v0.2.0)
 
 **트리거**: M2.7 실기에서 확인된 3중 문제 — `sys.executable == ohdo-agent.exe` 때문에 `CodeSandbox.subprocess.Popen(...)` 이 (a) user code 가 아닌 트레이 앱을 spawn, (b) 60초 timeout 으로 모든 실행이 `failed`, (c) child agent 가 server registry 를 하이재킹해 cancel/기타 WS push 가 부모에 닿지 못함.
