@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-04-24 (M3.1.2 구현·로컬 스모크) — Next.js 대시보드 shell + 매직링크 sign-in
+
+**설계**: [architecture/19-m3.1.2-web-scaffold.md](architecture/19-m3.1.2-web-scaffold.md) — `packages/web/` 신규. Next.js 16 + React 19 + Tailwind 3. 백엔드와 다른 포트지만 Next.js `rewrites` 로 `/v0/*` 와 `/auth/verify` 를 proxy 해 **브라우저 관점 same-origin** → CORS/쿠키 이슈 0. PUBLIC_BASE_URL 을 `http://localhost:3000` 으로 세팅하면 백엔드가 매직링크 URL 을 웹 도메인으로 출력.
+
+**추가된 파일** (백엔드·core 수정 0):
+
+- `packages/web/package.json` — next 16.2.4, react 19.2.5, typescript 5.6, tailwind 3.4.
+- `packages/web/tsconfig.json` / `next.config.ts` / `postcss.config.mjs` / `tailwind.config.ts` — 설정 파일.
+- `packages/web/app/globals.css` — Pretendard (jsdelivr CDN) + tailwind directive.
+- `packages/web/app/layout.tsx` — `<html lang="ko">` + `font-sans` 루트 레이아웃.
+- `packages/web/app/page.tsx` [server component] — `getCurrentUser()` 로 쿠키 확인 후 `/dashboard` 또는 `/sign-in` 으로 redirect.
+- `packages/web/app/sign-in/page.tsx` [client component] — 이메일 입력 폼, POST `/v0/auth/magic-link`, 202/422/기타 상태별 메시지.
+- `packages/web/app/dashboard/page.tsx` [server component] — getCurrentUser 재확인, 미인증이면 /sign-in redirect, 아니면 email/user_id/가입일 카드 + Logout 버튼.
+- `packages/web/lib/api.ts` — `apiFetch<T>()` fetch 래퍼 (credentials:include, 204 처리).
+- `packages/web/lib/auth.ts` — server-only `getCurrentUser()`. `cookies()` 로 `ohdo_session` 읽어 `/v0/users/me` 직접 호출 (same-process 에서 rewrite 말고 env `API_BASE_URL` 로 직통).
+- `packages/web/components/ui/button.tsx` / `input.tsx` — 기본 스타일 래퍼 (shadcn 는 M3.1.3+).
+- `packages/web/components/sign-out-button.tsx` [client] — POST `/v0/auth/logout` + window.location 으로 /sign-in 강제 네비게이션.
+- `.gitignore` — `packages/web/node_modules`, `.next`, `out`, `next-env.d.ts`, `.env.local` 제외.
+
+**검증**:
+
+- `npm install` → 109 packages, **0 vulnerabilities**.
+- `npm run typecheck` 통과.
+- `npm run build` 통과 (static: /sign-in, /_not-found / dynamic: /, /dashboard).
+- Dev server smoke:
+  - `GET /` → `307 Location: /sign-in` (쿠키 없음 → getCurrentUser null → redirect)
+  - `GET /sign-in` → `200 OK`
+  - `POST /v0/auth/magic-link` (Next.js :3000 → rewrite → backend :8000) → `202 {email, expires_in: 900}`
+  - 백엔드 로그에 **`[MAGIC LINK] http://localhost:3000/auth/verify?token=...`** (웹 도메인으로 링크 생성 확인)
+- 코어 회귀 `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (16:54).
+
+**M3.1.2 완료 조건 체크**:
+
+- [x] Next.js scaffold + 빌드 성공 + typecheck 통과
+- [x] 3 페이지 (`/`, `/sign-in`, `/dashboard`) + layout
+- [x] rewrites proxy (v0 + auth/verify)
+- [x] `lib/auth.ts` 서버 컴포넌트에서 `getCurrentUser()` 동작
+- [x] 매직링크 URL 이 웹 도메인 (localhost:3000) 으로 출력되는 것 확인
+- [x] 코어 회귀 25/25
+- [ ] **브라우저 실기 검증** — 사용자가 실제 브라우저에서 sign-in → verify URL 클릭 → dashboard 진입 → Logout 전 사이클 확인 필요
+
+**M3.1.2 범위 밖**: executions 리스트 (M3.1.3), cancel 버튼 (M3.1.4), 캡처 뷰어 (M3.1.5), Vercel 배포 (M3.1.6+), 프로필 편집, 회원가입 별도 flow.
+
+---
+
 ## 2026-04-24 (M3.1.1 구현·로컬 e2e) — 웹 사용자 인증 (매직링크 + 세션 쿠키)
 
 **설계**: [architecture/18-m3.1.1-web-auth.md](architecture/18-m3.1.1-web-auth.md) — 브라우저 사용자가 이메일로 로그인하고 httpOnly 쿠키로 세션을 유지. dev 에선 SMTP 대신 서버 로그에 verify URL stub. `current_agent` (Bearer ag_...) 와 완전 별개의 `current_user` (cookie sess_...) 의존성.

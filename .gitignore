@@ -55,3 +55,10 @@ logs/
 
 # M2.8: Agent 가 동반 배포할 Python 임베디드 (빌드 시 scripts/fetch-embedded-python.ps1 로 재생성)
 agent/vendor/
+
+# M3.1.2: Next.js web dashboard (`packages/web/`)
+packages/web/node_modules/
+packages/web/.next/
+packages/web/out/
+packages/web/next-env.d.ts
+packages/web/.env.local
