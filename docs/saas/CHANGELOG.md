@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-04-24 (M2.9.1 patch) — capture 업로드 복구 (v0.3.1)
+
+**트리거**: 사용자 실기에서 0.3.0 설치본으로 `raise RuntimeError(...)` 스텝 실행 시 `/captures` 목록이 비어있음 확인. `pyautogui.size()` 등 user code 실행은 정상 (`real screen 1920x1080`) — M2.9 메인 기능은 작동. 캡처 파이프라인만 실패.
+
+**원인**:
+- `core._capture_error_screen` 은 **agent 프로세스** 에서 `import mss` 한다. 하지만 agent 런타임 번들 (ohdo-agent.exe 내부 파이썬) 에는 mss 가 없었음 (embedded python 쪽 mss 와 별개).
+- 또 저장 경로도 `Path(__file__).parent.parent/data/sessions/...` 를 쓰는데 설치본은 Program Files 에 있어 쓰기 권한 이슈.
+- 결과: `error_screenshot = None` → runner 의 업로드 분기 조용히 skip → 로그에 흔적 없음.
+
+**수정** (core 수정 0):
+
+- `agent/requirements.txt` — `mss>=10.0` 추가. agent venv 에도 설치 (`pip install mss`).
+- `agent/build.spec` [수정] — hiddenimports 에 `"mss"` 추가. PyInstaller 가 PYZ 에 번들.
+- `agent/runner.py` [수정]:
+  - `_capture_desktop_png()` 신규 — agent 프로세스에서 mss 로 주모니터 PNG 캡처 → temp 파일 경로 반환. 실패 시 warn + None.
+  - `on_step_complete` 의 캡처 업로드 경로 변경: `result.error_screenshot` 참조 제거, 대신 `_capture_desktop_png()` 직접 호출 → `_upload_capture` → `os.unlink` 정리.
+  - `WorkflowEngine(screenshot_on_error=False)` — core 의 캡처 경로 비활성 (경로 이슈 + mss 미존재 이중문제 회피). `_capture_error_screen` 재정의·monkey-patch 없이 책임 분리.
+- 버전 `0.3.0 → 0.3.1` 세 파일 동기화.
+
+**빌드**:
+
+- PYZ 에 `mss.*` 모듈 포함 확인 (TOC 에서 검증).
+- bundle 150 MB 유지 (mss 자체는 67 KB).
+- `ohdo-agent-setup-0.3.1.exe` **45 MB** (0.3.0 = 44 MB, +1 MB).
+- bundle smoke: `version=0.3.1` 기동, ping/ws 정상, ImportError 없음.
+
+**회귀 테스트**: `python -m tests.test_runner --suite core` → **25 passed / 0 failed** (15:41).
+
+**사용자 재검증 필요** (0.3.1 설치본으로 재실행):
+
+```powershell
+# 실패 스텝 + captures 목록 확인
+$body = @{ session_snapshot = @{ session_id="m291-verify"; steps = @(@{ step_id=1; generated_code="raise RuntimeError('trigger capture')" }) } } | ConvertTo-Json -Depth 5
+$r = Invoke-RestMethod -Method POST -Uri "https://ohdo-production.up.railway.app/v0/executions" -Headers $headers -ContentType "application/json" -Body $body
+Start-Sleep -Seconds 3
+Invoke-RestMethod -Method GET -Uri ".../v0/executions/$($r.execution_id)/captures" -Headers $headers | Select-Object -ExpandProperty items
+```
+
+**기대**: `items` 길이 1, `size_bytes` 100~500 KB (실제 HP-Laptop 스크린샷), `content_type=image/png`.
+
+**Core 수정**: 없음.
+
+---
+
 ## 2026-04-24 (M2.9 빌드·번들) — embedded python + pip + 핵심 RPA 패키지 4종 (v0.3.0)
 
 **설계**: [architecture/16-m2.9-python-packages.md](architecture/16-m2.9-python-packages.md) — A2 (핵심 4개 `pywinauto`/`pyautogui`/`selenium`/`mss`) + 빌드시점 설치 + `._pth` 자동편집. per-session requirements 자동화는 M2.10+ 로 이관.

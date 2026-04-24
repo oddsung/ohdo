@@ -29,6 +29,12 @@ M2.9 추가:
   pkg_resources 와 bundle python 의 site-packages 가 서로 달라 매번 pip 를 돌려
   stdout 에 노이즈가 섞이던 문제 제거. 누락 패키지는 ImportError 로 명확히 노출.
 
+M2.9.1 수정 (캡처 업로드 복구):
+- core `_capture_error_screen` 는 agent 프로세스에서 `import mss` 하는데 agent 런타임
+  에는 mss 가 없어 항상 None 반환 → 업로드 skip 되던 문제. 해결:
+  runner 가 자체적으로 `_capture_desktop_png` 로 screenshot 을 temp 파일에 저장해
+  업로드 후 정리. `WorkflowEngine(screenshot_on_error=False)` 로 core 경로는 비활성.
+
 설계:
 - docs/saas/architecture/10-m2.3-execution-lifecycle.md
 - docs/saas/architecture/11-m2.4-execution-log.md
@@ -102,6 +108,35 @@ class _BundleCodeSandbox(CodeSandbox):
     """
 
     def _install_missing_packages(self, code: str):  # type: ignore[override]
+        return None
+
+
+def _capture_desktop_png() -> str | None:
+    """M2.9.1: agent 프로세스에서 주화면 스크린샷을 PNG 로 temp 파일에 저장.
+
+    성공 시 파일 경로, 실패 시 None. 호출자는 업로드 후 파일 삭제할 것.
+    """
+    try:
+        import tempfile
+
+        import mss  # agent bundle 에 포함 (M2.9.1 부터).
+        import mss.tools as mss_tools
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("capture import failed: %s", exc)
+        return None
+
+    try:
+        fd, path = tempfile.mkstemp(prefix="ohdo_capture_", suffix=".png")
+        os.close(fd)
+        with mss.mss() as sct:
+            monitors = sct.monitors
+            # monitors[0] = virtual screen 전체, monitors[1] = primary monitor
+            target = monitors[1] if len(monitors) > 1 else monitors[0]
+            img = sct.grab(target)
+            mss_tools.to_png(img.rgb, img.size, output=path)
+        return path
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("capture save failed: %s", exc)
         return None
 
 
@@ -450,16 +485,17 @@ class ExecutionRunner:
         current_step_id_ref: dict[str, int | None] = {"sid": None}
 
         # 2) 엔진 실행
-        # M2.6: screenshot_on_error=True 로 복귀. mss 미설치·headless 환경에서는
-        # 기존 core 로직이 None 반환 + warn 로 graceful 처리.
         # M2.8: CodeSandbox 에 embedded python.exe 를 명시적으로 주입. 기본
         # sys.executable 은 번들 시 ohdo-agent.exe 가 되어 재귀 spawn 을 일으킨다.
         # M2.9: _BundleCodeSandbox 로 auto-install 노이즈 제거.
+        # M2.9.1: screenshot_on_error=False. core 의 캡처 경로는 agent 런타임에 mss
+        # 가 없어 항상 실패했고 경로도 Program Files 쪽을 가리킴. 캡처는 runner 의
+        # _capture_desktop_png 가 on_step_complete 에서 자체 수행한다.
         sandbox = _BundleCodeSandbox(python_exe=_resolve_python_exe())
         engine = WorkflowEngine(
             sandbox=sandbox,
             step_delay_ms=0,
-            screenshot_on_error=True,
+            screenshot_on_error=False,
             visual_feedback_enabled=False,
         )
         # M2.5: cancel 요청이 이 engine 을 찾을 수 있도록 등록.
@@ -517,11 +553,18 @@ class ExecutionRunner:
             # M2.4: step 완료마다 로그 flush.
             self._flush_logs(execution_id, log_buf)
 
-            # M2.6: 스텝 실패 + 에러 스크린샷 존재 시 업로드.
+            # M2.6: 스텝 실패 시 화면 캡처 업로드.
+            # M2.9.1: core 대신 runner 가 직접 캡처 (agent 프로세스의 mss 사용).
             if not success:
-                shot_path = getattr(result, "error_screenshot", None)
-                if isinstance(shot_path, str) and shot_path and os.path.isfile(shot_path):
-                    self._upload_capture(execution_id, step_id, shot_path)
+                shot_path = _capture_desktop_png()
+                if shot_path:
+                    try:
+                        self._upload_capture(execution_id, step_id, shot_path)
+                    finally:
+                        try:
+                            os.unlink(shot_path)
+                        except OSError:
+                            pass
 
         try:
             report = asyncio.run(

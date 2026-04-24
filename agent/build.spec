@@ -46,6 +46,8 @@ a = Analysis(
         # M2.7: runner 가 사용하는 core 모듈. static analysis 가 못 잡을 수 있어 명시.
         "core",
         "core.workflow_engine",
+        # M2.9.1: runner 가 스텝 실패 시 화면 캡처.
+        "mss",
     ],
     hookspath=[],
     hooksconfig={},
