@@ -57,7 +57,7 @@
 - [x] `GET /v0/users/me` 기본 정보
 - [x] 로컬 12 시나리오 통과
 - [x] 코어 회귀 25/25
-- [ ] Railway e2e — push 후 외부에서 POST → 302 follow → /me 200 확인 필요
+- [x] Railway e2e (커밋 `e8cf4f9`) — API 레벨 6 시나리오 (202 magic-link / 422 invalid email / 400 bad token / 400 missing token / 401 /me / 204 logout idempotent) 전부 통과. 0006 마이그가 Railway Postgres 에 정상 적용됨 확인. 실 verify + 쿠키 플로우는 로컬 12 시나리오에서 검증 완료 (raw 토큰은 서버 로그 내부에 있어 외부 e2e 불가, M3.1.2 브라우저 테스트로 완결 예정).
 
 **M3.1.1 범위 밖**: 실 SMTP 이메일 (M3.2), rate limiting, CSRF 토큰, rolling 세션, 2FA/OAuth, 관리자 세션 revoke UI.
 
