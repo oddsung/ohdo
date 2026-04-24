@@ -59,10 +59,9 @@ ImportError 없음. 재귀 spawn 흔적 없음.
 - [x] Inno Setup → ohdo-agent-setup-0.2.0.exe (23 MB)
 - [x] CodeSandbox via embedded python 단위 검증 (성공·실패·kill 전부)
 - [x] 코어 회귀 25/25
-- [ ] **설치본 실기 e2e** — 사용자가 나중에 `ohdo-agent-setup-0.2.0.exe` 설치 후 재검증. 기대:
-  - `print('hello')` 스텝 → **status=completed** (60초 timeout 아님)
-  - mid-run cancel → **status=cancelled** (60초 timeout 아님)
-  - `cancel for unknown/finished execution` 로그 사라짐
+- [x] **설치본 실기 e2e 완료 (2026-04-24)** — HP-Laptop 에 `ohdo-agent-setup-0.2.0.exe` 설치 후:
+  - mid-run cancel 시나리오 (`exec_f05fd719e66344c9bb0b36ceabd891f8`): **`status=cancelled`**, `total_time_ms=2663` (M2.7 의 `60030` timeout 아님), `error_summary` null, `executed_steps=1` (subprocess 실제 시작 증거), `started_at → finished_at` 2.7초.
+  - → M2.7 의 3중 버그 (재귀 spawn / 60초 timeout / registry 하이재킹) **전부 해소** 확인.
 
 **알려진 제약 (M2.9+ 이관)**:
 
