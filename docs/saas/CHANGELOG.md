@@ -41,6 +41,7 @@
 - [x] 대시보드 + 새 실행 링크 + 상세 페이지 CancelButton 통합
 - [x] typecheck + build PASS
 - [x] 코어 회귀 25/25
+- [x] Railway smoke (커밋 `74be29c`) — 새 deploy 활성화 후 unauth POST → `not_authenticated` (current_subject 적용 확인). 유효한 Bearer 로 POST → `exec_ab96f78a...` 정상 생성, 기존 agent `ec2052e2-...` 매핑 유지로 회귀 0.
 - [ ] **브라우저 실기 검증** (M3.1.3 와 동일하게 dev 격리 이슈 — 사용자가 옵션 A 로컬 dev agent 띄우거나 M3.1.6 배포 후 자연 검증)
 
 **M3.1.4 범위 밖**: 다중 agent 직접 선택 dropdown (M3.1.5+), 코드 에디터 syntax highlight (Monaco), 캡처 인라인 이미지 (M3.1.5), session JSON 임포트.
