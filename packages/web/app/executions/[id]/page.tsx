@@ -6,6 +6,7 @@ import {
   listLogsServer,
   listCapturesServer,
 } from "@/lib/executions";
+import { CancelButton } from "@/components/cancel-button";
 import { ExecutionStatusBadge } from "@/components/execution-status-badge";
 import { ExecutionLogsTail } from "@/components/execution-logs-tail";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -48,8 +49,8 @@ export default async function ExecutionDetailPage({
       </header>
 
       <section className="max-w-5xl mx-auto px-6 py-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-3">
               <ExecutionStatusBadge status={exec.status} />
               <code className="text-sm font-mono text-gray-700 break-all">
@@ -60,12 +61,18 @@ export default async function ExecutionDetailPage({
               <p className="text-sm text-red-700">{exec.error_summary}</p>
             ) : null}
           </div>
-          <Link
-            href="/dashboard"
-            className="text-sm text-gray-600 hover:underline"
-          >
-            ← 목록
-          </Link>
+          <div className="flex items-center gap-3 shrink-0">
+            <CancelButton
+              executionId={exec.execution_id}
+              initialStatus={exec.status}
+            />
+            <Link
+              href="/dashboard"
+              className="text-sm text-gray-600 hover:underline"
+            >
+              ← 목록
+            </Link>
+          </div>
         </div>
 
         <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4">

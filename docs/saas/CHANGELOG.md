@@ -4,6 +4,51 @@
 
 ---
 
+## 2026-04-27 (M3.1.4 구현·로컬 e2e) — 웹 Cancel 버튼 + 신규 실행 폼
+
+**설계**: [architecture/21-m3.1.4-cancel-and-new-execution.md](architecture/21-m3.1.4-cancel-and-new-execution.md) — 웹에서 직접 실행을 만들고 취소할 수 있게. 백엔드 POST /v0/executions 가 cookie 인증도 받고 agent 자동 선택. cancel 은 M3.1.3 의 current_subject 덕에 백엔드 변경 0.
+
+**변경된 파일** (core 수정 0):
+
+### 백엔드
+
+- `packages/backend/app/routers/executions.py` [수정] — `create_execution` 의 dep 가 `current_agent` → `current_subject`. 인증 주체가 agent 면 `agent.id` 그대로 사용 (회귀 0). user 면 `Agent` 테이블에서 `user_id == subject.user_id AND revoked_at IS NULL` 중 `last_seen_at desc nulls last` 첫 row 선택. 없으면 400 `no_agent_available`. 이후 row insert / WS push 로직 동일.
+
+### 웹
+
+- `packages/web/components/cancel-button.tsx` [신규, client] — non-terminal 일 때만 표시. `window.confirm` → POST `/v0/executions/{id}/cancel` → 202 시 낙관적 hide + 1.5s 뒤 `router.refresh()` 로 헤더 status 갱신. 409/503/404/401 별 inline alert 메시지.
+- `packages/web/components/new-execution-form.tsx` [신규, client] — session_id (text, optional, 비우면 `web-{Date.now()}`), requirements (multiline → split lines), steps 동적 리스트 (추가/제거, 최소 1 비어있지 않은 스텝 필수). 제출 → `apiFetch("/v0/executions", POST)` → 201 시 `router.push("/executions/[id]")`. 400 `no_agent_available` 안내 메시지 명시.
+- `packages/web/app/executions/new/page.tsx` [신규] — 인증 가드 + `<NewExecutionForm>` 호스팅.
+- `packages/web/app/dashboard/page.tsx` [수정] — 헤더 우측 `+ 새 실행` 링크 (Tailwind 직접, Button 컴포넌트 import 안 함).
+- `packages/web/app/executions/[id]/page.tsx` [수정] — 헤더 layout 을 `flex items-start justify-between` 으로 바꿔 `<CancelButton>` 추가. CancelButton 은 status 가 terminal 이면 자동 null 반환.
+
+**검증**:
+
+- 백엔드 e2e (SQLite, uvicorn :8780) **5 시나리오** PASS:
+  - C1 cookie + 1 agent → 201, 그 agent_id 사용
+  - C2 cookie + 0 agent → 400 `no_agent_available`
+  - C3 cookie + 2 agent (다른 last_seen_at) → 가장 최근 선택
+  - C4 revoked agent 만 → 400
+  - C5 Bearer agent → 자기 자신 사용 (회귀 0)
+- 웹: `npm run typecheck` PASS / `npm run build` PASS (5 routes — `/executions/new` 추가됨).
+- 코어 회귀 25/25 (19:42).
+
+**M3.1.4 완료 조건 체크**:
+
+- [x] POST /v0/executions current_subject + agent 자동 선택
+- [x] 백엔드 e2e 5 시나리오
+- [x] CancelButton + NewExecutionForm + /executions/new
+- [x] 대시보드 + 새 실행 링크 + 상세 페이지 CancelButton 통합
+- [x] typecheck + build PASS
+- [x] 코어 회귀 25/25
+- [ ] **브라우저 실기 검증** (M3.1.3 와 동일하게 dev 격리 이슈 — 사용자가 옵션 A 로컬 dev agent 띄우거나 M3.1.6 배포 후 자연 검증)
+
+**M3.1.4 범위 밖**: 다중 agent 직접 선택 dropdown (M3.1.5+), 코드 에디터 syntax highlight (Monaco), 캡처 인라인 이미지 (M3.1.5), session JSON 임포트.
+
+**Core 수정**: 없음.
+
+---
+
 ## 2026-04-27 (M3.1.3 구현·로컬 e2e) — Executions 리스트·상세 페이지 + 합성 인증 dep
 
 **설계**: [architecture/20-m3.1.3-executions-ui.md](architecture/20-m3.1.3-executions-ui.md) — 백엔드에 `current_subject` (쿠키 OR Bearer) 합성 dep 도입해 read-only 엔드포인트가 web/agent 양쪽에서 호출 가능. 웹은 dashboard 가 executions 리스트로 교체되고 `/executions/[id]` 상세 페이지가 추가됨. 진행 중인 실행은 3초 polling, terminal 도달 시 자동 정지.

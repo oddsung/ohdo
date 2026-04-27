@@ -142,14 +142,40 @@ class ExecutionLogsResponse(BaseModel):
 )
 async def create_execution(
     body: ExecutionCreate,
-    agent: Agent = Depends(current_agent),
+    subject: AuthSubject = Depends(current_subject),
     session: AsyncSession = Depends(get_session),
 ) -> ExecutionRead:
-    """새 execution 을 ``queued`` 상태로 생성."""
+    """새 execution 을 ``queued`` 상태로 생성.
+
+    M3.1.4: 쿠키 인증된 web user 도 호출 가능. 그 경우 사용자의 가장 최근
+    ``last_seen_at`` agent 를 자동 선택 (revoked 제외). agent 가 없으면
+    400 ``no_agent_available``.
+    """
+    if subject.agent_id is not None:
+        # Bearer agent 인증 — 자기 자신 사용
+        agent_id = subject.agent_id
+    else:
+        # Cookie 인증 — auto-select agent
+        stmt = (
+            select(Agent.id)
+            .where(
+                Agent.user_id == subject.user_id,
+                Agent.revoked_at.is_(None),
+            )
+            .order_by(Agent.last_seen_at.desc().nulls_last())
+            .limit(1)
+        )
+        agent_id = (await session.execute(stmt)).scalar_one_or_none()
+        if agent_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": "no_agent_available"},
+            )
+
     execution = Execution(
         execution_id=_new_execution_id(),
-        agent_id=agent.id,
-        user_id=agent.user_id,
+        agent_id=agent_id,
+        user_id=subject.user_id,
         status="queued",
         session_snapshot=body.session_snapshot,
         from_step=body.from_step,
@@ -159,20 +185,20 @@ async def create_execution(
     await session.commit()
     await session.refresh(execution)
     logger.info(
-        "execution created: execution_id=%s agent_id=%s user_id=%s",
-        execution.execution_id, agent.id, agent.user_id,
+        "execution created: execution_id=%s agent_id=%s user_id=%s subject=%s",
+        execution.execution_id, agent_id, subject.user_id, subject.kind,
     )
 
     # M2.3: 해당 agent 가 WS 로 붙어있으면 execution.start 를 push. 오프라인이면
     # 조용히 queued 로 유지 (catchup 은 M2.4+).
-    ws = registry.get(agent.id)
+    ws = registry.get(agent_id)
     if ws is not None:
         frame = _build_start_frame(execution, body)
         try:
             await ws.send_json(frame)
             logger.info(
                 "execution.start pushed: execution_id=%s agent_id=%s",
-                execution.execution_id, agent.id,
+                execution.execution_id, agent_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -182,7 +208,7 @@ async def create_execution(
     else:
         logger.info(
             "agent offline at POST time: execution_id=%s agent_id=%s — left queued",
-            execution.execution_id, agent.id,
+            execution.execution_id, agent_id,
         )
 
     return ExecutionRead.model_validate(execution)

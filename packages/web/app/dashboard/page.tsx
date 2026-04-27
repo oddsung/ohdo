@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listExecutionsServer } from "@/lib/executions";
@@ -31,8 +32,16 @@ export default async function DashboardPage() {
 
       <section className="max-w-5xl mx-auto px-6 py-8 space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">실행 기록</h2>
-          <span className="text-xs text-gray-400">최신 실행이 위에 표시</span>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-semibold">실행 기록</h2>
+            <span className="text-xs text-gray-400">최신 실행이 위에 표시</span>
+          </div>
+          <Link
+            href="/executions/new"
+            className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium bg-gray-900 text-white hover:bg-gray-800"
+          >
+            + 새 실행
+          </Link>
         </div>
 
         <ExecutionsList initialItems={initial?.items ?? []} />
