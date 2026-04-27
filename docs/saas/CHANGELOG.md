@@ -38,8 +38,8 @@
 - [x] next.config.ts production-ready 확인 (M3.1.2 부터 환경변수 기반)
 - [x] typecheck + build PASS
 - [x] 코어 회귀 25/25
-- [ ] **사용자 수동 작업** — Vercel 프로젝트 생성 + 환경변수 + Railway PUBLIC_BASE_URL 추가
-- [ ] **배포 후 브라우저 e2e** — 매직링크 → 대시보드 → 신규 실행 / cancel / 캡처 그리드 전체 흐름 확인
+- [x] **사용자 수동 작업 완료 (2026-04-27)** — Vercel 배포 + `API_BASE_URL` + Railway `PUBLIC_BASE_URL` + `OHDO_ENV=production` 모두 적용 (`/healthz` 응답이 `env:production` 으로 변경 확인).
+- [x] **배포 후 브라우저 e2e PASS (2026-04-27)** — Vercel 도메인에서 매직링크 sign-in (oh.neodavinci@gmail.com) → /dashboard 진입 → 신규 실행 폼 → `exec_94da7992767a45faae60c620e58ff669` 자동 생성 → 10.6s 만에 completed → 메타 카드 (1/1/0) + 로그 5라인 (engine/stdout 색 구분) + 폴링 자동 정지 ("자동 새로고침 정지") + 캡처 (0) 섹션 모두 정상 표시. M3.1.3·M3.1.4·M3.1.5 의 dev 격리 이슈 자연 해소 확인.
 
 **알려진 한계 (M3.2+ 보강)**:
 
