@@ -10,7 +10,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Note: 절대 lib/ 단독 패턴은 packages/web/lib 같은 정상 코드를 잡으니 사용 X.
 lib64/
 parts/
 sdist/

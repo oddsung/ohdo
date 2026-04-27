@@ -1,12 +1,18 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { listExecutionsServer } from "@/lib/executions";
+import { ExecutionsList } from "@/components/executions-list";
 import { SignOutButton } from "@/components/sign-out-button";
+
+export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
   if (!user) {
     redirect("/sign-in");
   }
+
+  const initial = await listExecutionsServer({ limit: 20, offset: 0 });
 
   return (
     <main className="min-h-screen">
@@ -23,28 +29,13 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      <section className="max-w-5xl mx-auto px-6 py-10 space-y-4">
-        <h2 className="text-xl font-semibold">환영합니다</h2>
-        <p className="text-sm text-gray-600">
-          이 페이지는 M3.1.2 기본 shell 입니다. M3.1.3 에서 실행 목록이 여기에 표시됩니다.
-        </p>
+      <section className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">실행 기록</h2>
+          <span className="text-xs text-gray-400">최신 실행이 위에 표시</span>
+        </div>
 
-        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-          <div className="rounded-md border border-gray-200 bg-white p-4">
-            <dt className="text-xs text-gray-500">user_id</dt>
-            <dd className="mt-1 text-sm font-mono break-all">{user.id}</dd>
-          </div>
-          <div className="rounded-md border border-gray-200 bg-white p-4">
-            <dt className="text-xs text-gray-500">이메일</dt>
-            <dd className="mt-1 text-sm">{user.email}</dd>
-          </div>
-          <div className="rounded-md border border-gray-200 bg-white p-4">
-            <dt className="text-xs text-gray-500">계정 생성일</dt>
-            <dd className="mt-1 text-sm">
-              {new Date(user.created_at).toLocaleString("ko-KR")}
-            </dd>
-          </div>
-        </dl>
+        <ExecutionsList initialItems={initial?.items ?? []} />
       </section>
     </main>
   );

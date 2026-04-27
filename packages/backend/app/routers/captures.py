@@ -37,7 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..dependencies import current_agent
+from ..dependencies import AuthSubject, current_agent, current_subject
 from ..models import Agent, Execution, ExecutionCapture
 
 logger = logging.getLogger(__name__)
@@ -103,12 +103,12 @@ def _validate_execution_id(execution_id: str) -> None:
 
 
 async def _fetch_owned_execution(
-    execution_id: str, agent: Agent, session: AsyncSession
+    execution_id: str, user_id: uuid.UUID, session: AsyncSession
 ) -> Execution:
     _validate_execution_id(execution_id)
     stmt = select(Execution).where(
         Execution.execution_id == execution_id,
-        Execution.user_id == agent.user_id,
+        Execution.user_id == user_id,
     )
     row = (await session.execute(stmt)).scalar_one_or_none()
     if row is None:
@@ -156,8 +156,10 @@ async def upload_capture(
     - file: binary (image/png or image/jpeg), <= 10 MB
     - step_id: int (선택)
     - kind: "error_screenshot" (기본)
+
+    Bearer agent 인증만 허용 (업로드 주체는 항상 agent).
     """
-    await _fetch_owned_execution(execution_id, agent, session)
+    await _fetch_owned_execution(execution_id, agent.user_id, session)
 
     if kind not in ALLOWED_KINDS:
         raise HTTPException(
@@ -224,14 +226,17 @@ async def upload_capture(
 )
 async def list_captures(
     execution_id: str,
-    agent: Agent = Depends(current_agent),
+    subject: AuthSubject = Depends(current_subject),
     session: AsyncSession = Depends(get_session),
     limit: int = Query(default=LIST_LIMIT_DEFAULT, ge=1, le=LIST_LIMIT_MAX),
     offset: int = Query(default=0, ge=0),
     step_id: int | None = Query(default=None, ge=1),
 ) -> CaptureList:
-    """execution 의 캡처 메타데이터 리스트. 바이트는 GET /v0/captures/{id} 로."""
-    await _fetch_owned_execution(execution_id, agent, session)
+    """execution 의 캡처 메타데이터 리스트. 바이트는 GET /v0/captures/{id} 로.
+
+    M3.1.3: 쿠키/Bearer 둘 다 허용.
+    """
+    await _fetch_owned_execution(execution_id, subject.user_id, session)
 
     stmt = select(ExecutionCapture).where(
         ExecutionCapture.execution_id == execution_id
@@ -255,16 +260,19 @@ cap_router = APIRouter(prefix="/v0/captures", tags=["captures"])
 @cap_router.get("/{capture_id}")
 async def get_capture_bytes(
     capture_id: uuid.UUID = FPath(...),
-    agent: Agent = Depends(current_agent),
+    subject: AuthSubject = Depends(current_subject),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """caption_id 의 바이너리 내려주기. user_id 스코프 (execution 소유자)."""
+    """caption_id 의 바이너리 내려주기. user_id 스코프 (execution 소유자).
+
+    M3.1.3: 쿠키/Bearer 둘 다 허용.
+    """
     stmt = (
         select(ExecutionCapture, Execution)
         .join(Execution, Execution.execution_id == ExecutionCapture.execution_id)
         .where(
             ExecutionCapture.id == capture_id,
-            Execution.user_id == agent.user_id,
+            Execution.user_id == subject.user_id,
         )
     )
     res = (await session.execute(stmt)).first()

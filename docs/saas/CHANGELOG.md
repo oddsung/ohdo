@@ -4,6 +4,58 @@
 
 ---
 
+## 2026-04-27 (M3.1.3 구현·로컬 e2e) — Executions 리스트·상세 페이지 + 합성 인증 dep
+
+**설계**: [architecture/20-m3.1.3-executions-ui.md](architecture/20-m3.1.3-executions-ui.md) — 백엔드에 `current_subject` (쿠키 OR Bearer) 합성 dep 도입해 read-only 엔드포인트가 web/agent 양쪽에서 호출 가능. 웹은 dashboard 가 executions 리스트로 교체되고 `/executions/[id]` 상세 페이지가 추가됨. 진행 중인 실행은 3초 polling, terminal 도달 시 자동 정지.
+
+**변경된 파일** (core 수정 0):
+
+### 백엔드
+
+- `packages/backend/app/dependencies.py` [수정] — `AuthSubject` dataclass (`user_id`, `agent_id`, `kind`) + `_try_cookie_user` / `_try_bearer_agent` silent helper + `current_subject` dep. 기존 `current_user`/`current_agent` 는 유지 (다른 라우터들과 write 라우터에서 사용 중).
+- `packages/backend/app/routers/executions.py` [수정] — read-only 4 엔드포인트 (`GET /v0/executions/{id}`, `GET /v0/executions`, `GET /v0/executions/{id}/logs`, `POST /v0/executions/{id}/cancel`) 가 `current_subject` 사용. POST `/v0/executions` 는 `current_agent` 유지 (agent_id 가 row 에 박힘).
+- `packages/backend/app/routers/captures.py` [수정] — `_fetch_owned_execution` 시그니처 `agent: Agent` → `user_id: uuid.UUID` 로 일반화. GET `/v0/executions/{id}/captures` + GET `/v0/captures/{id}` 가 `current_subject` 사용. POST `/v0/executions/{id}/captures` 는 `current_agent` 유지.
+
+### 웹
+
+- `packages/web/lib/format.ts` [신규] — `STATUS_STYLES`/`STATUS_LABELS`/`TERMINAL_STATUSES` + `formatDateTime`/`formatDuration`/`shortenExecId`.
+- `packages/web/lib/executions.ts` [신규] — `serverFetch` 헬퍼 (cookies 자동 첨부) + `listExecutionsServer`/`getExecutionServer`/`listLogsServer`/`listCapturesServer` + Execution/LogEntry/Capture 타입.
+- `packages/web/components/execution-status-badge.tsx` [신규] — Tailwind 색 배지.
+- `packages/web/components/executions-list.tsx` [신규, client] — 상태 dropdown 필터 + "더 보기" 페이지네이션 (limit 20) + "새로고침" 버튼. apiFetch 로 `/v0/executions` 호출.
+- `packages/web/components/execution-logs-tail.tsx` [신규, client] — 스트림 dropdown (전체/engine/stdout/stderr) + 3초 polling (status 가 non-terminal 일 때만) + 스트림별 색 (engine 회색 / stdout 검은색 / stderr 빨강) + 더 보기. 폴링 race 방지를 위해 tick 카운터로 stale response 무시.
+- `packages/web/app/dashboard/page.tsx` [교체] — 헤더 + `<ExecutionsList>` 초기 데이터를 server-side fetch 로 prefetch.
+- `packages/web/app/executions/[id]/page.tsx` [신규] — 상태 배지 + `error_summary` 강조 + 메타 카드 6개 (총 스텝 / 실행됨·성공·실패 / 총 소요 / 시작 / 종료 / from-to step) + LogsTail + Captures 메타 (count + step_id + size, 인라인 이미지는 M3.1.5).
+
+**검증**:
+
+- 백엔드 e2e (SQLite, uvicorn :8779) 8 시나리오 모두 PASS:
+  - B1 쿠키 GET /executions → 200 + 자기 user_id 의 row 만
+  - B2 쿠키로 다른 user 의 detail → 404
+  - B3 Bearer GET /executions → 기존과 동일
+  - B4 인증 없이 → 401 not_authenticated
+  - B5 쿠키 사용자 POST cancel (자기 exec, agent offline) → 503 agent_offline
+  - B6 쿠키 사용자 POST /v0/executions → 401 missing_token (current_agent 만 받음)
+  - B7 쿠키 GET /logs → 200
+  - B8 쿠키 GET /captures → 200 (path traversal regex 도 함께 검증됨)
+- 웹: `npm run typecheck` PASS / `npm run build` PASS (4 routes: 정적 /sign-in, 동적 / /dashboard /executions/[id]).
+- 코어 회귀 25/25 (18:59).
+
+**M3.1.3 완료 조건 체크**:
+
+- [x] AuthSubject + current_subject (cookie OR bearer)
+- [x] 6 read-only 라우트 current_subject 적용 (write 2개는 current_agent 유지)
+- [x] 백엔드 e2e 8 시나리오
+- [x] 웹 lib/components/pages
+- [x] typecheck + build PASS
+- [x] 코어 회귀 25/25
+- [ ] **브라우저 실기 검증** — 사용자가 dashboard 에서 리스트 보기 → 상태 필터 → 상세 페이지 → 로그 polling → "더 보기"
+
+**M3.1.3 범위 밖**: cancel 버튼 UI (M3.1.4), 신규 실행 폼 (M3.1.4), 캡처 인라인 이미지 (M3.1.5), Vercel 배포.
+
+**Core 수정**: 없음.
+
+---
+
 ## 2026-04-24 (M3.1.2 구현·로컬 스모크) — Next.js 대시보드 shell + 매직링크 sign-in
 
 **설계**: [architecture/19-m3.1.2-web-scaffold.md](architecture/19-m3.1.2-web-scaffold.md) — `packages/web/` 신규. Next.js 16 + React 19 + Tailwind 3. 백엔드와 다른 포트지만 Next.js `rewrites` 로 `/v0/*` 와 `/auth/verify` 를 proxy 해 **브라우저 관점 same-origin** → CORS/쿠키 이슈 0. PUBLIC_BASE_URL 을 `http://localhost:3000` 으로 세팅하면 백엔드가 매직링크 URL 을 웹 도메인으로 출력.

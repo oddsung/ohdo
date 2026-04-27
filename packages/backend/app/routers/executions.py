@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import registry
 from ..db import get_session
-from ..dependencies import current_agent
+from ..dependencies import AuthSubject, current_agent, current_subject
 from ..models import Agent, Execution, ExecutionLog
 
 logger = logging.getLogger(__name__)
@@ -191,13 +191,13 @@ async def create_execution(
 @router.get("/{execution_id}", response_model=ExecutionRead)
 async def get_execution(
     execution_id: str,
-    agent: Agent = Depends(current_agent),
+    subject: AuthSubject = Depends(current_subject),
     session: AsyncSession = Depends(get_session),
 ) -> ExecutionRead:
-    """단건 조회. 같은 ``user_id`` 의 row 만 반환, 아니면 404."""
+    """단건 조회. 같은 ``user_id`` 의 row 만 반환, 아니면 404. 쿠키/Bearer 둘 다 허용."""
     stmt = select(Execution).where(
         Execution.execution_id == execution_id,
-        Execution.user_id == agent.user_id,
+        Execution.user_id == subject.user_id,
     )
     result = await session.execute(stmt)
     execution = result.scalar_one_or_none()
@@ -211,20 +211,20 @@ async def get_execution(
 
 @router.get("", response_model=ExecutionListResponse)
 async def list_executions(
-    agent: Agent = Depends(current_agent),
+    subject: AuthSubject = Depends(current_subject),
     session: AsyncSession = Depends(get_session),
     limit: int = Query(default=LIST_LIMIT_DEFAULT, ge=1, le=LIST_LIMIT_MAX),
     offset: int = Query(default=0, ge=0),
     status_filter: str | None = Query(default=None, alias="status"),
 ) -> ExecutionListResponse:
-    """같은 ``user_id`` 의 executions 를 최신순으로 리스트."""
+    """같은 ``user_id`` 의 executions 를 최신순으로 리스트. 쿠키/Bearer 둘 다 허용."""
     if status_filter is not None and status_filter not in ALLOWED_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "invalid_status_filter"},
         )
 
-    stmt = select(Execution).where(Execution.user_id == agent.user_id)
+    stmt = select(Execution).where(Execution.user_id == subject.user_id)
     if status_filter is not None:
         stmt = stmt.where(Execution.status == status_filter)
     stmt = (
@@ -246,7 +246,7 @@ async def list_executions(
 )
 async def list_execution_logs(
     execution_id: str,
-    agent: Agent = Depends(current_agent),
+    subject: AuthSubject = Depends(current_subject),
     session: AsyncSession = Depends(get_session),
     limit: int = Query(default=LOG_LIMIT_DEFAULT, ge=1, le=LOG_LIMIT_MAX),
     offset: int = Query(default=0, ge=0),
@@ -255,7 +255,7 @@ async def list_execution_logs(
 ) -> ExecutionLogsResponse:
     """M2.4: ``execution_id`` 에 속한 로그를 ``seq ASC`` 순으로 반환.
 
-    ``user_id`` 스코프 — execution 이 다른 user 소유면 404.
+    ``user_id`` 스코프 — execution 이 다른 user 소유면 404. 쿠키/Bearer 둘 다 허용 (M3.1.3).
     """
     if stream is not None and stream not in _ALLOWED_LOG_STREAMS:
         raise HTTPException(
@@ -266,7 +266,7 @@ async def list_execution_logs(
     # execution 소유 검증: user_id 스코프 (detail GET 과 동일).
     owner_stmt = select(Execution).where(
         Execution.execution_id == execution_id,
-        Execution.user_id == agent.user_id,
+        Execution.user_id == subject.user_id,
     )
     owner_result = await session.execute(owner_stmt)
     if owner_result.scalar_one_or_none() is None:
@@ -321,7 +321,7 @@ def _build_cancel_frame(execution_id: str) -> dict:
 )
 async def cancel_execution(
     execution_id: str,
-    agent: Agent = Depends(current_agent),
+    subject: AuthSubject = Depends(current_subject),
     session: AsyncSession = Depends(get_session),
 ) -> CancelResponse:
     """M2.5: 실행 중인 execution 을 에이전트에게 cancel 요청.
@@ -329,10 +329,12 @@ async def cancel_execution(
     서버 자체는 row 상태를 바꾸지 않는다. 에이전트가 ``execution.result`` 에
     ``status='cancelled'`` 로 응답해야 확정. 타임아웃·오프라인 등으로 에이전트가
     응답하지 않으면 row 는 running 인 채로 남는다 (이건 M2.6+ 에서 보강).
+
+    M3.1.3: 쿠키 인증 사용자도 자기 user_id 의 execution 을 취소 가능.
     """
     stmt = select(Execution).where(
         Execution.execution_id == execution_id,
-        Execution.user_id == agent.user_id,
+        Execution.user_id == subject.user_id,
     )
     execution = (await session.execute(stmt)).scalar_one_or_none()
     if execution is None:

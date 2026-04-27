@@ -6,13 +6,19 @@ ORM row 를 반환. 실패 시 401 (RFC 6750 스타일 ``WWW-Authenticate`` 헤�
 M3.1.1: ``current_user`` — ``ohdo_session`` httpOnly 쿠키를 검증해 ``User``
 ORM row 를 반환. 웹 브라우저 세션용.
 
+M3.1.3: ``current_subject`` — 쿠키 또는 Bearer 둘 중 하나로 인증. read-only
+엔드포인트가 web/agent 양쪽에서 호출 가능하게. 통합 키는 ``user_id``.
+
 설계:
 - docs/saas/architecture/06-m1.4-authenticated-ping.md
 - docs/saas/architecture/18-m3.1.1-web-auth.md
+- docs/saas/architecture/20-m3.1.3-executions-ui.md
 """
 
 from __future__ import annotations
 
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, status
@@ -122,3 +128,81 @@ async def current_user(
     us.last_seen_at = now
     await session.commit()
     return user
+
+
+# ── M3.1.3: 합성 인증 (쿠키 OR Bearer) ─────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class AuthSubject:
+    """인증된 호출자 (agent 또는 web user).
+
+    user_id 가 통합 스코프 키. agent_id 는 Bearer 로 인증됐을 때만 채워짐.
+    """
+
+    user_id: uuid.UUID
+    agent_id: uuid.UUID | None
+    kind: str  # "agent" | "user"
+
+
+async def _try_cookie_user(
+    request: Request, session: AsyncSession
+) -> User | None:
+    """쿠키 검증 silent 버전. 인증되면 User 반환, 아니면 None."""
+    raw = request.cookies.get(SESSION_COOKIE_NAME)
+    if not raw or not raw.startswith(SESSION_TOKEN_PREFIX):
+        return None
+    token_h = hash_token(raw)
+    stmt = (
+        select(UserSession, User)
+        .join(User, User.id == UserSession.user_id)
+        .where(UserSession.token_hash == token_h)
+    )
+    row = (await session.execute(stmt)).first()
+    if row is None:
+        return None
+    us: UserSession = row[0]
+    user: User = row[1]
+    expires_at = us.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if us.revoked_at is not None or expires_at <= now:
+        return None
+    us.last_seen_at = now
+    await session.commit()
+    return user
+
+
+async def _try_bearer_agent(
+    request: Request, session: AsyncSession
+) -> Agent | None:
+    """Bearer 검증 silent 버전. 인증되면 Agent 반환, 아니면 None."""
+    token = _extract_bearer_token(request)
+    if token is None or not token.startswith(AGENT_TOKEN_PREFIX):
+        return None
+    token_h = hash_token(token)
+    result = await session.execute(select(Agent).where(Agent.token_hash == token_h))
+    agent: Agent | None = result.scalar_one_or_none()
+    if agent is None or agent.revoked_at is not None:
+        return None
+    return agent
+
+
+async def current_subject(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AuthSubject:
+    """쿠키 → Bearer 순서로 시도. 둘 다 실패면 401."""
+    user = await _try_cookie_user(request, session)
+    if user is not None:
+        return AuthSubject(user_id=user.id, agent_id=None, kind="user")
+
+    agent = await _try_bearer_agent(request, session)
+    if agent is not None:
+        return AuthSubject(user_id=agent.user_id, agent_id=agent.id, kind="agent")
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"error": "not_authenticated"},
+    )
