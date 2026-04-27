@@ -7,6 +7,7 @@ import {
   listCapturesServer,
 } from "@/lib/executions";
 import { CancelButton } from "@/components/cancel-button";
+import { CapturesGrid } from "@/components/captures-grid";
 import { ExecutionStatusBadge } from "@/components/execution-status-badge";
 import { ExecutionLogsTail } from "@/components/execution-logs-tail";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -101,35 +102,13 @@ export default async function ExecutionDetailPage({
           <h3 className="text-sm font-medium text-gray-700">
             캡처 ({captures?.items.length ?? 0})
           </h3>
-          {captures && captures.items.length > 0 ? (
-            <ul className="rounded-md border border-gray-200 bg-white divide-y divide-gray-100 text-sm">
-              {captures.items.map((c) => (
-                <li
-                  key={c.capture_id}
-                  className="px-4 py-2 flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-gray-700">
-                      step {c.step_id ?? "—"}
-                    </span>
-                    <span className="text-gray-400 text-xs">
-                      {c.content_type}
-                    </span>
-                    <span className="text-gray-500 text-xs">
-                      {(c.size_bytes / 1024).toFixed(1)} KB
-                    </span>
-                  </div>
-                  <span className="text-xs text-gray-400 font-mono">
-                    {c.capture_id.slice(0, 8)}…
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-gray-500">캡처 없음</p>
-          )}
+          <CapturesGrid
+            executionId={exec.execution_id}
+            initialStatus={exec.status}
+            initialItems={captures?.items ?? []}
+          />
           <p className="text-xs text-gray-400">
-            (캡처 인라인 미리보기는 M3.1.5 에서 추가 예정)
+            카드 클릭 시 새 탭에서 원본 이미지 보기. 진행 중 실행은 자동 새로고침됩니다.
           </p>
         </div>
       </section>

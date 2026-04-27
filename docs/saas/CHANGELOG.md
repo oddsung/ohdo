@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-04-27 (M3.1.5 구현·로컬 빌드) — 캡처 인라인 뷰어
+
+**설계**: [architecture/22-m3.1.5-captures-viewer.md](architecture/22-m3.1.5-captures-viewer.md) — 상세 페이지의 캡처 섹션이 메타만 보여주던 것을 그리드 + 인라인 PNG 표시로 교체. `<img src="/v0/captures/{id}">` 가 Next.js rewrite 로 backend 에 same-origin 으로 도달해 쿠키 자동 첨부. 진행 중 실행은 captures list 도 3초 polling.
+
+**변경된 파일** (백엔드·core 수정 0):
+
+- `packages/web/components/captures-grid.tsx` [신규, client] — 그리드 (1/2/3열 반응형) + `<CaptureCard>` 서브컴포넌트. 카드: aspect-[16/10] 컨테이너 + object-contain 이미지 + step·KB 라벨. 클릭 시 새 탭으로 원본. `onError` → "이미지 사라짐 (410)" placeholder (Railway ephemeral FS 대응). non-terminal status 일 때만 polling, terminal 도달 시 자동 정지. tick 카운터로 stale response 무시.
+- `packages/web/app/executions/[id]/page.tsx` [수정] — 기존 메타 리스트 (`<ul>`) 를 `<CapturesGrid>` 로 교체. SSR initial fetch 결과 + status 를 prop 으로 전달.
+
+**검증**:
+
+- `npm run typecheck` PASS / `npm run build` PASS (5 routes 동일).
+- 코어 회귀 25/25 (20:25).
+
+**M3.1.5 완료 조건 체크**:
+
+- [x] 그리드 + 인라인 PNG 표시
+- [x] 새 탭 원본 보기 (Anchor target=_blank, 쿠키 자동)
+- [x] 410 fallback placeholder
+- [x] non-terminal polling + tick 카운터
+- [x] typecheck + build PASS
+- [x] 코어 회귀 25/25
+- [ ] 사용자 수동 브라우저 검증 (M3.1.3·M3.1.4 와 동일하게 dev 격리, 또는 M3.1.6 배포 후 자연 검증)
+
+**M3.1.5 범위 밖**: 다중 agent dropdown (M3.1.6), 라이트박스 모달, 캡처 zip 다운로드, 회전·줌, 사전 썸네일 생성.
+
+**Core / 백엔드 수정**: 없음 (M3.1.3 의 `current_subject` 가 captures GET 들에 이미 적용됨).
+
+**Railway 재배포 불필요** — 웹만 변경.
+
+---
+
 ## 2026-04-27 (M3.1.4 구현·로컬 e2e) — 웹 Cancel 버튼 + 신규 실행 폼
 
 **설계**: [architecture/21-m3.1.4-cancel-and-new-execution.md](architecture/21-m3.1.4-cancel-and-new-execution.md) — 웹에서 직접 실행을 만들고 취소할 수 있게. 백엔드 POST /v0/executions 가 cookie 인증도 받고 agent 자동 선택. cancel 은 M3.1.3 의 current_subject 덕에 백엔드 변경 0.
