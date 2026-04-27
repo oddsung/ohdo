@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-04-27 (M3.1.6 — 코드 준비) — Vercel 배포 가이드 + .env 템플릿 + README
+
+**설계**: [architecture/23-m3.1.6-vercel-deploy.md](architecture/23-m3.1.6-vercel-deploy.md) — `packages/web` 을 Vercel 에 배포해 dev 격리 (web localhost ↔ backend Railway) 이슈 자연 해소. 코드 변경 거의 없음 (M3.1.2 의 `next.config.ts` rewrites + 환경변수 기반 backend 주소가 이미 production-ready).
+
+**변경된 파일** (백엔드·core 수정 0):
+
+- `docs/saas/architecture/23-m3.1.6-vercel-deploy.md` [신규] — 배포 아키텍처, 사용자 수동 단계 (Vercel 프로젝트 생성, Railway 환경변수 추가), 검증 시나리오.
+- `packages/web/.env.example` [신규] — `API_BASE_URL` 템플릿 + 주석 (로컬 vs 프로덕션 가이드).
+- `packages/web/README.md` [신규] — dev 두 터미널 실행, 매직링크 흐름, 빌드, Vercel 배포 quickstart, 디렉터리 구조, 동작 원리 요약.
+
+**아키텍처 (배포 후)**:
+
+```
+[브라우저] ──https──→ ohdo-web-xxxxx.vercel.app
+                         ├── Next.js SSR
+                         └── /v0/* + /auth/verify rewrite ──https──→ ohdo-production.up.railway.app
+
+[브라우저 origin]: 항상 Vercel URL 하나 → CORS 불필요
+[쿠키 도메인]: Vercel URL → 매직링크 verify 도 Vercel 경유 → 같은 도메인
+```
+
+**검증**:
+
+- `npm run typecheck` PASS / `npm run build` PASS (5 routes 동일).
+- 코어 회귀 25/25 (M3.1.5 와 같은 수치 — 백엔드 변경 0).
+
+**M3.1.6 코드 준비 완료 조건 체크**:
+
+- [x] 설계 문서
+- [x] .env.example
+- [x] README quickstart
+- [x] next.config.ts production-ready 확인 (M3.1.2 부터 환경변수 기반)
+- [x] typecheck + build PASS
+- [x] 코어 회귀 25/25
+- [ ] **사용자 수동 작업** — Vercel 프로젝트 생성 + 환경변수 + Railway PUBLIC_BASE_URL 추가
+- [ ] **배포 후 브라우저 e2e** — 매직링크 → 대시보드 → 신규 실행 / cancel / 캡처 그리드 전체 흐름 확인
+
+**알려진 한계 (M3.2+ 보강)**:
+
+1. Rate limiting 없음 (매직링크 무한 발송 방지) — Stripe 도입과 함께
+2. 이메일 SMTP 미연결 — 매직링크 아직 dev stub
+3. 커스텀 도메인 (app.ohdo.ai) — 도메인 등록 후 Vercel 매핑
+
+**Core / 백엔드 수정**: 없음.
+
+---
+
 ## 2026-04-27 (M3.1.5 구현·로컬 빌드) — 캡처 인라인 뷰어
 
 **설계**: [architecture/22-m3.1.5-captures-viewer.md](architecture/22-m3.1.5-captures-viewer.md) — 상세 페이지의 캡처 섹션이 메타만 보여주던 것을 그리드 + 인라인 PNG 표시로 교체. `<img src="/v0/captures/{id}">` 가 Next.js rewrite 로 backend 에 same-origin 으로 도달해 쿠키 자동 첨부. 진행 중 실행은 captures list 도 3초 polling.
