@@ -48,6 +48,7 @@
 - [x] 웹 lib/components/pages
 - [x] typecheck + build PASS
 - [x] 코어 회귀 25/25
+- [x] Railway smoke (커밋 `6680249`) — 새 배포 활성화 후 unauth/bad-bearer 둘 다 `not_authenticated` (current_subject 적용 증거), 유효한 agent Bearer 로 GET /v0/executions 200 + M2.10 의 `exec_db547c8...` 정상 반환 (기존 agent 호환성 0 regression).
 - [ ] **브라우저 실기 검증** — 사용자가 dashboard 에서 리스트 보기 → 상태 필터 → 상세 페이지 → 로그 polling → "더 보기"
 
 **M3.1.3 범위 밖**: cancel 버튼 UI (M3.1.4), 신규 실행 폼 (M3.1.4), 캡처 인라인 이미지 (M3.1.5), Vercel 배포.
