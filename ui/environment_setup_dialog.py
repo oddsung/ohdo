@@ -103,7 +103,10 @@ class EnvironmentSetupDialog(QDialog):
         self.btn_layout.addStretch()
 
         self.rescan_btn = QPushButton("🔄 재스캔")
-        self.rescan_btn.clicked.connect(self._start_scan)
+        # QPushButton.clicked 는 bool(checked) 를 emit 하므로 lambda 로 인자를 흡수.
+        # 직접 _start_scan 에 connect 하면 python_path=False 로 호출되어 subprocess
+        # 가 TypeError("expected str ... not bool") 를 던진다.
+        self.rescan_btn.clicked.connect(lambda: self._start_scan())
         self.rescan_btn.setVisible(False)
         self.btn_layout.addWidget(self.rescan_btn)
 
@@ -209,6 +212,21 @@ class EnvironmentSetupDialog(QDialog):
 
         layout.addWidget(pkg_group)
 
+        # Gemini CLI 상태 (F.2)
+        gemini_group = QGroupBox("🤖 Gemini CLI (AI 채팅에 필수)")
+        gemini_layout = QFormLayout(gemini_group)
+        self.gemini_status_label = QLabel("검사 중...")
+        self.gemini_path_label = QLabel("-")
+        self.gemini_version_label = QLabel("-")
+        self.gemini_detail_label = QLabel("")
+        self.gemini_detail_label.setWordWrap(True)
+        self.gemini_detail_label.setStyleSheet("color: #f9e2af;")
+        gemini_layout.addRow("상태:", self.gemini_status_label)
+        gemini_layout.addRow("경로:", self.gemini_path_label)
+        gemini_layout.addRow("버전:", self.gemini_version_label)
+        gemini_layout.addRow("", self.gemini_detail_label)
+        layout.addWidget(gemini_group)
+
         return page
 
     def _create_manual_page(self) -> QWidget:
@@ -298,6 +316,20 @@ class EnvironmentSetupDialog(QDialog):
         self.scan_result = env_data
         self._display_result(env_data)
 
+        # F.2: 캐시에 Gemini 정보가 없거나 미설치면 자동 적용을 보류 (재검사 권장).
+        gemini_cached = env_data.get('gemini_cli') or {}
+        cache_complete = bool(gemini_cached) and bool(gemini_cached.get('installed'))
+
+        if not cache_complete:
+            # 캐시가 오래되어 Gemini 정보가 없거나 미설치 → 라이브 재스캔 추천
+            self._show_buttons()
+            QMessageBox.information(
+                self, "환경 재검사 필요",
+                "저장된 환경에 Gemini CLI 정보가 누락되었거나 미설치 상태입니다.\n"
+                "'재스캔' 버튼으로 최신 상태를 확인하세요.",
+            )
+            return
+
         # 자동 적용 옵션
         reply = QMessageBox.question(
             self,
@@ -317,6 +349,10 @@ class EnvironmentSetupDialog(QDialog):
 
     def _start_scan(self, python_path: Optional[str] = None):
         """환경 스캔 시작"""
+        # 방어: 시그널 잘못 연결 등으로 bool/non-str 가 들어와도 None 으로 정규화
+        if not isinstance(python_path, str):
+            python_path = None
+
         self.stack.setCurrentIndex(0)
         self.progress_bar.setValue(0)
         self.scan_status.setText("환경 스캔 시작...")
@@ -414,6 +450,67 @@ class EnvironmentSetupDialog(QDialog):
             row += 1
 
         self.install_btn.setVisible(has_missing)
+
+        # Gemini CLI 상태 표시 (F.2)
+        self._display_gemini(result.get('gemini_cli') or {})
+
+        # Apply 버튼 게이트 갱신
+        self._update_apply_gate(result)
+
+    def _display_gemini(self, gemini: Dict):
+        """Gemini CLI 상태 패널 갱신"""
+        installed = bool(gemini.get('installed'))
+        path = gemini.get('path')
+        version = gemini.get('version')
+        error = gemini.get('error')
+        detail = gemini.get('detail') or ""
+
+        if installed:
+            self.gemini_status_label.setText("✅ 설치됨")
+            self.gemini_status_label.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+            self.gemini_detail_label.setText("")
+        else:
+            err_label = {
+                'not_found': "❌ 미설치 (PATH 에 없음)",
+                'timeout': "⚠️ 응답 시간 초과",
+                'execution_error': "⚠️ 실행 오류",
+                'non_zero_exit': "⚠️ 비정상 종료",
+            }.get(error, "❌ 사용 불가")
+            self.gemini_status_label.setText(err_label)
+            self.gemini_status_label.setStyleSheet("color: #f38ba8; font-weight: bold;")
+            # 미설치는 가장 흔한 경로 — 추가 안내 1줄
+            if error == 'not_found':
+                detail = (detail + "\n'gemini' 명령이 PATH 에서 동작해야 AI 채팅이 가능합니다. "
+                          "설치 후 '재스캔' 을 눌러주세요.").strip()
+            self.gemini_detail_label.setText(detail)
+
+        self.gemini_path_label.setText(path or "-")
+        self.gemini_version_label.setText(version or "-")
+
+    def _update_apply_gate(self, result: Dict):
+        """Apply 버튼 활성/비활성 + tooltip 사유 갱신.
+
+        활성 조건:
+            1) 필수 패키지 모두 설치됨
+            2) Gemini CLI installed=True
+        둘 다 만족하지 못하면 비활성, tooltip 으로 사유 노출.
+        """
+        packages = result.get('packages') or {}
+        all_required = bool(packages.get('all_required_installed'))
+        gemini_ok = bool((result.get('gemini_cli') or {}).get('installed'))
+
+        reasons = []
+        if not all_required:
+            reasons.append("필수 패키지가 일부 누락되었습니다")
+        if not gemini_ok:
+            reasons.append("Gemini CLI 가 설치되지 않았습니다")
+
+        if reasons:
+            self.apply_btn.setEnabled(False)
+            self.apply_btn.setToolTip("적용 불가: " + " / ".join(reasons))
+        else:
+            self.apply_btn.setEnabled(True)
+            self.apply_btn.setToolTip("")
 
     def _add_package_row(self, row: int, pkg: Dict, is_required: bool):
         """패키지 테이블 행 추가"""
@@ -540,6 +637,26 @@ class EnvironmentSetupDialog(QDialog):
             self.selected_python = self.python_combo.currentData()
             if self.selected_python:
                 self.scan_result['python_path'] = self.selected_python
+
+        # 최종 게이트 (F.2): 어떻게든 비활성이 풀려도 한 번 더 막는다
+        packages = self.scan_result.get('packages') or {}
+        gemini = self.scan_result.get('gemini_cli') or {}
+        if not packages.get('all_required_installed') or not gemini.get('installed'):
+            problems = []
+            if not packages.get('all_required_installed'):
+                problems.append("• 필수 패키지 일부 미설치")
+            if not gemini.get('installed'):
+                problems.append("• Gemini CLI 미설치 (AI 채팅 불가)")
+            reply = QMessageBox.warning(
+                self, "환경 미충족",
+                "다음 문제가 있습니다:\n\n" + "\n".join(problems) +
+                "\n\n그래도 이 설정으로 진행하시겠습니까?\n"
+                "(나중에 '재스캔' 으로 다시 검사할 수 있습니다)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         # 환경 저장
         from core.environment_scanner import get_scanner

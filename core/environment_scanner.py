@@ -72,8 +72,9 @@ class EnvironmentScanner:
             mac = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff)
                           for ele in range(0, 48, 8)][::-1])
             info_parts.append(mac)
-        except:
-            pass
+        except Exception as e:
+            # uuid.getnode() 가 매우 드물게 실패할 수 있음 — 호스트명/CPU 만으로도 ID 안정적
+            print(f"[DEBUG] MAC 주소 수집 실패 (무시됨): {e}")
 
         # 사용자 이름 추가
         info_parts.append(os.environ.get('USERNAME', os.environ.get('USER', '')))
@@ -140,6 +141,77 @@ class EnvironmentScanner:
         except IOError:
             return False
 
+    @staticmethod
+    def _probe_python_version(python_path: str, timeout: int = 5) -> str:
+        """주어진 python.exe 의 버전 문자열을 안전하게 조회.
+
+        실패 사유는 silent 가 아니라 좁혀서 처리한다 — 예상 가능한 실패
+        (subprocess/OSError) 만 'unknown' 으로 폴백하고, 그 외 예외는 위로
+        전파시켜 디버깅을 어렵게 만들지 않는다.
+        """
+        try:
+            result = subprocess.run(
+                [python_path, '--version'],
+                capture_output=True, text=True, timeout=timeout
+            )
+            return result.stdout.strip().replace('Python ', '') or "unknown"
+        except (subprocess.SubprocessError, OSError, UnicodeDecodeError) as e:
+            print(f"[DEBUG] Python 버전 조회 실패 ({python_path}): {e}")
+            return "unknown"
+
+    def check_gemini_cli(self, command: str = "gemini", timeout: int = 10) -> Dict:
+        """Gemini CLI 가 설치되어 있고 실행 가능한지 검증.
+
+        반환 dict 키:
+            - installed: PATH 에서 찾았고 --version 호출이 성공한 경우 True
+            - command: 검사한 명령어 (기본 'gemini')
+            - path: shutil.which 결과 (없으면 None)
+            - version: 'gemini --version' 의 stdout (실패 시 None)
+            - error: 'not_found' | 'timeout' | 'non_zero_exit' | None
+            - detail: 사람이 읽을 수 있는 추가 메시지 (옵션)
+        """
+        result: Dict = {
+            'installed': False,
+            'command': command,
+            'path': None,
+            'version': None,
+            'error': None,
+            'detail': None,
+        }
+
+        path = shutil.which(command)
+        if not path:
+            result['error'] = 'not_found'
+            result['detail'] = f"PATH 에서 '{command}' 를 찾을 수 없습니다."
+            return result
+
+        result['path'] = path
+
+        try:
+            proc = subprocess.run(
+                [path, '--version'],
+                capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            result['error'] = 'timeout'
+            result['detail'] = f"'{command} --version' 이 {timeout}초 안에 응답하지 않았습니다."
+            return result
+        except (OSError, UnicodeDecodeError) as e:
+            result['error'] = 'execution_error'
+            result['detail'] = f"실행 중 오류: {e}"
+            return result
+
+        if proc.returncode != 0:
+            result['error'] = 'non_zero_exit'
+            stderr_tail = (proc.stderr or '').strip().splitlines()[-1:] or ['']
+            result['detail'] = f"종료 코드 {proc.returncode}: {stderr_tail[0]}"
+            return result
+
+        version = (proc.stdout or proc.stderr or '').strip()
+        result['installed'] = True
+        result['version'] = version or 'unknown'
+        return result
+
     def find_python_paths(self) -> List[Dict]:
         """시스템에서 사용 가능한 Python 경로 탐색"""
         python_paths = []
@@ -158,18 +230,9 @@ class EnvironmentScanner:
         for name in ['python', 'python3', 'py']:
             path = shutil.which(name)
             if path and path != sys.executable and os.path.exists(path):
-                try:
-                    result = subprocess.run(
-                        [path, '--version'],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    version = result.stdout.strip().replace('Python ', '')
-                except:
-                    version = "unknown"
-
                 python_paths.append({
                     'path': path,
-                    'version': version,
+                    'version': self._probe_python_version(path),
                     'is_current': False,
                     'is_venv': False,
                     'exists': True
@@ -189,18 +252,9 @@ class EnvironmentScanner:
                     if subdir.is_dir():
                         python_exe = subdir / 'python.exe'
                         if python_exe.exists() and str(python_exe) not in [p['path'] for p in python_paths]:
-                            try:
-                                result = subprocess.run(
-                                    [str(python_exe), '--version'],
-                                    capture_output=True, text=True, timeout=5
-                                )
-                                version = result.stdout.strip().replace('Python ', '')
-                            except:
-                                version = "unknown"
-
                             python_paths.append({
                                 'path': str(python_exe),
-                                'version': version,
+                                'version': self._probe_python_version(str(python_exe)),
                                 'is_current': False,
                                 'is_venv': False,
                                 'exists': True
@@ -210,18 +264,9 @@ class EnvironmentScanner:
         project_root = Path(__file__).parent.parent
         venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
         if venv_python.exists() and str(venv_python) not in [p['path'] for p in python_paths]:
-            try:
-                result = subprocess.run(
-                    [str(venv_python), '--version'],
-                    capture_output=True, text=True, timeout=5
-                )
-                version = result.stdout.strip().replace('Python ', '')
-            except:
-                version = "unknown"
-
             python_paths.append({
                 'path': str(venv_python),
-                'version': version,
+                'version': self._probe_python_version(str(venv_python)),
                 'is_current': False,
                 'is_venv': True,
                 'exists': True
@@ -247,8 +292,9 @@ class EnvironmentScanner:
                         capture_output=True, text=True, timeout=10
                     )
                     version = ver_result.stdout.strip()
-                except:
-                    pass
+                except (subprocess.SubprocessError, OSError, UnicodeDecodeError) as e:
+                    # 패키지는 import 됐는데 __version__ 만 못 읽는 경우 — 로그만 남기고 None
+                    print(f"[DEBUG] {package_name} 버전 조회 실패 (무시됨): {e}")
 
             return {
                 'package': package_name,
@@ -326,24 +372,20 @@ class EnvironmentScanner:
             'machine_id': self.get_machine_id(),
             'system_info': self.get_system_info(),
             'python_path': python_path,
-            'python_version': None,
+            'python_version': self._probe_python_version(python_path),
             'available_pythons': self.find_python_paths(),
             'packages': None,
+            'gemini_cli': None,
             'scan_time': datetime.now().isoformat()
         }
 
-        # Python 버전 확인
-        try:
-            result = subprocess.run(
-                [python_path, '--version'],
-                capture_output=True, text=True, timeout=5
-            )
-            env_data['python_version'] = result.stdout.strip().replace('Python ', '')
-        except:
-            env_data['python_version'] = 'unknown'
-
         # 패키지 상태 확인
         env_data['packages'] = self.check_all_packages(python_path)
+
+        # Gemini CLI 검사 — 미설치여도 앱은 기동 가능 (UI 만 동작), 따라서
+        # full_scan 결과에는 포함하되 is_environment_valid 의 invalid 사유에는
+        # 포함하지 않는다. dialog 가 별도로 게이트한다.
+        env_data['gemini_cli'] = self.check_gemini_cli()
 
         return env_data
 

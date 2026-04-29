@@ -1,0 +1,670 @@
+{
+  "suite_name": "core",
+  "run_time": "2026-04-28T23:00:52.486352",
+  "duration_ms": 12406,
+  "total": 36,
+  "passed": 36,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "CoreTest.test_01_session_create_and_load",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.015235",
+      "duration_ms": 38,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.024] ── 단계: 임시 디렉토리에 세션 매니저 생성 ──",
+        "[23:00:53.026] ── 단계: 세션 생성 ──",
+        "[23:00:53.039] [PASS] 세션 ID가 생성되어야 합니다",
+        "[23:00:53.039] [PASS] '테스트 세션' == '테스트 세션'",
+        "[23:00:53.039] [PASS] 'desktop' == 'desktop'",
+        "[23:00:53.039] 세션 생성됨: 022bacf2-6ff0-4129-bc35-6f4276b481d1",
+        "[23:00:53.039] ── 단계: 세션 로드 ──",
+        "[23:00:53.050] [PASS] 로드된 제목이 일치해야 합니다",
+        "[23:00:53.050] [PASS] 세션 ID가 일치해야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_02_session_step_management",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.054218",
+      "duration_ms": 22,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.057] ── 단계: 스텝 3개 추가 ──",
+        "[23:00:53.060] [PASS] 3개 스텝이 추가되어야 합니다",
+        "[23:00:53.060] ── 단계: 스텝 업데이트 ──",
+        "[23:00:53.069] [PASS] 스텝 2 상태가 업데이트되어야 합니다",
+        "[23:00:53.069] ── 단계: 스텝 삭제 ──",
+        "[23:00:53.071] [PASS] 스텝 삭제가 성공해야 합니다",
+        "[23:00:53.071] [PASS] 2개 스텝이 남아야 합니다",
+        "[23:00:53.071] [PASS] 첫 번째 스텝 ID = 1",
+        "[23:00:53.071] [PASS] 두 번째 스텝 ID = 2",
+        "[23:00:53.071] ── 단계: 스텝 이동 ──",
+        "[23:00:53.072] [PASS] 스텝 1이 아래로 이동해야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_03_session_list_and_delete",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.076490",
+      "duration_ms": 64,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.077] ── 단계: 세션 3개 생성 ──",
+        "[23:00:53.086] ── 단계: 세션 목록 조회 ──",
+        "[23:00:53.111] [PASS] 3개 세션이 목록에 있어야 합니다",
+        "[23:00:53.111] ── 단계: 세션 삭제 ──",
+        "[23:00:53.134] [PASS] 삭제 후 2개 세션이 남아야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_04_session_export_workflow",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.141090",
+      "duration_ms": 11,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.148] ── 단계: 워크플로우 내보내기 ──",
+        "[23:00:53.149] [PASS] import문이 포함되어야 합니다",
+        "[23:00:53.149] [PASS] os import가 포함되어야 합니다",
+        "[23:00:53.149] [PASS] 코드 본문이 포함되어야 합니다",
+        "[23:00:53.149] [PASS] 두 번째 스텝 코드도 포함되어야 합니다",
+        "[23:00:53.149] 내보낸 코드 길이: 264자"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_05_session_export_project",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.152948",
+      "duration_ms": 20,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.156] ── 단계: 프로젝트 내보내기 ──",
+        "[23:00:53.160] [PASS] main.py가 생성되어야 합니다",
+        "[23:00:53.160] [PASS] requirements.txt가 생성되어야 합니다",
+        "[23:00:53.160] [PASS] README.md가 생성되어야 합니다",
+        "[23:00:53.167] [PASS] main.py에 코드가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_06_prompt_builder_basic",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.172952",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.174] ── 단계: PromptBuilder 생성 ──",
+        "[23:00:53.174] ── 단계: 스텝 프롬프트 생성 ──",
+        "[23:00:53.174] [PASS] 사용자 요청이 프롬프트에 포함되어야 합니다",
+        "[23:00:53.174] [PASS] pywinauto 가이드가 포함되어야 합니다",
+        "[23:00:53.174] [PASS] Selenium 가이드가 포함되어야 합니다",
+        "[23:00:53.174] [PASS] 코드블록 규칙이 포함되어야 합니다",
+        "[23:00:53.174] 프롬프트 길이: 13837자"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_07_prompt_builder_with_context",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.174505",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.174] ── 단계: 이전 코드 포함된 프롬프트 ──",
+        "[23:00:53.174] [PASS] 이전 스텝 코드가 포함되어야 합니다",
+        "[23:00:53.174] [PASS] 누적 코드 안내가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_08_prompt_builder_error_recovery",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.174505",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.174] ── 단계: 에러 복구 프롬프트 ──",
+        "[23:00:53.174] [PASS] 에러 메시지가 포함되어야 합니다",
+        "[23:00:53.174] [PASS] 현재 코드가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_09_prompt_builder_browser_element",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.174505",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.174] ── 단계: 브라우저 요소 컨텍스트 프롬프트 ──",
+        "[23:00:53.174] [PASS] 브라우저 요소일 때 Selenium 지시가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_10_sandbox_execute_success",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.174505",
+      "duration_ms": 61,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.176] ── 단계: 간단한 코드 실행 ──",
+        "[23:00:53.236] [PASS] 실행 성공해야 합니다: None",
+        "[23:00:53.236] [PASS] 출력이 캡처되어야 합니다",
+        "[23:00:53.236] 실행 시간: 58ms"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_11_sandbox_execute_error",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.236417",
+      "duration_ms": 64,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.236] ── 단계: 에러 코드 실행 ──",
+        "[23:00:53.300] [PASS] 실행 실패해야 합니다",
+        "[23:00:53.300] [PASS] 에러 메시지에 에러 타입이 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_12_sandbox_timeout",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:53.300707",
+      "duration_ms": 2025,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:53.300] ── 단계: 타임아웃 테스트 (2초 제한) ──",
+        "[23:00:55.325] [PASS] 타임아웃으로 실패해야 합니다",
+        "[23:00:55.325] [PASS] 타임아웃 에러 메시지가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_13_ai_engine_manager_init",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.325943",
+      "duration_ms": 8,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.330] ── 단계: 설정으로 초기화 ──",
+        "[23:00:55.330] [PASS] 기본 엔진이 gemini_cli이어야 합니다",
+        "[23:00:55.330] ── 단계: 사용 가능한 엔진 목록 ──",
+        "[23:00:55.334] [PASS] 최소 1개 엔진이 있어야 합니다",
+        "[23:00:55.334] 엔진 목록: [{'name': 'gemini_cli', 'display_name': 'Gemini CLI', 'available': True, 'is_current': True}]"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_14_ai_engine_switch",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.334507",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.334] ── 단계: 존재하지 않는 엔진 전환 시도 ──",
+        "[23:00:55.335] 예상된 에러 발생: 알 수 없는 AI 엔진: 'nonexistent'. 사용 가능: ['gemini_cli']"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_15_win_inspector_code_gen_desktop",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.335499",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.336] ── 단계: 일반 데스크톱 요소 코드 생성 ──",
+        "[23:00:55.336] [PASS] pywinauto 코드가 포함되어야 합니다",
+        "[23:00:55.336] [PASS] automation_id가 포함되어야 합니다",
+        "[23:00:55.336] [PASS] DPI 설정 코드가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_16_win_inspector_code_gen_owner_drawn",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.336509",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.336] ── 단계: Owner-drawn 요소 코드 생성 ──",
+        "[23:00:55.336] [PASS] owner-drawn 안내가 있어야 합니다",
+        "[23:00:55.336] [PASS] 좌표 기반 클릭 코드가 있어야 합니다",
+        "[23:00:55.336] [PASS] screen_x 좌표가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_17_win_inspector_code_gen_browser",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.336509",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.336] ── 단계: 인터랙티브 브라우저 요소 (direct click) - CDP DOM 수집됨 ──",
+        "[23:00:55.336] [PASS] Button은 find_and_click 패턴이어야 합니다",
+        "[23:00:55.336] ── 단계: 비인터랙티브 브라우저 요소 (JS click) - CDP DOM 수집됨 ──",
+        "[23:00:55.336] [PASS] Text 요소는 JS click이어야 합니다",
+        "[23:00:55.336] [PASS] script 태그 제외 XPath가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_18_win_inspector_dynamic_autoid_warning",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.336509",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.336] [PASS] 순수 숫자 auto_id에 대한 경고가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_19_extract_imports_basic",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.336509",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.336] [PASS] import 3개 추출",
+        "[23:00:55.336] [PASS] 첫 번째 import",
+        "[23:00:55.336] [PASS] body에 코드 포함",
+        "[23:00:55.336] [PASS] body에 import가 없어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_20_extract_imports_with_docstring",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.336509",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.337] [PASS] docstring 이후 import 2개 추출",
+        "[23:00:55.337] [PASS] body에 코드 포함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_21_extract_imports_midcode_import_stays",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.337014",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.337] [PASS] 상단 import만 1개 추출",
+        "[23:00:55.337] [PASS] 중간 import는 body에 남아야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_22_merge_imports_dedup",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.337014",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.337] [PASS] 중복 제거 후 4개",
+        "[23:00:55.337] [PASS] import os는 1번만"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_23_assemble_script",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.337014",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.337] [PASS] import 포함",
+        "[23:00:55.337] [PASS] 코드1 포함",
+        "[23:00:55.337] [PASS] import가 코드보다 먼저 나와야 합니다",
+        "[23:00:55.337] [PASS] 스텝1 시작 주석",
+        "[23:00:55.337] [PASS] 스텝1 끝 주석",
+        "[23:00:55.337] [PASS] 스텝2 시작 주석",
+        "[23:00:55.337] [PASS] 스텝1 코드 포함",
+        "[23:00:55.337] [PASS] 스텝2 코드 포함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_24_extract_package_names",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.337014",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.337] [PASS] pywinauto 포함",
+        "[23:00:55.337] [PASS] selenium 포함",
+        "[23:00:55.337] [PASS] pyautogui 포함",
+        "[23:00:55.337] [PASS] os는 stdlib이므로 제외",
+        "[23:00:55.337] [PASS] time은 stdlib이므로 제외"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_25_export_workflow_with_step_comments",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.337014",
+      "duration_ms": 2,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.337] ── 단계: 스텝 2개로 export (conversation 포함) ──",
+        "[23:00:55.338] [PASS] export에서 import os 중복 제거",
+        "[23:00:55.338] [PASS] 스텝1 시작 주석",
+        "[23:00:55.338] [PASS] 스텝1 끝 주석",
+        "[23:00:55.338] [PASS] 스텝2 시작 주석",
+        "[23:00:55.338] [PASS] 스텝2 끝 주석",
+        "[23:00:55.338] [PASS] 스텝1 코드 포함",
+        "[23:00:55.338] [PASS] 스텝2 코드 포함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_26_env_machine_id_stable",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.339265",
+      "duration_ms": 33,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.372] [PASS] machine_id 가 동일 환경에서 안정적이어야 합니다",
+        "[23:00:55.372] [PASS] machine_id 는 16자 hex 문자열이어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_27_env_save_load_roundtrip",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.372838",
+      "duration_ms": 12,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.374] ── 단계: 환경 데이터 저장 ──",
+        "[23:00:55.375] [PASS] save_environment 는 성공해야 합니다",
+        "[23:00:55.375] ── 단계: 저장된 환경 로드 ──",
+        "[23:00:55.384] [PASS] 저장 직후 로드는 dict 를 반환해야 합니다",
+        "[23:00:55.384] [PASS] 'C:\\\\Users\\\\NeodaVinci\\\\ohdo\\\\.venv\\\\Scripts\\\\python.exe' == 'C:\\\\Users\\\\NeodaVinci\\\\ohdo\\\\.venv\\\\Scripts\\\\python.exe'",
+        "[23:00:55.384] [PASS] machine_id 가 자동으로 박혀야 합니다",
+        "[23:00:55.384] [PASS] last_scan 타임스탬프가 박혀야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_28_env_load_other_machine_resets",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.385498",
+      "duration_ms": 3,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.386] ── 단계: 타 컴퓨터의 환경 파일 시뮬레이션 ──",
+        "[23:00:55.386] [PASS] 사전 조건: 환경 파일이 존재",
+        "[23:00:55.386] ── 단계: load_saved_environment 호출 ──",
+        "[23:00:55.389] [PASS] 다른 머신의 설정은 None 을 반환해야 합니다",
+        "[23:00:55.389] [PASS] 다른 머신 감지 시 파일이 삭제되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_29_probe_python_version_current",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.389224",
+      "duration_ms": 28,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.418] [PASS] sys.executable(C:\\Users\\NeodaVinci\\ohdo\\.venv\\Scripts\\python.exe) 의 버전 = 3.12.1"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_30_check_gemini_cli_not_found",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.418879",
+      "duration_ms": 6,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:55.424] [PASS] 없는 명령은 installed=False",
+        "[23:00:55.424] [PASS] 'not_found' == 'not_found'",
+        "[23:00:55.424] [PASS] PATH 에서 못 찾으면 path=None",
+        "[23:00:55.424] [PASS] 사용자에게 보일 detail 메시지가 있어야 함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_31_check_gemini_cli_shape",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:55.425814",
+      "duration_ms": 1143,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:00:56.568] [PASS] 결과 dict 에 'installed' 키가 있어야 합니다",
+        "[23:00:56.569] [PASS] 결과 dict 에 'command' 키가 있어야 합니다",
+        "[23:00:56.569] [PASS] 결과 dict 에 'path' 키가 있어야 합니다",
+        "[23:00:56.569] [PASS] 결과 dict 에 'version' 키가 있어야 합니다",
+        "[23:00:56.569] [PASS] 결과 dict 에 'error' 키가 있어야 합니다",
+        "[23:00:56.569] [PASS] 결과 dict 에 'detail' 키가 있어야 합니다",
+        "[23:00:56.569] [PASS] 'gemini' == 'gemini'",
+        "[23:00:56.569] [PASS] installed 는 bool",
+        "[23:00:56.569] [PASS] installed=True 면 error=None",
+        "[23:00:56.569] [PASS] installed=True 면 version 존재"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_32_full_scan_includes_gemini_section",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:00:56.569296",
+      "duration_ms": 4018,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:01:00.587] [PASS] full_scan 성공",
+        "[23:01:00.587] [PASS] 결과에 gemini_cli 섹션 포함",
+        "[23:01:00.587] [PASS] gemini_cli 는 dict",
+        "[23:01:00.587] [PASS]"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_33_kernel_basic_lifecycle",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:01:00.588099",
+      "duration_ms": 1108,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:01:00.589] [PASS] 초기 not alive",
+        "[23:01:00.589] ── 단계: start() ──",
+        "[23:01:00.596] [PASS] start 후 alive",
+        "[23:01:00.596] ── 단계: ping() ──",
+        "[23:01:00.660] [PASS] ping 응답",
+        "[23:01:00.660] ── 단계: stop() ──",
+        "[23:01:01.172] [PASS] stop 후 not alive",
+        "[23:01:01.172] ── 단계: 재기동 ──",
+        "[23:01:01.181] [PASS] 재기동 alive"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_34_kernel_executes_code_with_namespace",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:01:01.696412",
+      "duration_ms": 579,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:01:01.702] ── 단계: 첫 블럭에서 변수 정의 ──",
+        "[23:01:01.764] [PASS] 첫 블럭 성공해야 함 (error=None)",
+        "[23:01:01.764] ── 단계: 두 번째 블럭에서 이전 변수 사용 ──",
+        "[23:01:01.764] [PASS] 둘째 블럭 성공",
+        "[23:01:01.764] [PASS] 변수 x 보존",
+        "[23:01:01.764] [PASS] 변수 y 보존",
+        "[23:01:01.764] ── 단계: executed_steps 추적 ──",
+        "[23:01:01.764] [PASS] 1, 2 가 추적됨"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_35_kernel_stop_terminates_subprocess",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:01:02.276372",
+      "duration_ms": 509,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:01:02.281] [PASS] start 후 _proc 존재",
+        "[23:01:02.281] 커널 PID=16124",
+        "[23:01:02.281] ── 단계: stop() 호출 ──",
+        "[23:01:02.786] [PASS] stop() 후 자식 프로세스가 종료되어야 함 (poll=1, PID=16124)",
+        "[23:01:02.786] 종료 코드: 1"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_36_kernel_timeout_triggers_restart_capability",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-04-28T23:01:02.786258",
+      "duration_ms": 2106,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[23:01:02.791] ── 단계: 긴 sleep 코드 1초 timeout 으로 실행 → 강제 종료 유발 ──",
+        "[23:01:04.309] [PASS] 타임아웃은 실패로 보고",
+        "[23:01:04.309] [PASS] 에러 메시지에 시간 초과 표시",
+        "[23:01:04.309] [PASS] 타임아웃 후 커널 종료 상태",
+        "[23:01:04.309] ── 단계: 재기동 후 정상 실행 ──",
+        "[23:01:04.314] [PASS] 재기동 alive",
+        "[23:01:04.380] [PASS] 재기동 후 정상 실행 (error=None)",
+        "[23:01:04.380] [PASS] 재기동 후 출력 정상"
+      ],
+      "error": null,
+      "error_type": null
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.12.1",
+    "machine": "AMD64",
+    "timestamp": "2026-04-28T23:00:52.570697",
+    "screen_width": 1920,
+    "screen_height": 1080,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PyQt6": "installed",
+    "pkg_selenium": "4.43.0",
+    "pkg_Pillow": "12.2.0"
+  }
+}

@@ -475,6 +475,333 @@ import subprocess
         self.assert_true("os" not in packages, "os는 표준 라이브러리이므로 제외되어야 합니다")
 
 
+    # ──────────────────────────────────────────
+    # 6. WinInspector.should_use_selenium 라우팅 결정 (브라우저 chrome vs DOM)
+    # ──────────────────────────────────────────
+
+    def test_26_selenium_routing_matrix(self):
+        """should_use_selenium 의 라우팅 매트릭스 검증.
+
+        | browser? | CDP? | tagName? | 결정     |
+        |----------|------|----------|----------|
+        | No       | -    | -        | False    |
+        | Yes      | Yes  | 있음     | True     |
+        | Yes      | Yes  | 없음     | False    |
+        | Yes      | No   | -        | False    |  ← Selenium 으로 가면 새 Chrome 띄워 기존 페이지 못 찾음
+
+        Selenium 은 CDP 가 실제 응답하고 DOM 까지 있을 때만 사용. 그 외는 모두 pywinauto
+        (사용자가 본 그 윈도우에 connect 가능 + pyautogui 좌표 클릭으로 HTML 콘텐츠도 OK).
+        """
+        from core.win_inspector import WindowInspector
+
+        # 케이스 A: Chrome 페이지 button + CDP+DOM → Selenium
+        page_dom_elem = {
+            "is_browser": True, "browser_type": "Chrome",
+            "control_type": "Button", "name": "검색", "automation_id": "search-btn",
+            "dom_context": {
+                "cdp_available": True, "tagName": "button",
+                "attributes": {"id": "real-html-id", "class": "btn-primary"},
+            },
+        }
+        self.assert_true(
+            WindowInspector.should_use_selenium(page_dom_elem),
+            "CDP+DOM 있는 페이지 요소는 Selenium 경로",
+        )
+
+        # 케이스 B: Chrome 탭 + CDP 있지만 tagName 없음 → pywinauto (chrome UI)
+        chrome_tab_elem = {
+            "is_browser": True, "browser_type": "Chrome",
+            "control_type": "TabItem", "name": "typing.works - Chrome",
+            "automation_id": "view_20", "class_name": "Tab",
+            "dom_context": {"cdp_available": True, "tagName": ""},
+        }
+        self.assert_equal(
+            WindowInspector.should_use_selenium(chrome_tab_elem), False,
+            "CDP 응답이 tagName 없음 = browser chrome 확정 → pywinauto",
+        )
+
+        # 케이스 C: Chrome + CDP 미연결 → pywinauto
+        # (Selenium 은 attach 불가하니 새 Chrome 띄워 사용자 보던 페이지 못 찾음.
+        #  pywinauto + pyautogui 가 사용자가 본 그 윈도우/element 를 정확히 클릭.)
+        chrome_no_cdp = {
+            "is_browser": True, "browser_type": "Chrome",
+            "control_type": "Button", "name": "버튼",
+            "dom_context": {"cdp_available": False},
+        }
+        self.assert_equal(
+            WindowInspector.should_use_selenium(chrome_no_cdp), False,
+            "CDP 없으면 Selenium attach 불가 → pywinauto + pyautogui",
+        )
+
+        # 케이스 D: 데스크톱 앱 → pywinauto
+        desktop_elem = {
+            "is_browser": False,
+            "control_type": "Edit", "name": "메모장 본문",
+        }
+        self.assert_equal(
+            WindowInspector.should_use_selenium(desktop_elem), False,
+            "비-브라우저 데스크톱 앱은 항상 pywinauto",
+        )
+
+        # 케이스 E: dom_context 키 자체 없음 → False (안전한 default)
+        legacy_elem = {"browser_type": "Chrome", "control_type": "Button", "name": "x"}
+        self.assert_equal(
+            WindowInspector.should_use_selenium(legacy_elem), False,
+            "dom_context 정보 자체 없음 → Selenium 으로 보내는 건 위험 (pywinauto)",
+        )
+
+        # 케이스 F: 비-브라우저 + dom_context 도 없음 → False
+        plain_desktop = {"control_type": "Button", "name": "확인"}
+        self.assert_equal(
+            WindowInspector.should_use_selenium(plain_desktop), False,
+            "browser_type 자체가 없으면 항상 pywinauto",
+        )
+
+    def test_27_browser_chrome_with_cdp_routes_to_pywinauto(self):
+        """CDP 가 응답했지만 tagName 없으면 (= browser chrome UI 확정) pywinauto path"""
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        # CDP 가 응답했지만 (cdp_available=True) tagName 이 비어있음 → 탭/메뉴 같은 chrome UI
+        chrome_tab_with_cdp = {
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "TabItem",
+            "name": "typing.works - Chrome",
+            "automation_id": "view_20",
+            "class_name": "Tab",
+            "rect": {"left": 906, "top": 77, "width": 149, "height": 41},
+            "parent_window_title": "snipaste 요소 - Google 검색 - Chrome",
+            "parent_window_class": "Chrome_WidgetWin_1",
+            "dom_context": {"cdp_available": True, "tagName": ""},
+            "screen_x": 980, "screen_y": 97,
+        }
+        text = inspector.get_element_info_text(chrome_tab_with_cdp)
+
+        self.assert_contains(text, "데스크톱", "CDP 확정한 chrome UI 는 desktop path")
+        self.assert_contains(text, "pywinauto", "pywinauto 자동화 방식")
+        self.assert_contains(text, "snipaste 요소 - Google 검색 - Chrome",
+                             "parent_window_title runtime 값 사용 (하드코딩 0)")
+        self.assert_true("HTML ID" not in text,
+                         "auto_id 를 'HTML ID' 로 잘못 라벨링하면 안 됨")
+
+    def test_29_browser_no_cdp_routes_to_pywinauto_with_pyautogui_primary(self):
+        """browser + CDP 미연결 → desktop path (pywinauto). 코드 템플릿이 pyautogui PRIMARY.
+
+        Selenium 으로 가면 새 Chrome 띄워 사용자가 보던 페이지/탭 못 찾음.
+        pywinauto 는 picker 의 parent_title 로 기존 윈도우에 connect 해서
+        사용자가 본 element 를 정확히 찾고, pyautogui 좌표 클릭으로 GPU compositor
+        영역까지 확실히 전달.
+        """
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        # 사용자 세션 시나리오: Chrome 탭 클릭, CDP 미연결
+        chrome_tab_no_cdp = {
+            "is_browser": True, "browser_type": "Chrome",
+            "control_type": "TabItem", "name": "typing.works - 메모리 사용량 - 94.1MB",
+            "automation_id": "view_20", "class_name": "Tab",
+            "rect": {"left": 867, "top": 142, "width": 149, "height": 41},
+            "parent_window_title": "snipaste 요소 - Google 검색 - Chrome",
+            "parent_window_class": "Chrome_WidgetWin_1",
+            "dom_context": {"cdp_available": False},
+        }
+        text = inspector.get_element_info_text(chrome_tab_no_cdp)
+
+        # desktop path 로 가야 함 (Selenium 새 Chrome 회피)
+        self.assert_contains(text, "데스크톱", "browser+no-CDP 는 desktop path 헤더로")
+        self.assert_contains(text, "pywinauto", "pywinauto 자동화 방식")
+
+        # picker 의 parent_title 이 그대로 connect 에 사용 (사용자가 본 그 윈도우)
+        self.assert_contains(text, "snipaste 요소 - Google 검색 - Chrome",
+                             "기존 Chrome 윈도우 title 로 connect")
+
+        # 핵심: 클릭 코드가 pyautogui 를 PRIMARY 로 사용해야 함
+        # (Selenium 새 Chrome 안 띄움 + HTML 콘텐츠도 pyautogui 좌표 클릭으로 OK)
+        self.assert_contains(text, "pyautogui PRIMARY",
+                             "browser process 라 pyautogui 가 PRIMARY")
+        self.assert_contains(text, "pyautogui.click(center_x, center_y)",
+                             "코드 템플릿이 pyautogui.click 을 우선 호출")
+
+        # 새 브라우저 띄우는 webdriver.Chrome() 코드는 절대 안 들어감
+        self.assert_true("webdriver.Chrome" not in text,
+                         "browser+no-CDP 면 절대 새 webdriver.Chrome 띄우지 말 것")
+
+    def test_31_desktop_app_keeps_wm_click_primary(self):
+        """비-브라우저 데스크톱 앱은 element.click() 을 PRIMARY 로 유지 (속도/정확성)."""
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        notepad_btn = {
+            "is_browser": False,
+            "control_type": "Button", "name": "확인", "automation_id": "okBtn",
+            "rect": {"left": 50, "top": 100, "width": 60, "height": 24},
+            "parent_window_title": "메모장",
+        }
+        text = inspector.get_element_info_text(notepad_btn)
+
+        # 데스크톱 앱은 WM 메시지 클릭이 빠르고 정확
+        self.assert_contains(text, "element.click()",
+                             "데스크톱 앱은 element.click() PRIMARY")
+        self.assert_true("pyautogui PRIMARY" not in text,
+                         "데스크톱 앱은 pyautogui PRIMARY 가 아님")
+
+    # ──────────────────────────────────────────
+    # 7. 회귀 방지 — 사용자 실제 세션 fixture 기반
+    # ──────────────────────────────────────────
+
+    def test_32_regression_chrome_tab_session_ce6aa624(self):
+        """**회귀 방지** — 사용자 세션 ce6aa624 step 1 의 Chrome 탭 element_info.
+
+        이 케이스는 여러 번 깨졌다 고쳐졌다를 반복했음. picker 가 Chrome 탭 (CDP 미연결) 을
+        고를 때:
+          1. **pywinauto 경로** 로 가야 함 (Selenium 새 browser 회피)
+          2. picker 의 parent_window_title 로 기존 Chrome 윈도우에 connect
+          3. 탭 name + TabItem control_type 으로 child_window
+          4. **pyautogui PRIMARY** 로 클릭 (HTML 콘텐츠도 일관 동작)
+        이 모든 항목이 깨지면 즉시 회귀 — 변경 후 반드시 prompt_quality 테스트 통과 확인.
+        """
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        # 실제 사용자 세션 ce6aa624 (2026-04-28 21:30) step 1 의 element_info
+        chrome_tab = {
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "TabItem",
+            "name": "typing.works - 메모리 사용량 - 94.1MB",
+            "automation_id": "view_20",
+            "class_name": "Tab",
+            "rect": {"left": 872, "top": 26, "width": 149, "height": 41},
+            "parent_window_title": "snipaste 요소 - Google 검색 - Chrome",
+            "parent_window_class": "Chrome_WidgetWin_1",
+            "dom_context": {"cdp_available": False},
+            "screen_x": 946, "screen_y": 46,
+        }
+
+        # (1) 라우팅: should_use_selenium=False (pywinauto 경로)
+        self.assert_equal(
+            WindowInspector.should_use_selenium(chrome_tab), False,
+            "[회귀] Chrome 탭 (CDP 미연결) 은 pywinauto 경로로 가야 함",
+        )
+
+        text = inspector.get_element_info_text(chrome_tab)
+
+        # (2) 절대 새 webdriver.Chrome() 띄우는 코드가 안 들어가야 함
+        self.assert_true(
+            "webdriver.Chrome" not in text,
+            "[회귀] Chrome 탭 picker 시 새 webdriver.Chrome() 코드 생성 금지",
+        )
+
+        # (3) pywinauto Application connect (기존 Chrome 윈도우에)
+        self.assert_contains(text, "pywinauto", "[회귀] pywinauto 자동화 방식")
+        self.assert_contains(text, "Application", "[회귀] Application connect")
+        self.assert_contains(
+            text, 'title="snipaste 요소 - Google 검색 - Chrome"',
+            "[회귀] picker 의 parent_window_title 로 기존 Chrome 에 connect",
+        )
+
+        # (4) 탭 element selector (UIA 정보 그대로 사용 — 하드코딩 0)
+        self.assert_contains(
+            text, 'title="typing.works - 메모리 사용량 - 94.1MB"',
+            "[회귀] 탭 name 으로 child_window selector 구성",
+        )
+        self.assert_contains(
+            text, 'control_type="TabItem"',
+            "[회귀] 탭 control_type 으로 child_window selector 구성",
+        )
+
+        # (5) browser process 라 pyautogui PRIMARY 클릭
+        self.assert_contains(
+            text, "pyautogui.click(center_x, center_y)",
+            "[회귀] browser process element 는 pyautogui PRIMARY 클릭",
+        )
+
+    def test_33_regression_html_text_session_ce6aa624(self):
+        """**회귀 방지** — 사용자 세션 ce6aa624 step 2 의 HTML 페이지 Text element.
+
+        Chrome 안 페이지의 'TYPING SETTING' Text element. CDP 미연결 케이스.
+        직전 fix 들 사이에서 여러 번 라우팅이 흔들림. 동일 원칙 검증:
+        pywinauto + pyautogui PRIMARY (Selenium 새 browser 안 띄움).
+        """
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        page_text = {
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "Text",
+            "name": "TYPING SETTING",
+            "rect": {"left": 913, "top": 365, "width": 92, "height": 18},
+            "parent_window_title": "typing.works - Chrome",
+            "parent_window_class": "Chrome_WidgetWin_1",
+            "dom_context": {"cdp_available": False},
+        }
+
+        self.assert_equal(
+            WindowInspector.should_use_selenium(page_text), False,
+            "[회귀] Chrome 페이지 Text (CDP 미연결) 도 pywinauto 경로",
+        )
+
+        text = inspector.get_element_info_text(page_text)
+        self.assert_true(
+            "webdriver.Chrome" not in text,
+            "[회귀] HTML 콘텐츠 picker 도 새 webdriver.Chrome() 금지",
+        )
+        self.assert_contains(text, 'title="typing.works - Chrome"',
+                             "[회귀] picker 의 parent_window_title 로 connect")
+        self.assert_contains(text, 'title="TYPING SETTING"',
+                             "[회귀] HTML 텍스트 element name 으로 selector")
+        self.assert_contains(text, "pyautogui.click(center_x, center_y)",
+                             "[회귀] browser process 는 pyautogui PRIMARY")
+
+    def test_30_desktop_app_no_browser_specific_guidance(self):
+        """비-브라우저 데스크톱 앱은 브라우저 특화 가이드가 안 떠야 한다."""
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        notepad_btn = {
+            "is_browser": False,
+            "control_type": "Button", "name": "확인", "automation_id": "okBtn",
+            "rect": {"left": 50, "top": 100, "width": 60, "height": 24},
+            "parent_window_title": "메모장",
+        }
+        text = inspector.get_element_info_text(notepad_btn)
+
+        self.assert_true("pyautogui PRIMARY" not in text,
+                         "비-브라우저 element 는 pyautogui PRIMARY 가 아니어야 함")
+        self.assert_true("GPU compositor" not in text,
+                         "비-브라우저 element 에는 브라우저 한계 설명이 없어야 함")
+
+    def test_28_page_dom_with_cdp_uses_selenium_path(self):
+        """CDP DOM 수집된 페이지 요소는 Selenium path 로"""
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        page_button = {
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "Button",
+            "name": "Submit",
+            "automation_id": "ui-button-42",
+            "rect": {"left": 100, "top": 200, "width": 80, "height": 30},
+            "parent_window_title": "Login - example.com - Chrome",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "button",
+                "attributes": {"id": "submitBtn", "class": "primary"},
+                "page_url": "https://example.com/login",
+            },
+        }
+        text = inspector.get_element_info_text(page_button)
+
+        self.assert_contains(text, "브라우저", "DOM 페이지 요소는 브라우저 path 헤더로")
+        self.assert_contains(text, "Selenium", "Selenium 자동화 방식")
+        self.assert_contains(text, "AutomationID", "auto_id 는 'AutomationID' 로 정확히 라벨")
+        self.assert_true("HTML ID" not in text or "HTML id 있음" in text,
+                         "auto_id 를 'HTML ID' 로 잘못 라벨링하면 안 됨")
+
+
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
     runner = TestRunner(suite_name="prompt_quality")

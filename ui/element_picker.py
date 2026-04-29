@@ -7,6 +7,7 @@ UI 요소 피커 (Element Picker)
 
 import logging
 import sys
+import time
 import ctypes
 if sys.platform == "win32":
     import ctypes.wintypes
@@ -37,11 +38,16 @@ SM_CYVIRTUALSCREEN = 79
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_NOACTIVATE = 0x08000000
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
-HWND_TOPMOST = -1
+HWND_TOPMOST = -1  # SetWindowPos 의 hWndInsertAfter sentinel — 진짜 topmost
 VK_F3 = 0x72
 VK_ESCAPE = 0x1B
+
+# user32 argtypes 1 회 설정 플래그 (모듈 레벨)
+_user32_argtypes_set = False
 
 # pywinauto lazy import
 _pywinauto_available = False
@@ -90,8 +96,26 @@ class ElementPickerOverlay(QWidget):
     element_picked = pyqtSignal(dict)
     pick_cancelled = pyqtSignal()
 
-    def __init__(self, parent=None):
+    # UIA 트리 walk 의 기본값. update_settings() 으로 재정의 가능.
+    DEFAULT_UIA_MAX_DEPTH = 15
+    DEFAULT_UIA_TIME_BUDGET_MS = 150
+
+    # post_pause_mode 후 일반 picker mode 로 전환 지연 (ms).
+    # 이 시간 동안 click-through 로 OS 가 submenu 에 cursor 위치를 등록하면,
+    # 그 후 TRANSPARENT 끄고 일반 mode 로 가도 submenu 유지 (가설).
+    POST_PAUSE_TRANSITION_MS = 200
+
+    def __init__(self, parent=None, settings: dict | None = None):
         super().__init__(parent)
+
+        # UIA tree walk 파라미터 (settings 에서 덮어쓰기 가능)
+        self._uia_max_depth = self.DEFAULT_UIA_MAX_DEPTH
+        self._uia_time_budget_sec = self.DEFAULT_UIA_TIME_BUDGET_MS / 1000.0
+        # post_pause → 일반 picker mode 전환 지연 (ms). 0 이면 transition 비활성
+        # (방향 B 직접 — post_pause_mode 가 click/ESC 까지 유지).
+        self._post_pause_transition_ms = self.POST_PAUSE_TRANSITION_MS
+        if settings:
+            self.update_settings(settings)
 
         # 윈도우 설정: 전체 화면 투명 레이어
         self.setWindowFlags(
@@ -159,6 +183,34 @@ class ElementPickerOverlay(QWidget):
         """)
         self._pause_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._pause_label.hide()
+
+    def update_settings(self, settings: dict):
+        """settings dict 의 element_picker 섹션에서 UIA walk 파라미터 갱신.
+
+        설정이 다이얼로그로 변경되면 main_window 가 이 메서드를 호출.
+        """
+        ep = (settings or {}).get("element_picker", {}) or {}
+
+        try:
+            md = int(ep.get("uia_max_depth", self.DEFAULT_UIA_MAX_DEPTH))
+        except (TypeError, ValueError):
+            md = self.DEFAULT_UIA_MAX_DEPTH
+        self._uia_max_depth = max(1, min(50, md))  # 1~50 클램프
+
+        try:
+            tb_ms = int(ep.get("uia_time_budget_ms", self.DEFAULT_UIA_TIME_BUDGET_MS))
+        except (TypeError, ValueError):
+            tb_ms = self.DEFAULT_UIA_TIME_BUDGET_MS
+        self._uia_time_budget_sec = max(0.03, min(2.0, tb_ms / 1000.0))  # 30ms~2s 클램프
+
+        try:
+            pp_ms = int(ep.get(
+                "post_pause_transition_ms", self.POST_PAUSE_TRANSITION_MS,
+            ))
+        except (TypeError, ValueError):
+            pp_ms = self.POST_PAUSE_TRANSITION_MS
+        # 0 이면 transition 비활성 (방향 B 직접). 양수면 그 ms 후 자동 전환.
+        self._post_pause_transition_ms = max(0, min(5000, pp_ms))
 
     def start_picking(self):
         """요소 선택 시작 - 전체 화면 오버레이 표시"""
@@ -261,6 +313,12 @@ class ElementPickerOverlay(QWidget):
         self.raise_()
         self.activateWindow()
 
+        # 진짜 TOPMOST 강제 — Qt WindowStaysOnTopHint 만으로는 Win11 작업표시줄
+        # (Shell_TrayWnd) 나 Chrome 메인 윈도우가 우리 overlay 위로 올라오는 케이스가
+        # 있어 SetWindowPos 로 z-order 강제 재배치. 이게 빠지면 picker 의 click 이
+        # underlying app 에 가려져 element 선택이 안 되는 회귀 발생함.
+        self._force_topmost()
+
         # show() 후 다시 크기 확인
         shown_geo = self.geometry()
         logger.info(
@@ -287,10 +345,16 @@ class ElementPickerOverlay(QWidget):
         self._cursor_local_pos = QPoint()
         self._current_screen_info = ""
         self._paint_logged = False  # 디버그 로깅 초기화
+        self._diag_tick_count = 0  # 진단 print 카운터 리셋 (picker 시작 시 첫 3 tick 만 출력)
 
         # 마우스 추적 시작
         self._track_timer.start(self._track_interval)
+
+        # 키보드 hook 설치 — picker 전체 lifecycle 동안 유지 (focus 무관 ESC/F3 응답)
+        self._install_keyboard_hook()
+
         logger.info("UI 요소 피커 시작")
+        print("[ElementPicker] 진단 출력 활성화 (첫 3 tick)", flush=True)
 
     def stop_picking(self):
         """선택 중단"""
@@ -300,6 +364,8 @@ class ElementPickerOverlay(QWidget):
         self._paused = False
         if self._post_pause_mode:
             self._exit_post_pause_mode()
+        # 키보드 hook 해제 (lifecycle 종료)
+        self._uninstall_keyboard_hook()
         self._current_element_ref = None
         self.hide()
 
@@ -340,66 +406,590 @@ class ElementPickerOverlay(QWidget):
         primary = QGuiApplication.primaryScreen()
         return primary, primary.devicePixelRatio() if primary else 1.0
 
+    @staticmethod
+    def _ensure_user32_argtypes():
+        """user32 의 HWND 관련 함수들 argtypes 를 명시적으로 설정.
+
+        64-bit Windows 에서 HWND 는 8-byte (c_void_p) 인데 ctypes 기본은 c_int (4-byte) 라
+        argtypes 미설정 시 HWND 값이 잘려 IsWindowVisible/GetWindowRect 등이 잘못된
+        결과를 반환할 수 있다. 한 번만 설정하면 모듈 lifetime 동안 유지.
+        """
+        global _user32_argtypes_set
+        if _user32_argtypes_set:
+            return
+        if not user32:
+            return
+        user32.GetTopWindow.argtypes = [ctypes.wintypes.HWND]
+        user32.GetTopWindow.restype = ctypes.wintypes.HWND
+        user32.GetWindow.argtypes = [ctypes.wintypes.HWND, ctypes.c_uint]
+        user32.GetWindow.restype = ctypes.wintypes.HWND
+        user32.IsWindowVisible.argtypes = [ctypes.wintypes.HWND]
+        user32.IsWindowVisible.restype = ctypes.wintypes.BOOL
+        user32.IsIconic.argtypes = [ctypes.wintypes.HWND]
+        user32.IsIconic.restype = ctypes.wintypes.BOOL
+        user32.GetWindowRect.argtypes = [
+            ctypes.wintypes.HWND,
+            ctypes.POINTER(ctypes.wintypes.RECT),
+        ]
+        user32.GetWindowRect.restype = ctypes.wintypes.BOOL
+        # SetWindowPos 시그니처. 두 번째 HWND 자리에 HWND_TOPMOST(-1) 같은 음수
+        # sentinel 이 들어가므로 c_ssize_t 로 받아 부호 보존.
+        user32.SetWindowPos.argtypes = [
+            ctypes.wintypes.HWND,
+            ctypes.c_ssize_t,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        user32.SetWindowPos.restype = ctypes.wintypes.BOOL
+        _user32_argtypes_set = True
+
+    def _force_topmost(self):
+        """Win32 SetWindowPos(HWND_TOPMOST) 로 진짜 z-order 최상단에 박는다.
+
+        Qt 의 WindowStaysOnTopHint + raise_() 만으로는 Win11 작업표시줄
+        (Shell_TrayWnd) 같은 시스템 우선 z-order 윈도우들을 못 이겨, Chrome 메인
+        윈도우가 우리 overlay 위로 올라오는 등의 회귀가 발생함. SetWindowPos 가 실제
+        WS_EX_TOPMOST 플래그 설정 + z-order 강제 재배치.
+        """
+        if not user32:
+            return
+        self._ensure_user32_argtypes()
+        try:
+            hwnd = int(self.winId())
+            ok = user32.SetWindowPos(
+                hwnd, HWND_TOPMOST,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            logger.info(f"SetWindowPos(HWND_TOPMOST) → {bool(ok)}")
+        except Exception as e:
+            logger.debug(f"SetWindowPos(HWND_TOPMOST) 실패: {e}")
+
+    def _find_topmost_window_at_point(self, x: int, y: int, exclude_hwnd: int):
+        """GetTopWindow + GetWindow(GW_HWNDNEXT) 루프로 z-order top-down 순회하며
+        (x,y) 를 포함하는 가시 윈도우 중 exclude_hwnd 가 아닌 첫 HWND 를 반환.
+
+        설계 의도 (mouse-over 누수 방지):
+            WS_EX_TRANSPARENT 토글을 **전혀 사용하지 않는다**. z-order 상단부터
+            우리 overlay 를 명시적으로 skip 하면 "그 다음 윈도우" 를 자연스럽게 얻을
+            수 있다. OS click-through 플래그가 한순간도 켜지지 않으므로 mouse-move
+            이벤트 누수 가능성이 0.
+
+            EnumWindows 의 콜백 + ctypes 변환에서 가끔 동작 이상이 보고되어 더 단순한
+            GetTopWindow/GetWindow 루프로 대체. argtypes 도 명시 설정.
+        """
+        if not user32:
+            return None
+
+        self._ensure_user32_argtypes()
+
+        diag = getattr(self, "_diag_tick_count", 99) <= 10
+
+        GW_HWNDNEXT = 2
+        # GetTopWindow(0) = 데스크톱의 z-order top-most child = 최상위 top-level 윈도우
+        hwnd = user32.GetTopWindow(None)
+        scanned = 0
+        skipped_self = 0
+        skipped_invisible = 0
+        skipped_iconic = 0
+        skipped_norect = 0
+        skipped_outside = 0
+        sample_lines = []
+        max_scan = 500
+
+        while hwnd and scanned < max_scan:
+            scanned += 1
+            try:
+                if hwnd == exclude_hwnd:
+                    skipped_self += 1
+                else:
+                    visible = bool(user32.IsWindowVisible(hwnd))
+                    iconic = bool(user32.IsIconic(hwnd))
+                    if not visible:
+                        skipped_invisible += 1
+                    elif iconic:
+                        skipped_iconic += 1
+                    else:
+                        rect = ctypes.wintypes.RECT()
+                        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                            skipped_norect += 1
+                        else:
+                            inside = (rect.left <= x < rect.right
+                                      and rect.top <= y < rect.bottom)
+                            if diag and len(sample_lines) < 8:
+                                sample_lines.append(
+                                    f"  HWND=0x{hwnd:x} rect=({rect.left},{rect.top})"
+                                    f"~({rect.right},{rect.bottom}) "
+                                    f"inside={inside}"
+                                )
+                            if inside:
+                                if diag:
+                                    print(f"[ElementPicker DIAG] z-order 매칭: HWND=0x{hwnd:x} "
+                                          f"scanned={scanned}",
+                                          flush=True)
+                                return hwnd
+                            else:
+                                skipped_outside += 1
+            except Exception as e:
+                if diag:
+                    print(f"[ElementPicker DIAG] z-order 순회 중 예외: {e}", flush=True)
+
+            hwnd = user32.GetWindow(hwnd, GW_HWNDNEXT)
+
+        if diag:
+            print(f"[ElementPicker DIAG] _find_topmost_window: 매칭 없음 "
+                  f"(scanned={scanned}, self={skipped_self}, invisible={skipped_invisible}, "
+                  f"iconic={skipped_iconic}, norect={skipped_norect}, outside={skipped_outside})",
+                  flush=True)
+            for line in sample_lines:
+                print(f"[ElementPicker DIAG]{line}", flush=True)
+        return None
+
+    def _find_deepest_descendant(self, root_wrapper, x: int, y: int,
+                                  time_budget_sec: float = 0.1):
+        """root_wrapper 의 모든 descendants 를 훑어 (x,y) 를 포함하는 가장 작은 것 반환.
+
+        ⚠ pywinauto.descendants() 는 모든 element 를 eager 하게 wrap 해서 Chrome 같이
+        거대한 UIA 트리에서 호출만 300-500ms 소요. _raw_walk_at_point 가 더 빠르고
+        포괄적이므로 raw 폴백으로 대체. 이 메서드는 fallback-of-fallback 으로만 유지.
+        """
+        deadline = time.time() + time_budget_sec
+        try:
+            descendants = root_wrapper.descendants()
+        except Exception:
+            return None
+
+        best = None
+        best_area = None
+        for desc in descendants:
+            if time.time() > deadline:
+                break
+            try:
+                r = desc.rectangle()
+            except Exception:
+                continue
+            if r.left <= x < r.right and r.top <= y < r.bottom:
+                w = max(1, r.right - r.left)
+                h = max(1, r.bottom - r.top)
+                area = w * h
+                if best_area is None or area < best_area:
+                    best_area = area
+                    best = desc
+
+        return best
+
+    def _raw_walk_at_point(self, target_hwnd: int, x: int, y: int,
+                           time_budget_sec: float | None = None,
+                           max_depth: int | None = None):
+        """IUIA RawViewWalker 로 (x,y) 를 포함하는 가장 깊은 element 를 lazily 탐색.
+
+        ControlView (pywinauto 의 .children()/.descendants() 기본값) 는 Chrome/Win11
+        XAML 등에서 sparse 하게 돌아옴. RawView 는 모든 UIA element (구조 element
+        포함) 를 보여주므로 Chrome 탭 같은 깊은 element 도 닿는다.
+
+        Eager wrapping 없이 raw IUIAutomationElement 로만 traversal 후 결과 1개만
+        UIAWrapper 로 wrap → 거대 트리에서도 빠름.
+
+        Returns:
+            UIAWrapper 또는 None (실패/타임아웃)
+        """
+        if max_depth is None:
+            max_depth = self._uia_max_depth
+        if time_budget_sec is None:
+            time_budget_sec = self._uia_time_budget_sec
+
+        try:
+            from pywinauto.uia_defines import IUIA
+            from pywinauto.uia_element_info import UIAElementInfo
+            from pywinauto.controls.uiawrapper import UIAWrapper
+        except Exception as e:
+            logger.debug(f"raw walker import 실패: {e}")
+            return None
+
+        deadline = time.time() + time_budget_sec
+
+        try:
+            iuia = IUIA().iuia
+            walker = iuia.RawViewWalker
+
+            root_info = UIAElementInfo(target_hwnd)
+            root_elem = root_info._element  # IUIAutomationElement
+        except Exception as e:
+            logger.debug(f"raw walker 초기화 실패: {e}")
+            return None
+
+        def _rect_contains(rect, px, py):
+            return rect.left <= px < rect.right and rect.top <= py < rect.bottom
+
+        def _area(rect):
+            return max(1, (rect.right - rect.left)) * max(1, (rect.bottom - rect.top))
+
+        def walk(elem, depth):
+            if depth <= 0 or time.time() > deadline:
+                return elem
+            try:
+                rect = elem.CurrentBoundingRectangle
+            except Exception:
+                return elem
+            if not _rect_contains(rect, x, y):
+                return None
+
+            best = elem
+            best_area = _area(rect)
+
+            try:
+                child = walker.GetFirstChildElement(elem)
+            except Exception:
+                return best
+
+            while child:
+                if time.time() > deadline:
+                    break
+                try:
+                    cr = child.CurrentBoundingRectangle
+                except Exception:
+                    cr = None
+                if cr is not None and _rect_contains(cr, x, y):
+                    deeper = walk(child, depth - 1)
+                    if deeper is not None and deeper is not elem:
+                        try:
+                            dr = deeper.CurrentBoundingRectangle
+                            d_area = _area(dr)
+                            if d_area < best_area:
+                                best = deeper
+                                best_area = d_area
+                        except Exception:
+                            pass
+                try:
+                    child = walker.GetNextSiblingElement(child)
+                except Exception:
+                    break
+
+            return best
+
+        try:
+            deepest = walk(root_elem, max_depth)
+        except Exception as e:
+            logger.debug(f"raw walker 실행 실패: {e}")
+            return None
+
+        if deepest is None:
+            return None
+
+        try:
+            return UIAWrapper(UIAElementInfo(deepest))
+        except Exception as e:
+            logger.debug(f"raw walker 결과 wrap 실패: {e}")
+            return None
+
+    def _walk_uia_to_deepest(self, root_wrapper, x: int, y: int,
+                             max_depth: int | None = None,
+                             time_budget_sec: float | None = None):
+        """root_wrapper 의 UIA 트리를 walk 하여 (x,y) 를 포함하는 가장 깊은 자식을 찾는다.
+
+        - 각 레벨에서 (x,y) 를 포함하는 children 중 **가장 작은** 것을 선택해 깊이 들어감
+        - max_depth 또는 time_budget 초과 시 거기서 멈춤 (Chrome 같은 거대 UIA 트리 보호)
+        - 깊은 자식이 없으면 root_wrapper 자체 반환
+
+        max_depth/time_budget_sec 를 명시적으로 안 주면 instance 의 설정값 사용.
+        """
+        if max_depth is None:
+            max_depth = self._uia_max_depth
+        if time_budget_sec is None:
+            time_budget_sec = self._uia_time_budget_sec
+
+        current = root_wrapper
+        deadline = time.time() + time_budget_sec
+
+        for _ in range(max_depth):
+            if time.time() > deadline:
+                break
+
+            try:
+                children = current.children()
+            except Exception:
+                break
+
+            if not children:
+                break
+
+            best_child = None
+            best_area = None
+            for child in children:
+                if time.time() > deadline:
+                    break
+                try:
+                    r = child.rectangle()
+                except Exception:
+                    continue
+                if r.left <= x < r.right and r.top <= y < r.bottom:
+                    area = max(1, (r.right - r.left)) * max(1, (r.bottom - r.top))
+                    if best_area is None or area < best_area:
+                        best_area = area
+                        best_child = child
+
+            if best_child is None:
+                break
+
+            current = best_child
+
+        return current
+
+    def _detect_via_efp(self, x_phys: int, y_phys: int):
+        """IUIAutomation::ElementFromPoint 직호출 — TreeWalker 와 다른 OS-level path.
+
+        walker (ControlView/RawView) 가 leaf 에서 멈추는 lazy a11y 트리 케이스
+        (MFC+WebView, Chrome lazy renderer 등) 도 OS 가 직접 깊이 들어감.
+        HWND 무관 — cursor 좌표만으로 element 반환.
+
+        Returns:
+            (wrapper, rect, area) 또는 (None, None, None)
+        """
+        diag = getattr(self, "_diag_tick_count", 99) <= 10
+        try:
+            from pywinauto.uia_defines import IUIA
+            from pywinauto.uia_element_info import UIAElementInfo
+            from pywinauto.controls.uiawrapper import UIAWrapper
+
+            iuia = IUIA().iuia
+            pt = ctypes.wintypes.POINT(x_phys, y_phys)
+            elem_com = iuia.ElementFromPoint(pt)
+            if not elem_com:
+                if diag:
+                    print("[ElementPicker DIAG] EFP → None", flush=True)
+                return None, None, None
+
+            info = UIAElementInfo(elem_com)
+            wrapper = UIAWrapper(info)
+            rect = wrapper.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0:
+                if diag:
+                    print("[ElementPicker DIAG] EFP → 빈 rect", flush=True)
+                return None, None, None
+            area = max(1, rect.width() * rect.height())
+            if diag:
+                print(f"[ElementPicker DIAG] EFP → {wrapper!r} "
+                      f"area={area} rect=({rect.left},{rect.top})~"
+                      f"({rect.right},{rect.bottom})",
+                      flush=True)
+            return wrapper, rect, area
+        except Exception as e:
+            if diag:
+                print(f"[ElementPicker DIAG] EFP 실패: {e}", flush=True)
+            return None, None, None
+
+    def _detect_in_hwnd(self, hwnd: int, x_phys: int, y_phys: int, label: str = ""):
+        """주어진 HWND 의 UIA tree 에서 (x,y) 위치의 가장 깊은 element 를 찾는다.
+
+        Single-HWND detection — main HWND 와 child HWND 각각 호출 가능.
+        Chrome 같은 multi-process 앱에서:
+          - main HWND (Chrome_WidgetWin_1) → 탭 strip / URL bar / 툴바 등 chrome UI
+          - child HWND (Chrome Legacy Window/renderer) → HTML 페이지 콘텐츠
+        둘 다 시도해야 모든 케이스 커버.
+
+        Returns:
+            tuple: (element, rect, area) 또는 (None, None, None)
+        """
+        if not user32:
+            return None, None, None
+
+        diag = getattr(self, "_diag_tick_count", 99) <= 10
+        label_prefix = f"[{label}] " if label else ""
+
+        # WM_GETOBJECT 송신 — UIA tree 활성화 신호 (특히 Chrome 같은 lazy 앱)
+        try:
+            WM_GETOBJECT = 0x003D
+            OBJID_CLIENT = ctypes.c_long(-4).value & 0xFFFFFFFF
+            user32.SendMessageW(hwnd, WM_GETOBJECT, 0, OBJID_CLIENT)
+        except Exception:
+            pass
+
+        try:
+            from pywinauto.uia_element_info import UIAElementInfo
+            from pywinauto.controls.uiawrapper import UIAWrapper
+
+            elem_info = UIAElementInfo(hwnd)
+            window_wrapper = UIAWrapper(elem_info)
+            if diag:
+                print(f"[ElementPicker DIAG] {label_prefix}UIA wrap(0x{hwnd:x}) → "
+                      f"{window_wrapper!r}",
+                      flush=True)
+        except Exception as e:
+            if diag:
+                print(f"[ElementPicker DIAG] {label_prefix}UIA wrap 실패: {e}", flush=True)
+            return None, None, None
+
+        try:
+            # 1) children walk (fast preview)
+            t0 = time.time()
+            element = self._walk_uia_to_deepest(window_wrapper, x_phys, y_phys)
+            walk_ms = int((time.time() - t0) * 1000)
+            rect = element.rectangle()
+            current_area = max(1, rect.width() * rect.height())
+            if diag:
+                print(f"[ElementPicker DIAG] {label_prefix}walk {walk_ms}ms → "
+                      f"area={current_area} rect=({rect.left},{rect.top})~"
+                      f"({rect.right},{rect.bottom})",
+                      flush=True)
+
+            # 2) raw walker — RawView, lazy
+            budget_remaining = self._uia_time_budget_sec - (time.time() - t0)
+            if budget_remaining > 0.03:
+                t1 = time.time()
+                deeper = self._raw_walk_at_point(hwnd, x_phys, y_phys, budget_remaining)
+                raw_ms = int((time.time() - t1) * 1000)
+                if deeper is not None:
+                    try:
+                        d_rect = deeper.rectangle()
+                        d_area = max(1, d_rect.width() * d_rect.height())
+                        if diag:
+                            print(f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → "
+                                  f"area={d_area}",
+                                  flush=True)
+                        if d_area < current_area and d_rect.width() > 0 and d_rect.height() > 0:
+                            element = deeper
+                            rect = d_rect
+                            current_area = d_area
+                    except Exception:
+                        pass
+                elif diag:
+                    print(f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → 매칭 없음",
+                          flush=True)
+
+            # 3) descendants() 폴백 — Chrome 같은 sparse children 케이스
+            budget_remaining = self._uia_time_budget_sec - (time.time() - t0)
+            if budget_remaining > 0.03:
+                t2 = time.time()
+                desc_result = self._find_deepest_descendant(
+                    window_wrapper, x_phys, y_phys, budget_remaining,
+                )
+                desc_ms = int((time.time() - t2) * 1000)
+                if desc_result is not None:
+                    try:
+                        ds_rect = desc_result.rectangle()
+                        ds_area = max(1, ds_rect.width() * ds_rect.height())
+                        if diag:
+                            print(f"[ElementPicker DIAG] {label_prefix}descendants {desc_ms}ms "
+                                  f"→ area={ds_area}",
+                                  flush=True)
+                        if ds_area < current_area and ds_rect.width() > 0 and ds_rect.height() > 0:
+                            element = desc_result
+                            rect = ds_rect
+                            current_area = ds_area
+                    except Exception:
+                        pass
+                elif diag:
+                    print(f"[ElementPicker DIAG] {label_prefix}descendants {desc_ms}ms → "
+                          f"매칭 없음",
+                          flush=True)
+
+            if rect.width() > 0 and rect.height() > 0:
+                return element, rect, current_area
+        except Exception as e:
+            if diag:
+                print(f"[ElementPicker DIAG] {label_prefix}detection 실패: {e}", flush=True)
+
+        return None, None, None
+
     def _detect_element_multi_backend(self, x_phys: int, y_phys: int):
         """
         다중 백엔드를 사용하여 커서 위치의 UI 요소를 감지합니다.
 
-        순서: UIA → Win32 → Win32 API (WindowFromPoint)
+        설계 (회귀 방지):
+          1. main HWND (e.g., Chrome_WidgetWin_1) 의 UIA tree 에서 검색 → 탭 strip / URL bar
+          2. child HWND (e.g., Chrome Legacy Window) 의 UIA tree 에서 검색 → HTML 콘텐츠
+          3. 둘 중 더 깊은 (= 더 작은 면적) 결과 채택
+        Chrome 같은 multi-process 앱은 메인/렌더러가 별도 UIA tree 라 둘 다 봐야 함.
+        WS_EX_TRANSPARENT 토글 0회 (mouse-leak 방지).
 
         Returns:
             tuple: (element, backend_name) 또는 (None, None)
         """
-        # 오버레이를 hit-test에서 일시 제외
-        hwnd = int(self.winId())
-        ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TRANSPARENT)
+        if not user32:
+            return None, None
 
-        element = None
-        backend_used = None
+        overlay_hwnd = int(self.winId())
+        diag = getattr(self, "_diag_tick_count", 99) <= 10
 
+        # 0) IUIAutomation::ElementFromPoint — OS-level path (HWND 무관)
+        #    walker (ControlView/RawView) 가 leaf 에서 멈추는 lazy a11y 트리
+        #    (MFC+WebView, 일부 Chrome 케이스 등) 도 OS 가 직접 깊이 reach.
+        #    walker 결과보다 먼저 후보로 두고, 더 작은 area 가 나오면 walker 가 갱신.
+        best_element, best_rect, best_area = self._detect_via_efp(x_phys, y_phys)
+
+        # 1) z-order 순회로 main HWND 찾기 (e.g., Chrome_WidgetWin_1)
+        main_hwnd = self._find_topmost_window_at_point(x_phys, y_phys, overlay_hwnd)
+        if diag:
+            print(f"[ElementPicker DIAG] _find_topmost_window_at_point → "
+                  f"{'0x%x' % main_hwnd if main_hwnd else 'None'}",
+                  flush=True)
+        if not main_hwnd:
+            # main HWND 못 찾았어도 EFP 가 잡았으면 그걸 반환
+            if best_element is not None and best_rect is not None:
+                if best_rect.width() > 0 and best_rect.height() > 0:
+                    if diag:
+                        print("[ElementPicker DIAG] main HWND 없음 → EFP 결과 반환",
+                              flush=True)
+                    return best_element, "uia"
+            return None, None
+
+        # 2) child HWND 도 추출 (e.g., Chrome Legacy Window/renderer)
+        child_hwnd = None
         try:
-            # 1순위: UIA 백엔드 (WPF, Qt, 브라우저 등 모던 앱)
-            try:
-                desktop_uia = Desktop(backend='uia')
-                element = desktop_uia.from_point(x_phys, y_phys)
-                if element:
-                    # 유효한 요소인지 확인 (rectangle이 있어야 함)
-                    try:
-                        rect = element.rectangle()
-                        if rect.width() > 0 and rect.height() > 0:
-                            backend_used = "uia"
-                            return element, backend_used
-                    except Exception:
-                        element = None
-            except Exception as e:
-                logger.debug(f"UIA 백엔드 실패: {e}")
+            client_pt = ctypes.wintypes.POINT(x_phys, y_phys)
+            user32.ScreenToClient(main_hwnd, ctypes.byref(client_pt))
+            ch = user32.ChildWindowFromPointEx(main_hwnd, client_pt, 3)
+            if diag:
+                print(f"[ElementPicker DIAG] ChildWindowFromPointEx → "
+                      f"child={'0x%x' % ch if ch else 'None'}",
+                      flush=True)
+            if ch and ch != main_hwnd:
+                child_hwnd = ch
+        except Exception as e:
+            if diag:
+                print(f"[ElementPicker DIAG] ChildWindowFromPointEx 예외: {e}", flush=True)
 
-            # 2순위: Win32 백엔드 (MFC, VB6, 레거시 앱)
-            try:
-                desktop_win32 = Desktop(backend='win32')
-                element = desktop_win32.from_point(x_phys, y_phys)
-                if element:
-                    try:
-                        rect = element.rectangle()
-                        if rect.width() > 0 and rect.height() > 0:
-                            backend_used = "win32"
-                            return element, backend_used
-                    except Exception:
-                        element = None
-            except Exception as e:
-                logger.debug(f"Win32 백엔드 실패: {e}")
+        # 3) 양쪽 HWND 의 UIA tree 에서 검색 — main 은 chrome UI (탭 strip 등),
+        #    child 는 콘텐츠 (HTML 페이지 등). 둘 중 더 깊은 결과 채택.
+        #    best_* 는 §0 의 EFP 결과로 이미 초기화 — walker 가 더 작은 area 면 갱신.
+        candidates = [(main_hwnd, "main")]
+        if child_hwnd:
+            candidates.append((child_hwnd, "child"))
 
-            # 3순위: Win32 API 직접 사용 (WindowFromPoint → 가장 깊은 창)
-            try:
-                element, backend_used = self._detect_element_win32_api(x_phys, y_phys)
-                if element:
-                    return element, backend_used
-            except Exception as e:
-                logger.debug(f"Win32 API 직접 감지 실패: {e}")
+        for hwnd, label in candidates:
+            elem, rect, area = self._detect_in_hwnd(hwnd, x_phys, y_phys, label)
+            if elem is not None and area is not None:
+                if best_area is None or area < best_area:
+                    best_element = elem
+                    best_rect = rect
+                    best_area = area
+                    if diag:
+                        print(f"[ElementPicker DIAG] [{label}] 채택 "
+                              f"(area={area} {'<' if best_area == area else '<='} prev)",
+                              flush=True)
 
-        finally:
-            # 오버레이 스타일 복원
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+        if best_element is not None and best_rect is not None:
+            if best_rect.width() > 0 and best_rect.height() > 0:
+                return best_element, "uia"
+
+        # 4) Win32 폴백 (UIA 모두 실패 시 main HWND 만)
+        try:
+            from pywinauto.controls.hwndwrapper import HwndWrapper
+
+            element = HwndWrapper(main_hwnd)
+            if diag:
+                print(f"[ElementPicker DIAG] Win32 wrap(0x{main_hwnd:x}) → {element!r}",
+                      flush=True)
+            try:
+                rect = element.rectangle()
+                if rect.width() > 0 and rect.height() > 0:
+                    return element, "win32"
+            except Exception as e:
+                if diag:
+                    print(f"[ElementPicker DIAG] Win32 rectangle() 실패: {e}", flush=True)
+        except Exception as e:
+            if diag:
+                print(f"[ElementPicker DIAG] Win32 wrap 실패: {e}", flush=True)
 
         return None, None
 
@@ -456,6 +1046,13 @@ class ElementPickerOverlay(QWidget):
         if not _pywinauto_available:
             return
 
+        # 진단: picker 시작 후 첫 10 tick (~1초) 의 진행 상황을 사용자 콘솔에 직접 출력.
+        # 사용자가 picker 시작 후 cursor 를 원하는 위치 (탭 등) 로 옮길 시간 확보.
+        if not hasattr(self, '_diag_tick_count'):
+            self._diag_tick_count = 0
+        self._diag_tick_count += 1
+        diag = self._diag_tick_count <= 10
+
         try:
             # Win32 물리 좌표 (pywinauto 요소 감지용)
             pt_phys = ctypes.wintypes.POINT()
@@ -466,8 +1063,31 @@ class ElementPickerOverlay(QWidget):
             cursor_logical = QCursor.pos()
             x_log, y_log = cursor_logical.x(), cursor_logical.y()
 
+            if diag:
+                print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                      f"cursor phys=({x_phys},{y_phys}) overlay_hwnd=0x{int(self.winId()):x}",
+                      flush=True)
+
             # 다중 백엔드로 요소 감지
             element, backend_used = self._detect_element_multi_backend(x_phys, y_phys)
+
+            if diag:
+                if element is None:
+                    print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                          f"_detect_element_multi_backend → None (감지 실패)",
+                          flush=True)
+                else:
+                    try:
+                        r = element.rectangle()
+                        print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                              f"감지 OK backend={backend_used} "
+                              f"rect=({r.left},{r.top})~({r.right},{r.bottom}) "
+                              f"size={r.width()}x{r.height()}",
+                              flush=True)
+                    except Exception as _re:
+                        print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                              f"감지 OK backend={backend_used} 그러나 rectangle() 실패: {_re}",
+                              flush=True)
 
             if element:
                 try:
@@ -662,22 +1282,28 @@ class ElementPickerOverlay(QWidget):
                 f"rect(): {self.rect().width()}x{self.rect().height()}"
             )
 
-        # 반투명 배경
+        # 반투명 배경 (alpha>0 으로 Windows hit-test 차단 — click-through 방지)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 30))
 
         # 하이라이트 사각형
         if not self._highlight_rect.isNull():
-            # 하이라이트 영역은 투명하게 (구멍 뚫기)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-            painter.fillRect(self._highlight_rect, Qt.GlobalColor.transparent)
+            # 핵심: 하이라이트 영역도 alpha=0 으로 만들지 않는다.
+            # Windows 의 layered window 는 alpha=0 픽셀을 자동 click-through 하므로
+            # CompositionMode_Clear 로 구멍을 뚫으면 mouse-move 이벤트가 그 아래
+            # 앱으로 새어 나가 mouse-over 효과가 발동된다 (이전 버그).
+            # 대신 highlight 영역의 dim 을 약간 줄이는 방식으로 시각적 강조만 유지.
 
-            # 빨간 테두리
+            # 1) 배경 dim 을 부분 상쇄 — alpha=30 - 20 ≈ 10 효과 (alpha>0 유지로 hit-test 차단)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
+            painter.fillRect(self._highlight_rect, QColor(0, 0, 0, 20))
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
+            # 2) 빨간 테두리
             pen = QPen(QColor("#f38ba8"), 3)
             painter.setPen(pen)
             painter.drawRect(self._highlight_rect)
 
-            # 내부 반투명 채우기
+            # 3) 내부 반투명 채우기 (강조)
             painter.fillRect(
                 self._highlight_rect,
                 QColor(243, 139, 168, 30)
@@ -1140,7 +1766,7 @@ class ElementPickerOverlay(QWidget):
             self.pick_cancelled.emit()
 
     def keyPressEvent(self, event):
-        """ESC로 취소, F3으로 일시정지"""
+        """ESC로 취소, F3으로 일시정지 (3초 wait 후 picker 복귀)"""
         if event.key() == Qt.Key.Key_Escape:
             self._pause_label.hide()
             self.stop_picking()
@@ -1150,10 +1776,22 @@ class ElementPickerOverlay(QWidget):
                 self._start_pause()
 
     def _start_pause(self):
-        """F3 일시정지 시작 - 3초간 오버레이 숨기고 자유롭게 조작 가능"""
+        """F3 일시정지 시작 - 3초간 오버레이 숨기고 자유롭게 조작 가능.
+
+        3초 후 _resume_after_pause 가 post_pause_mode 진입 — overlay 다시 띄우되
+        WS_EX_TRANSPARENT 켜서 underlying app 으로 mouse 이벤트 통과 (펼친
+        hover-only submenu 유지 + 다른 창 활성화 가능). click 은 WH_MOUSE_LL
+        hook 으로 감지해서 element_picked emit 한 후 underlying 에 통과.
+
+        Trade-off: post_pause_mode 동안만 underlying mouseover 누수 발생.
+        일반 picker mode (F3 누르기 전) 의 누수 0 보장은 그대로 유지.
+        """
         self._paused = True
         self._pause_countdown = 3
         self._track_timer.stop()
+        # transition timer 가 active 면 정지 (post_pause 중 F3 재진입)
+        if hasattr(self, '_post_pause_transition_timer'):
+            self._post_pause_transition_timer.stop()
 
         # 오버레이 숨기기
         self.hide()
@@ -1186,22 +1824,30 @@ class ElementPickerOverlay(QWidget):
 
     def _resume_after_pause(self):
         """
-        F3 일시정지 후 복귀.
+        F3 일시정지 후 picker 복귀 (post_pause_mode 진입).
 
-        핵심: 오버레이를 다시 표시하되 대상 앱의 포커스/메뉴 상태를 건드리지 않는다.
-        - WS_EX_NOACTIVATE로 show() 시 포커스 빼앗기 방지
-        - 저수준 키보드 훅(WH_KEYBOARD_LL)으로 F3/ESC를 가로채어
-          대상 앱에 전달되지 않게 차단
-        - 마우스 좌클릭은 GetAsyncKeyState로 감지
+        설계 (방향 B 통합):
+        - WS_EX_NOACTIVATE: show() 시 focus 빼앗기 방지
+        - WS_EX_TRANSPARENT: click-through 로 underlying 에 mouse 이벤트 통과
+          → 펼친 hover-only submenu 유지 + wait 후 다른 창 활성화 자연스러움
+        - WH_KEYBOARD_LL hook: F3/ESC 글로벌 가로챔 (overlay 가 키 못 받음)
+        - WH_MOUSE_LL hook: 좌클릭 감지 + 통과. click 시 element_picked emit
+          후 underlying 동작도 정상 진행.
+        - _poll_mouse_click 폴링: hook 실패 시 fallback.
+
+        Trade-off: post_pause_mode 동안만 underlying mouseover 누수 발생.
+        일반 picker mode (F3 누르기 전) 의 누수 0 보장은 그대로.
         """
         self._post_pause_mode = True
 
         if sys.platform == "win32":
             hwnd = int(self.winId())
-
-            # WS_EX_NOACTIVATE로 포커스 빼앗지 않고 표시
             ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE)
+            user32.SetWindowLongW(
+                hwnd,
+                GWL_EXSTYLE,
+                ex_style | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            )
             self.show()
             self.raise_()
         else:
@@ -1211,25 +1857,48 @@ class ElementPickerOverlay(QWidget):
         # 커서 추적 재개 (하이라이트용)
         self._track_timer.start(self._track_interval)
 
-        # 저수준 키보드 훅 설치 (F3/ESC 가로채기)
-        self._install_keyboard_hook()
+        # 키보드 hook 은 start_picking 에서 이미 설치 — lifecycle 전체 유지
+        # (재설치는 _install_keyboard_hook 의 idempotent guard 가 막음)
 
-        # 마우스 클릭 감지용 폴링 타이머
+        # WS_EX_TRANSPARENT 켜진 overlay 는 mouse 이벤트 못 받음 → click 감지 hook
+        self._install_mouse_hook()
+
+        # 마우스 클릭 폴링 (hook 실패 시 fallback)
         if not hasattr(self, '_click_poll_timer'):
             self._click_poll_timer = QTimer(self)
             self._click_poll_timer.timeout.connect(self._poll_mouse_click)
         self._click_poll_timer.start(50)
 
+        # 짧은 transition 후 일반 picker mode 로 자동 전환 — 누수 최소화 시도.
+        # 가설: post_pause click-through 동안 OS 가 cursor 위치를 submenu 에
+        # 등록한 후 TRANSPARENT 를 꺼도 cursor 좌표 변경 없으면 mouse-leave 미발생.
+        # 실험 결과 (2026-04-29): SetWindowLongW 호출 시 OS 가 hit-test 다시 함 →
+        # mouse-leave 트리거되어 menu 닫힘. 가설 실패. settings 로 0 (비활성)
+        # 가능. 0 이면 post_pause_mode 가 click/ESC 까지 유지 (방향 B 직접).
+        if self._post_pause_transition_ms > 0:
+            if not hasattr(self, '_post_pause_transition_timer'):
+                self._post_pause_transition_timer = QTimer(self)
+                self._post_pause_transition_timer.setSingleShot(True)
+                self._post_pause_transition_timer.timeout.connect(
+                    self._exit_post_pause_mode
+                )
+            self._post_pause_transition_timer.start(self._post_pause_transition_ms)
+
     # ── 저수준 키보드 훅 (WH_KEYBOARD_LL) ──
 
     def _install_keyboard_hook(self):
         """
-        WH_KEYBOARD_LL 훅을 설치하여 F3/ESC를 시스템 레벨에서 가로챔.
-        대상 앱에 키 이벤트가 전달되기 전에 차단하므로
-        메모장의 "다음 찾기" 같은 동작이 발생하지 않음.
+        WH_KEYBOARD_LL 훅으로 F3/ESC 를 시스템 레벨에서 가로챔.
+
+        picker 전체 lifecycle 동안 유지 (start_picking 부터 stop_picking 까지).
+        focus 와 무관하게 키 입력 즉시 감지 → ESC/F3 응답성 보장.
+        대상 앱에 키 이벤트가 전달되기 전에 차단해 메모장 "다음 찾기" 같은
+        동작도 방지.
         """
         if sys.platform != "win32":
             return
+        if hasattr(self, '_keyboard_hook') and self._keyboard_hook:
+            return  # 이미 설치 — 재설치 방지 (leak)
 
         # 콜백 함수 타입 정의
         HOOKPROC = ctypes.CFUNCTYPE(
@@ -1240,8 +1909,9 @@ class ElementPickerOverlay(QWidget):
         )
 
         def _keyboard_hook_proc(nCode, wParam, lParam):
-            """저수준 키보드 훅 콜백"""
-            if nCode >= 0 and self._post_pause_mode:
+            """저수준 키보드 훅 콜백 — picker active (paused 또는 visible) 시 동작"""
+            picker_active = self._paused or not self.isHidden()
+            if nCode >= 0 and picker_active:
                 # lParam은 KBDLLHOOKSTRUCT 포인터
                 # 구조체의 첫 번째 DWORD가 vkCode
                 vk_code = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_ulong))[0]
@@ -1251,7 +1921,7 @@ class ElementPickerOverlay(QWidget):
 
                 if vk_code == VK_F3:
                     if wParam == WM_KEYUP:
-                        # F3 릴리즈 시 → 다시 일시정지
+                        # F3 릴리즈 시 → 일시정지 진입 (이미 paused 면 _on_hook_f3 가 무시)
                         QTimer.singleShot(0, self._on_hook_f3)
                     return 1  # 키 이벤트 소비 (대상 앱에 전달 안 함)
 
@@ -1283,18 +1953,97 @@ class ElementPickerOverlay(QWidget):
             self._keyboard_hook = None
         self._hook_proc_ref = None
 
-    def _on_hook_f3(self):
-        """훅에서 F3 감지 → 다시 일시정지"""
+    # ── 저수준 마우스 훅 (WH_MOUSE_LL) ──
+
+    def _install_mouse_hook(self):
+        """
+        WH_MOUSE_LL 훅으로 좌클릭을 시스템 레벨에서 감지.
+
+        post_pause_mode 의 overlay 는 WS_EX_TRANSPARENT 가 켜져 있어 mouse
+        이벤트를 받지 못함 (방향 B 통합). GetAsyncKeyState 폴링이 짧은 click 을
+        놓칠 수 있어 hook 으로 보강. hook 은 click 을 감지만 하고 통과시켜
+        underlying app (펼친 submenu 항목, 다른 창 활성화 등) 동작도 정상 진행.
+        """
+        if sys.platform != "win32":
+            return
+
+        HOOKPROC = ctypes.CFUNCTYPE(
+            ctypes.c_long,
+            ctypes.c_int,
+            ctypes.c_ulonglong,
+            ctypes.c_ulonglong,
+        )
+
+        WM_LBUTTONDOWN = 0x0201
+
+        def _mouse_hook_proc(nCode, wParam, lParam):
+            if (nCode >= 0 and self._post_pause_mode
+                    and wParam == WM_LBUTTONDOWN):
+                # click 감지 → element 정보 emit. underlying 에는 통과.
+                QTimer.singleShot(0, self._on_hook_click)
+            return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+        # GC 방지용 레퍼런스 유지
+        self._mouse_hook_proc_ref = HOOKPROC(_mouse_hook_proc)
+
+        WH_MOUSE_LL = 14
+        self._mouse_hook = user32.SetWindowsHookExW(
+            WH_MOUSE_LL,
+            self._mouse_hook_proc_ref,
+            None,
+            0,
+        )
+        if not self._mouse_hook:
+            logger.warning("마우스 훅 설치 실패 (Shift+F3 모드 클릭 감지가 폴링에만 의존)")
+
+    def _uninstall_mouse_hook(self):
+        """저수준 마우스 훅 해제"""
+        if hasattr(self, '_mouse_hook') and self._mouse_hook:
+            user32.UnhookWindowsHookEx(self._mouse_hook)
+            self._mouse_hook = None
+        self._mouse_hook_proc_ref = None
+
+    def _on_hook_click(self):
+        """훅에서 좌클릭 감지 → 요소 선택 + picker 종료.
+
+        _poll_mouse_click 과 동일 흐름. 둘 중 먼저 발동되는 쪽이
+        _post_pause_mode 를 False 로 바꿔 다른 쪽은 no-op.
+        """
         if not self._post_pause_mode:
             return
         self._exit_post_pause_mode()
+        element_info = (
+            self._current_element_info.copy()
+            if self._current_element_info else {}
+        )
+        element_ref = self._current_element_ref
+        self.stop_picking()
+        if element_info:
+            self._log_element_details(element_info, element_ref)
+            self.element_picked.emit(element_info)
+        else:
+            self.pick_cancelled.emit()
+
+    def _on_hook_f3(self):
+        """훅에서 F3 감지 → 일시정지 진입.
+
+        일반 picker mode + post_pause_mode 둘 다 처리 (lifecycle 통합).
+        wait 중이면 무시 (이미 paused).
+        """
+        if self._paused:
+            return
+        if self._post_pause_mode:
+            self._exit_post_pause_mode()
         self._start_pause()
 
     def _on_hook_esc(self):
-        """훅에서 ESC 감지 → 취소"""
-        if not self._post_pause_mode:
-            return
-        self._exit_post_pause_mode()
+        """훅에서 ESC 감지 → picker 취소.
+
+        일반 picker mode + post_pause + wait 중 어디서든 즉시 종료.
+        focus 와 무관하게 hook 으로 가로채니 응답성 보장.
+        """
+        if self._post_pause_mode:
+            self._exit_post_pause_mode()
         self.stop_picking()
         self.pick_cancelled.emit()
 
@@ -1317,19 +2066,40 @@ class ElementPickerOverlay(QWidget):
                 self.pick_cancelled.emit()
 
     def _exit_post_pause_mode(self):
-        """투과 모드 종료: 훅 해제, 타이머 정지, WS_EX_NOACTIVATE 제거"""
+        """post_pause 모드 종료: 훅 해제, 타이머 정지, ex-style 정리.
+
+        _resume_after_pause 가 켠 WS_EX_NOACTIVATE 와 WS_EX_TRANSPARENT 둘 다 제거.
+
+        호출 경로 (3가지):
+        - 사용자 click/ESC → _on_hook_click / _on_hook_esc
+        - F3 재진입 → _on_hook_f3 (다음에 _start_pause)
+        - **자동 transition** → POST_PAUSE_TRANSITION_MS 후 자동 호출 (가설:
+          submenu 등록 후 mode 전환해도 menu 유지)
+        """
+        if not self._post_pause_mode:
+            return  # idempotent — transition timer 와 user 액션 동시 fire 방어
         self._post_pause_mode = False
-        self._uninstall_keyboard_hook()
+        if hasattr(self, '_post_pause_transition_timer'):
+            self._post_pause_transition_timer.stop()
+        # keyboard hook 은 picker 전체 lifecycle 유지 — 여기선 해제 안 함
+        self._uninstall_mouse_hook()
         if hasattr(self, '_click_poll_timer'):
             self._click_poll_timer.stop()
         if sys.platform == "win32":
             hwnd = int(self.winId())
             ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_NOACTIVATE)
+            user32.SetWindowLongW(
+                hwnd,
+                GWL_EXSTYLE,
+                ex_style & ~WS_EX_NOACTIVATE & ~WS_EX_TRANSPARENT,
+            )
 
     def _update_pause_label(self):
         """일시정지 카운트다운 라벨 업데이트"""
-        self._pause_label.setText(f"  ⏸️ 일시정지 중... {self._pause_countdown}초 후 재개  |  마우스/키보드 자유롭게 조작하세요  ")
+        self._pause_label.setText(
+            f"  ⏸️ 일시정지 중... {self._pause_countdown}초 후 재개  |  "
+            f"마우스/키보드 자유롭게 조작하세요  "
+        )
         self._pause_label.adjustSize()
 
         # 화면 중앙 상단에 배치

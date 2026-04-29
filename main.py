@@ -53,7 +53,12 @@ def check_environment() -> bool:
             # 저장된 환경 검증
             is_valid, message = scanner.is_environment_valid(saved_env)
 
-            if is_valid:
+            # F.2: 캐시에 Gemini CLI 정보가 없거나 미설치면 fast-path 우회 →
+            # dialog 가 사용자에게 상태를 보여주고 게이트하도록 한다.
+            gemini_cached = saved_env.get('gemini_cli') or {}
+            cache_has_gemini_ok = bool(gemini_cached) and bool(gemini_cached.get('installed'))
+
+            if is_valid and cache_has_gemini_ok:
                 # 유효한 환경 - Python 경로 검증만 추가로 수행
                 python_path = saved_env.get('python_path')
                 if python_path and os.path.exists(python_path):

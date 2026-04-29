@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
             self.window_picker.pick_cancelled.connect(self._on_window_pick_cancelled)
 
         # ── UI 요소 피커 오버레이 ──
-        self.element_picker = ElementPickerOverlay()
+        self.element_picker = ElementPickerOverlay(settings=self.settings)
         self.element_picker.element_picked.connect(self._on_element_picked)
         self.element_picker.pick_cancelled.connect(self._on_element_pick_cancelled)
 
@@ -788,7 +788,11 @@ class MainWindow(QMainWindow):
             else:
                 element_ctx = None
 
-            is_browser_elem = any(e.get("is_browser", False) for e in pending_elems) if pending_elems else False
+            # Selenium DOM 경로는 picker 가 CDP 로 실제 DOM 정보를 수집했을 때만.
+            # WinInspector.should_use_selenium 으로 단일 기준 적용 (하드코딩 0).
+            is_browser_elem = any(
+                self.win_inspector.should_use_selenium(e) for e in pending_elems
+            ) if pending_elems else False
             prompt = self.prompt_builder.build_step_prompt(
                 session=self.current_session,
                 user_request=user_message,
@@ -1185,6 +1189,54 @@ class MainWindow(QMainWindow):
             f"요소 선택 완료: {display}"
             + (f" (창: {parent})" if parent else ""), "INFO"
         )
+
+        # CDP 미연결 브라우저 element 감지 시 1회 안내 (suppressible)
+        # HTML 페이지 콘텐츠는 CDP+Selenium 이 안정적이고, picker 가 자동으로 그 경로로
+        # 라우팅하려면 Chrome 이 --remote-debugging-port 로 떠 있어야 한다.
+        browser_type = element_info.get("browser_type")
+        if browser_type:
+            dom_ctx = element_info.get("dom_context") or {}
+            if not dom_ctx.get("cdp_available"):
+                self._maybe_show_cdp_hint(browser_type)
+
+    def _maybe_show_cdp_hint(self, browser_name: str):
+        """브라우저 element 인데 CDP 미연결 시 사용자에게 1회 안내.
+
+        suppressible — '다시 보지 않기' 클릭 시 settings.hints.cdp_browser_hint_dismissed=True
+        저장. 이후엔 안 뜬다 (설정 다이얼로그 또는 settings.json 직접 수정으로 리셋).
+        """
+        hints = self.settings.setdefault("hints", {})
+        if hints.get("cdp_browser_hint_dismissed", False):
+            return
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle(f"{browser_name} 디버그 포트 권장")
+        msg.setText(
+            f"{browser_name} 이(가) 디버그 포트 없이 실행 중입니다.\n\n"
+            "HTML 페이지 요소 자동화는 Chrome DevTools Protocol (CDP) 가 연결돼야\n"
+            "안정적으로 동작합니다. 현재는 pyautogui 좌표 클릭으로 fallback 됩니다.\n"
+            "(페이지 변화 시 위치가 어긋날 수 있음)"
+        )
+        msg.setInformativeText(
+            f"더 안정적인 자동화를 원하시면 {browser_name} 을(를) 종료한 후\n"
+            "다음 명령으로 재시작하세요 (PowerShell):\n\n"
+            '& "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" '
+            "--remote-debugging-port=9222\n\n"
+            "이후 picker 가 자동으로 CDP 연결 → Selenium DOM 기반 안정 코드를 생성합니다."
+        )
+        btn_ok = msg.addButton("확인", QMessageBox.ButtonRole.AcceptRole)
+        btn_dismiss = msg.addButton("다시 보지 않기", QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(btn_ok)
+        msg.exec()
+
+        if msg.clickedButton() is btn_dismiss:
+            hints["cdp_browser_hint_dismissed"] = True
+            self._save_settings()
+            self.console_panel.log(
+                "CDP 안내가 비활성화되었습니다. 설정에서 다시 켤 수 있습니다.",
+                "INFO",
+            )
 
     def _on_element_pick_cancelled(self):
         """UI 요소 선택 취소 (ESC 또는 우클릭)"""
@@ -1858,6 +1910,8 @@ class MainWindow(QMainWindow):
             self.workflow_engine.visual_feedback_enabled = (
                 self.settings.get("visual_feedback", {}).get("enabled", True)
             )
+            # 요소 picker 의 UIA walk 파라미터 즉시 반영
+            self.element_picker.update_settings(self.settings)
             self.console_panel.log("설정이 변경되었습니다.", "INFO")
 
     def _show_about(self):

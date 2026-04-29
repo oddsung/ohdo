@@ -80,6 +80,14 @@ class ExecutionKernel:
         if self.is_alive:
             return
 
+        # C.3: 이전에 죽은 프로세스 객체와 reader thread 참조 정리.
+        # is_alive=False 인 두 경우 — (1) self._proc is None, (2) self._proc.poll() != None.
+        # (2) 의 경우 객체 참조만 남아 있으니 None 으로 비워준다. reader thread 는
+        # daemon 이라 stdout 닫힘 시 자연 종료되며, 새 thread 가 별도로 시작되어도 큐는
+        # 새로 만들어지므로 (line 100) 데이터 충돌 없음.
+        self._proc = None
+        self._reader_thread = None
+
         worker_path = Path(__file__).parent / "kernel_worker.py"
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
@@ -109,25 +117,76 @@ class ExecutionKernel:
         logger.info("ExecutionKernel 시작 (PID=%s)", self._proc.pid)
 
     def stop(self) -> None:
-        """커널 프로세스를 종료합니다."""
+        """커널 프로세스를 종료합니다.
+
+        종료 단계 (C.1):
+            1) stdin close → kernel_worker 가 EOF 받고 자발적 종료
+            2) wait 0.5s — 못 끝나면 terminate (Unix SIGTERM, Windows TerminateProcess)
+            3) wait 1.0s — 못 끝나면 kill (Unix SIGKILL; Windows 에선 terminate 와 동일)
+            4) wait 2.0s — 그래도 못 끝나면 좀비 가능성으로 WARNING
+
+        종료 결과는 logger 에 정확히 표시한다 (이전 코드는 좀비여도 "종료" 로그를
+        출력하던 거짓 보고를 했음).
+        """
         proc = self._proc
         self._proc = None
+        self._reader_thread = None
         self._executed_steps = []
 
         if proc is not None:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
-            try:
-                proc.kill()
-                proc.wait(timeout=3)
-            except Exception:
-                pass
-            logger.info("ExecutionKernel 종료")
+            terminated = self._terminate_proc_gracefully(proc)
+            if terminated:
+                logger.info("ExecutionKernel 종료 (PID=%s)", proc.pid)
+            else:
+                logger.warning(
+                    "ExecutionKernel 강제 종료 실패 — 좀비 프로세스 가능 (PID=%s)",
+                    proc.pid,
+                )
 
         # 큐에 종료 센티넬 삽입 (대기 중인 execute_block 해제)
         self._output_queue.put(None)
+
+    @staticmethod
+    def _terminate_proc_gracefully(proc: subprocess.Popen) -> bool:
+        """프로세스를 단계적으로 종료. 종료가 확정되면 True, 좀비 가능성이면 False."""
+        # 1) stdin close — kernel_worker.py 의 _run_loop 가 EOF 받고 break
+        try:
+            if proc.stdin and not proc.stdin.closed:
+                proc.stdin.close()
+        except (OSError, ValueError) as e:
+            # 이미 닫혔거나 broken pipe — graceful path 가 막힌 것 뿐, kill 로 진행
+            logger.debug("stdin close 실패 (무시): %s", e)
+
+        # 2) 자발적 종료 대기
+        try:
+            proc.wait(timeout=0.5)
+            return True
+        except subprocess.TimeoutExpired:
+            pass
+
+        # 3) terminate (POSIX SIGTERM / Windows TerminateProcess)
+        try:
+            proc.terminate()
+        except (OSError, ProcessLookupError) as e:
+            logger.debug("terminate 실패: %s", e)
+
+        try:
+            proc.wait(timeout=1.0)
+            return True
+        except subprocess.TimeoutExpired:
+            pass
+
+        # 4) kill — Windows 에선 terminate 와 동일하지만 안전 한 번 더
+        try:
+            proc.kill()
+        except (OSError, ProcessLookupError) as e:
+            logger.debug("kill 실패: %s", e)
+
+        try:
+            proc.wait(timeout=2.0)
+            return True
+        except subprocess.TimeoutExpired:
+            return False  # 좀비 가능성
 
     def reset(self) -> None:
         """커널을 재시작합니다 (변수 상태 초기화)."""
@@ -197,8 +256,10 @@ class ExecutionKernel:
                 if not line:
                     break
                 self._output_queue.put(line.rstrip('\r\n'))
-        except Exception as e:
-            logger.debug("KernelReader 종료: %s", e)
+        except (OSError, ValueError) as e:
+            # ValueError: I/O on closed file (정상 종료 경로)
+            # OSError: Windows 에서 broken pipe / Unix 에서 EBADF
+            logger.debug("KernelReader 정상 종료: %s", e)
         finally:
             # 프로세스 종료 신호
             self._output_queue.put(None)
@@ -222,7 +283,9 @@ class ExecutionKernel:
             self._proc.stdin.write(actual_code + "\n")
             self._proc.stdin.write(self._SENTINEL_END + "\n")
             self._proc.stdin.flush()
-        except Exception as e:
+        except (OSError, ValueError, AttributeError) as e:
+            # OSError: broken pipe (커널이 죽음) / ValueError: closed file
+            # AttributeError: self._proc 가 race 로 None 이 된 경우
             return StepResult(
                 step_id=step_id,
                 success=False,

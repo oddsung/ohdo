@@ -48,6 +48,9 @@ class SettingsDialog(QDialog):
         # 3. 실행 설정 탭
         tabs.addTab(self._create_execution_tab(), "▶ 실행")
 
+        # 3-1. 요소 선택 탭
+        tabs.addTab(self._create_element_picker_tab(), "🎯 요소 선택")
+
         # 4. 프롬프트 편집 탭
         tabs.addTab(self._create_prompt_tab(), "💬 프롬프트")
 
@@ -182,6 +185,66 @@ class SettingsDialog(QDialog):
             "DBeaver 등 클릭이 제대로 되지 않는 경우 디버깅에 유용합니다."
         )
         form.addRow(self.visual_feedback_cb)
+
+        return widget
+
+    def _create_element_picker_tab(self) -> QWidget:
+        """🎯 요소 선택 탭 — UIA 트리 walk 파라미터"""
+        widget = QWidget()
+        form = QFormLayout(widget)
+
+        ep_config = self.settings.get("element_picker", {})
+
+        # 안내 라벨
+        intro = QLabel(
+            "요소 선택(picker) 도구가 마우스 아래의 UI 요소를 찾을 때 사용하는 파라미터입니다.\n"
+            "값이 클수록 더 깊은 요소(예: 페이지 안의 버튼)까지 잡지만, picker 가 살짝 lag 될 수 있습니다."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #6c7086; padding: 4px 0 12px 0;")
+        form.addRow(intro)
+
+        # max_depth
+        self.uia_max_depth_spin = QSpinBox()
+        self.uia_max_depth_spin.setRange(1, 50)
+        self.uia_max_depth_spin.setValue(int(ep_config.get("uia_max_depth", 10)))
+        self.uia_max_depth_spin.setSuffix(" 단계")
+        self.uia_max_depth_spin.setToolTip(
+            "UIA 트리 walk 의 최대 깊이입니다.\n"
+            "\n"
+            "Picker 는 마우스 아래 요소를 찾기 위해 UI 계층을 따라 들어갑니다.\n"
+            "예: 윈도우 → 페이지 → 헤더 → 메뉴 → 버튼 (5단계)\n"
+            "\n"
+            "  - 작게 (3-5): 큰 영역만 (윈도우/페이지) 잡힘. 빠름.\n"
+            "  - 보통 (10): 일반 데스크톱 앱 + 일부 웹페이지 요소까지.\n"
+            "  - 크게 (15-25): Chrome 안 깊은 HTML 요소까지. cycle 위험 살짝 있음.\n"
+            "\n"
+            "권장: 10. 깊은 element 가 안 잡히면 15-20 으로 올려보세요.\n"
+            "범위: 1 ~ 50"
+        )
+        form.addRow("UIA 최대 깊이:", self.uia_max_depth_spin)
+
+        # time_budget_ms
+        self.uia_time_budget_spin = QSpinBox()
+        self.uia_time_budget_spin.setRange(30, 2000)
+        self.uia_time_budget_spin.setValue(int(ep_config.get("uia_time_budget_ms", 150)))
+        self.uia_time_budget_spin.setSuffix(" ms")
+        self.uia_time_budget_spin.setSingleStep(10)
+        self.uia_time_budget_spin.setToolTip(
+            "UIA 트리 walk 한 번에 사용할 수 있는 최대 시간 (밀리초).\n"
+            "\n"
+            "Picker 는 100ms 마다 마우스 아래 요소를 다시 감지합니다.\n"
+            "이 시간 내에 walk 가 끝나야 부드럽게 추적되며,\n"
+            "넘으면 그 시점까지의 best match 를 반환하고 다음 tick 에 재시도합니다.\n"
+            "\n"
+            "  - 작게 (50-100ms): 부드러운 추적, 깊은 element 못 찾을 수 있음.\n"
+            "  - 보통 (150ms): 일반 앱은 끝까지 가고 Chrome 같은 거대 트리는 부분 매칭.\n"
+            "  - 크게 (300-500ms): Chrome 안 깊은 element 까지 정확히, 추적이 약간 lag.\n"
+            "\n"
+            "권장: 150ms. lag 가 거슬리면 줄이고, 깊이가 부족하면 늘리세요.\n"
+            "범위: 30 ~ 2000ms"
+        )
+        form.addRow("UIA 시간 예산:", self.uia_time_budget_spin)
 
         return widget
 
@@ -400,6 +463,12 @@ class SettingsDialog(QDialog):
         if "visual_feedback" not in self.settings:
             self.settings["visual_feedback"] = {}
         self.settings["visual_feedback"]["enabled"] = self.visual_feedback_cb.isChecked()
+
+        # 요소 선택 (UIA 트리 walk)
+        if "element_picker" not in self.settings:
+            self.settings["element_picker"] = {}
+        self.settings["element_picker"]["uia_max_depth"] = self.uia_max_depth_spin.value()
+        self.settings["element_picker"]["uia_time_budget_ms"] = self.uia_time_budget_spin.value()
 
         # UI
         self.settings["ui"]["theme"] = self.theme_combo.currentText()

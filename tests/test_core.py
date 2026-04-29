@@ -382,7 +382,9 @@ class CoreTest(TestCase):
 
         inspector = WindowInspector()
 
-        self.step("인터랙티브 브라우저 요소 (direct click)")
+        self.step("인터랙티브 브라우저 요소 (direct click) - CDP DOM 수집됨")
+        # Selenium 경로는 CDP 가 실제 DOM 정보 (tagName) 를 수집했을 때만 발동.
+        # is_browser 만으로는 부족 (탭/주소창 등 chrome UI 도 is_browser=True 라서).
         button_elem = {
             "control_type": "Button",
             "name": "Submit",
@@ -392,11 +394,16 @@ class CoreTest(TestCase):
             "parent_window_title": "Chrome",
             "is_browser": True,
             "browser_type": "Chrome",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "button",
+                "attributes": {"id": "submitBtn", "class": "button"},
+            },
         }
         text = inspector.get_element_info_text(button_elem)
         self.assert_contains(text, "find_and_click", "Button은 find_and_click 패턴이어야 합니다")
 
-        self.step("비인터랙티브 브라우저 요소 (JS click)")
+        self.step("비인터랙티브 브라우저 요소 (JS click) - CDP DOM 수집됨")
         text_elem = {
             "control_type": "Text",
             "name": "메뉴항목",
@@ -406,6 +413,11 @@ class CoreTest(TestCase):
             "parent_window_title": "Chrome",
             "is_browser": True,
             "browser_type": "Chrome",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "span",
+                "attributes": {"class": "span"},
+            },
         }
         text = inspector.get_element_info_text(text_elem)
         self.assert_contains(text, "execute_script", "Text 요소는 JS click이어야 합니다")
@@ -573,6 +585,625 @@ class CoreTest(TestCase):
             # 코드 포함 확인
             self.assert_contains(result, "print(os.getcwd())", "스텝1 코드 포함")
             self.assert_contains(result, "pywinauto.Application()", "스텝2 코드 포함")
+
+
+    # ──────────────────────────────────────────
+    # EnvironmentScanner 테스트 (F.1)
+    # ──────────────────────────────────────────
+
+    def test_26_env_machine_id_stable(self):
+        """동일 컴퓨터에서 machine_id 는 호출마다 동일해야 한다"""
+        from core.environment_scanner import EnvironmentScanner
+
+        with tempfile.TemporaryDirectory() as td:
+            scanner = EnvironmentScanner(config_dir=Path(td))
+            id1 = scanner.get_machine_id()
+            id2 = scanner.get_machine_id()
+            self.assert_equal(id1, id2, "machine_id 가 동일 환경에서 안정적이어야 합니다")
+            self.assert_true(len(id1) == 16, "machine_id 는 16자 hex 문자열이어야 합니다")
+
+    def test_27_env_save_load_roundtrip(self):
+        """save_environment → load_saved_environment 라운드트립"""
+        from core.environment_scanner import EnvironmentScanner
+
+        with tempfile.TemporaryDirectory() as td:
+            scanner = EnvironmentScanner(config_dir=Path(td))
+
+            self.step("환경 데이터 저장")
+            payload = {
+                'python_path': sys.executable,
+                'python_version': '3.12.0',
+                'packages': {'all_required_installed': True, 'required': [], 'optional': []},
+            }
+            ok = scanner.save_environment(payload)
+            self.assert_true(ok, "save_environment 는 성공해야 합니다")
+
+            self.step("저장된 환경 로드")
+            loaded = scanner.load_saved_environment()
+            self.assert_not_none(loaded, "저장 직후 로드는 dict 를 반환해야 합니다")
+            self.assert_equal(loaded.get('python_path'), sys.executable)
+            self.assert_true('machine_id' in loaded, "machine_id 가 자동으로 박혀야 합니다")
+            self.assert_true('last_scan' in loaded, "last_scan 타임스탬프가 박혀야 합니다")
+
+    def test_28_env_load_other_machine_resets(self):
+        """다른 컴퓨터의 machine_id 면 None 반환 + 환경 파일 삭제"""
+        from core.environment_scanner import EnvironmentScanner
+
+        with tempfile.TemporaryDirectory() as td:
+            scanner = EnvironmentScanner(config_dir=Path(td))
+
+            self.step("타 컴퓨터의 환경 파일 시뮬레이션")
+            fake = {
+                'machine_id': 'deadbeef00000000',  # 절대 매칭되지 않을 hex
+                'hostname': 'other-pc',
+                'python_path': sys.executable,
+                'last_scan': '2020-01-01T00:00:00',
+            }
+            scanner.env_file.write_text(json.dumps(fake), encoding='utf-8')
+            self.assert_true(scanner.env_file.exists(), "사전 조건: 환경 파일이 존재")
+
+            self.step("load_saved_environment 호출")
+            loaded = scanner.load_saved_environment()
+            self.assert_true(loaded is None, "다른 머신의 설정은 None 을 반환해야 합니다")
+            self.assert_true(not scanner.env_file.exists(), "다른 머신 감지 시 파일이 삭제되어야 합니다")
+
+    def test_29_probe_python_version_current(self):
+        """_probe_python_version 이 현재 인터프리터 버전을 반환해야 한다"""
+        from core.environment_scanner import EnvironmentScanner
+        import platform as _platform
+
+        version = EnvironmentScanner._probe_python_version(sys.executable)
+        expected = _platform.python_version()
+        self.assert_equal(
+            version, expected,
+            f"sys.executable({sys.executable}) 의 버전 = {expected}"
+        )
+
+    def test_30_check_gemini_cli_not_found(self):
+        """존재하지 않는 명령어로 호출 시 not_found 에러를 반환"""
+        from core.environment_scanner import EnvironmentScanner
+
+        with tempfile.TemporaryDirectory() as td:
+            scanner = EnvironmentScanner(config_dir=Path(td))
+            result = scanner.check_gemini_cli(command="ohdo_nonexistent_cli_xyz_zzz")
+
+            self.assert_equal(result['installed'], False, "없는 명령은 installed=False")
+            self.assert_equal(result['error'], 'not_found')
+            self.assert_true(result['path'] is None, "PATH 에서 못 찾으면 path=None")
+            self.assert_not_none(result['detail'], "사용자에게 보일 detail 메시지가 있어야 함")
+
+    def test_31_check_gemini_cli_shape(self):
+        """기본 'gemini' 호출의 결과 dict 가 약속된 shape 를 가져야 한다.
+
+        설치 여부와 무관하게 dict 의 키 집합과 타입이 일관되어야 dialog
+        쪽에서 분기 코드를 단순하게 유지할 수 있다.
+        """
+        from core.environment_scanner import EnvironmentScanner
+
+        with tempfile.TemporaryDirectory() as td:
+            scanner = EnvironmentScanner(config_dir=Path(td))
+            result = scanner.check_gemini_cli()
+
+            for key in ('installed', 'command', 'path', 'version', 'error', 'detail'):
+                self.assert_true(key in result, f"결과 dict 에 '{key}' 키가 있어야 합니다")
+            self.assert_equal(result['command'], 'gemini')
+            self.assert_true(isinstance(result['installed'], bool), "installed 는 bool")
+            if result['installed']:
+                self.assert_true(result['error'] is None, "installed=True 면 error=None")
+                self.assert_not_none(result['version'], "installed=True 면 version 존재")
+            else:
+                self.assert_not_none(result['error'], "installed=False 면 error 존재")
+
+    def test_32_full_scan_includes_gemini_section(self):
+        """full_scan 결과 dict 에 'gemini_cli' 섹션이 포함되어야 한다"""
+        from core.environment_scanner import EnvironmentScanner
+
+        with tempfile.TemporaryDirectory() as td:
+            scanner = EnvironmentScanner(config_dir=Path(td))
+            result = scanner.full_scan(sys.executable)
+
+            self.assert_equal(result.get('success'), True, "full_scan 성공")
+            self.assert_true('gemini_cli' in result, "결과에 gemini_cli 섹션 포함")
+            gemini = result['gemini_cli']
+            self.assert_true(isinstance(gemini, dict), "gemini_cli 는 dict")
+            self.assert_true('installed' in gemini and isinstance(gemini['installed'], bool))
+
+
+    # ──────────────────────────────────────────
+    # ExecutionKernel 테스트 (C.x — 라이프사이클/타임아웃/race)
+    # ──────────────────────────────────────────
+
+    def test_33_kernel_basic_lifecycle(self):
+        """ExecutionKernel start/ping/stop/restart 사이클"""
+        from core.execution_kernel import ExecutionKernel
+
+        kernel = ExecutionKernel(default_timeout=5)
+        try:
+            self.assert_equal(kernel.is_alive, False, "초기 not alive")
+
+            self.step("start()")
+            kernel.start()
+            self.assert_equal(kernel.is_alive, True, "start 후 alive")
+
+            self.step("ping()")
+            self.assert_equal(kernel.ping(timeout=3.0), True, "ping 응답")
+
+            self.step("stop()")
+            kernel.stop()
+            self.assert_equal(kernel.is_alive, False, "stop 후 not alive")
+
+            self.step("재기동")
+            kernel.start()
+            self.assert_equal(kernel.is_alive, True, "재기동 alive")
+        finally:
+            kernel.stop()
+
+    def test_34_kernel_executes_code_with_namespace(self):
+        """블럭 간 네임스페이스 공유 (Jupyter 식 동작)"""
+        from core.execution_kernel import ExecutionKernel
+
+        kernel = ExecutionKernel(default_timeout=5)
+        kernel.start()
+        try:
+            self.step("첫 블럭에서 변수 정의")
+            r1 = kernel.execute_block("x = 42\ny = 'hello'", step_id=1)
+            self.assert_true(r1.success, f"첫 블럭 성공해야 함 (error={r1.error})")
+
+            self.step("두 번째 블럭에서 이전 변수 사용")
+            r2 = kernel.execute_block("print(x); print(y)", step_id=2)
+            self.assert_true(r2.success, "둘째 블럭 성공")
+            self.assert_contains(r2.output, "42", "변수 x 보존")
+            self.assert_contains(r2.output, "hello", "변수 y 보존")
+
+            self.step("executed_steps 추적")
+            self.assert_equal(kernel.executed_steps, [1, 2], "1, 2 가 추적됨")
+        finally:
+            kernel.stop()
+
+    def test_35_kernel_stop_terminates_subprocess(self):
+        """C.1 게이트: stop() 이 자식 프로세스를 진짜 종료해야 한다."""
+        from core.execution_kernel import ExecutionKernel
+        import time
+
+        kernel = ExecutionKernel(default_timeout=5)
+        kernel.start()
+        proc = kernel._proc  # 종료 후 검증용으로 reference 보존
+        self.assert_not_none(proc, "start 후 _proc 존재")
+        pid = proc.pid
+        self.log(f"커널 PID={pid}")
+
+        self.step("stop() 호출")
+        kernel.stop()
+
+        # poll() 이 None 이 아닌 종료 코드를 반환할 때까지 폴링 (max 5초)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+
+        self.assert_true(
+            proc.poll() is not None,
+            f"stop() 후 자식 프로세스가 종료되어야 함 (poll={proc.poll()}, PID={pid})",
+        )
+        self.log(f"종료 코드: {proc.poll()}")
+
+    def test_36_kernel_timeout_triggers_restart_capability(self):
+        """C.1: 무한 대기 코드를 짧은 timeout 으로 강제 종료 → 재기동 가능해야 한다."""
+        from core.execution_kernel import ExecutionKernel
+
+        kernel = ExecutionKernel(default_timeout=5)
+        kernel.start()
+        try:
+            self.step("긴 sleep 코드 1초 timeout 으로 실행 → 강제 종료 유발")
+            r1 = kernel.execute_block(
+                "import time\ntime.sleep(30)",
+                step_id=1,
+                timeout=1,
+            )
+            self.assert_equal(r1.success, False, "타임아웃은 실패로 보고")
+            self.assert_contains(r1.error or "", "시간 초과", "에러 메시지에 시간 초과 표시")
+
+            # 타임아웃 시 _execute_locked 가 self.stop() 을 호출 → is_alive=False
+            self.assert_equal(kernel.is_alive, False, "타임아웃 후 커널 종료 상태")
+
+            self.step("재기동 후 정상 실행")
+            kernel.start()
+            self.assert_equal(kernel.is_alive, True, "재기동 alive")
+
+            r2 = kernel.execute_block("print('alive')", step_id=2, timeout=5)
+            self.assert_true(r2.success, f"재기동 후 정상 실행 (error={r2.error})")
+            self.assert_contains(r2.output, "alive", "재기동 후 출력 정상")
+        finally:
+            kernel.stop()
+
+
+    # ──────────────────────────────────────────
+    # ElementPicker 인프라 회귀 방지 (SetWindowPos / _force_topmost)
+    # ──────────────────────────────────────────
+
+    def test_37_element_picker_force_topmost_exists(self):
+        """[회귀] _force_topmost 메서드가 element_picker 에 존재하고 start_picking
+        에서 호출되는지. 이 메서드가 빠지면 Win11 에서 Chrome/작업표시줄이 overlay
+        위로 올라와 picker click 이 가려져 element 선택 불능 회귀 발생.
+        """
+        from ui import element_picker
+
+        self.assert_true(
+            hasattr(element_picker.ElementPickerOverlay, "_force_topmost"),
+            "[회귀] ElementPickerOverlay._force_topmost 메서드가 존재해야 함",
+        )
+
+        # SetWindowPos 와 HWND_TOPMOST 상수 존재
+        self.assert_true(
+            hasattr(element_picker, "HWND_TOPMOST"),
+            "[회귀] HWND_TOPMOST 상수 존재해야 함",
+        )
+        self.assert_equal(element_picker.HWND_TOPMOST, -1, "HWND_TOPMOST=-1")
+        self.assert_true(
+            hasattr(element_picker, "SWP_NOMOVE")
+            and hasattr(element_picker, "SWP_NOSIZE")
+            and hasattr(element_picker, "SWP_NOACTIVATE"),
+            "[회귀] SWP_NOMOVE/SWP_NOSIZE/SWP_NOACTIVATE 상수 존재",
+        )
+
+        # start_picking 의 소스에 _force_topmost 호출이 있는지 (정적 검사)
+        import inspect
+        src = inspect.getsource(element_picker.ElementPickerOverlay.start_picking)
+        self.assert_true(
+            "_force_topmost" in src,
+            "[회귀] start_picking 이 _force_topmost() 를 호출해야 함",
+        )
+
+    def test_39_element_picker_walkers_in_helper(self):
+        """[회귀] _detect_in_hwnd helper 가 세 walker 모두 호출하는지.
+
+        Chrome 처럼 sparse children 케이스에서 walker 하나만 빠져도 회귀.
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        self.assert_true(
+            hasattr(ElementPickerOverlay, "_detect_in_hwnd"),
+            "[회귀] _detect_in_hwnd helper 메서드 존재 필수",
+        )
+        src = inspect.getsource(ElementPickerOverlay._detect_in_hwnd)
+        self.assert_true(
+            "_walk_uia_to_deepest" in src,
+            "[회귀] _detect_in_hwnd 가 children walk 호출 필수",
+        )
+        self.assert_true(
+            "_raw_walk_at_point" in src,
+            "[회귀] _detect_in_hwnd 가 raw walker 호출 필수",
+        )
+        self.assert_true(
+            "_find_deepest_descendant" in src,
+            "[회귀] _detect_in_hwnd 가 descendants 폴백 호출 필수",
+        )
+
+    def test_40_element_picker_tries_main_and_child_hwnd(self):
+        """[회귀] _detect_element_multi_backend 가 main + child HWND 둘 다 시도.
+
+        탭/URL bar 는 main HWND 트리, HTML 콘텐츠는 child HWND (renderer) 트리.
+        한쪽만 빼도 다른 케이스 회귀.
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        src = inspect.getsource(ElementPickerOverlay._detect_element_multi_backend)
+        self.assert_true(
+            "_find_topmost_window_at_point" in src,
+            "[회귀] main HWND 추출 (EnumWindows 기반) 필수",
+        )
+        self.assert_true(
+            "ChildWindowFromPointEx" in src,
+            "[회귀] child HWND 추출 필수 (HTML 콘텐츠 detection)",
+        )
+        self.assert_true(
+            "_detect_in_hwnd" in src,
+            "[회귀] _detect_in_hwnd helper 호출 필수",
+        )
+        self.assert_true(
+            "candidates" in src,
+            "[회귀] HWND 후보 리스트 (main + child) 패턴 필수",
+        )
+
+    def test_38_element_picker_detection_helpers_exist(self):
+        """[회귀] picker 의 detection 헬퍼 함수들 존재 확인.
+
+        이전에 여러 번 추가/제거된 핵심 함수들. 사라지면 element 감지 자체가
+        깨짐. 정적 존재 검증만 (GUI 의존 동작은 수동 검증).
+        """
+        from ui.element_picker import ElementPickerOverlay
+
+        required = [
+            "_find_topmost_window_at_point",
+            "_walk_uia_to_deepest",
+            "_find_deepest_descendant",
+            "_raw_walk_at_point",
+            "_detect_via_efp",
+            "_detect_element_multi_backend",
+            "_update_element_under_cursor",
+            "mousePressEvent",
+        ]
+        for method_name in required:
+            self.assert_true(
+                hasattr(ElementPickerOverlay, method_name),
+                f"[회귀] ElementPickerOverlay.{method_name} 가 존재해야 함",
+            )
+
+    def test_42_element_picker_post_pause_always_transparent(self):
+        """[회귀] post_pause_mode 는 항상 WS_EX_TRANSPARENT 켜야 함.
+
+        방향 B 통합 결정 (2026-04-29) — F3 wait 후 picker 복귀는 click-through
+        모드로 통일:
+        - 펼친 hover-only submenu 유지
+        - 다른 창 활성화 자연스러움
+        - underlying mouseover 누수는 post_pause_mode 동안만 (일반 picker mode 의
+          누수 0 은 그대로)
+
+        이전에는 _keep_submenu_mode 분기로 Shift+F3 일 때만 켰지만 통합으로
+        분기 제거. 이 보장이 깨지면 submenu 닫힘 회귀.
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        rsm_src = inspect.getsource(ElementPickerOverlay._resume_after_pause)
+        self.assert_true(
+            "WS_EX_TRANSPARENT" in rsm_src,
+            "[회귀] _resume_after_pause 가 WS_EX_TRANSPARENT 적용 필수 (방향 B 통합)",
+        )
+        self.assert_true(
+            "WS_EX_NOACTIVATE" in rsm_src,
+            "[회귀] _resume_after_pause 가 WS_EX_NOACTIVATE 적용 필수 (focus 빼앗기 방지)",
+        )
+
+        # _exit_post_pause_mode 가 두 ex-style 모두 제거
+        epm_src = inspect.getsource(ElementPickerOverlay._exit_post_pause_mode)
+        self.assert_true(
+            "~WS_EX_TRANSPARENT" in epm_src,
+            "[회귀] _exit_post_pause_mode 가 WS_EX_TRANSPARENT 제거 필수",
+        )
+        self.assert_true(
+            "~WS_EX_NOACTIVATE" in epm_src,
+            "[회귀] _exit_post_pause_mode 가 WS_EX_NOACTIVATE 제거 필수",
+        )
+
+    def test_43_element_picker_general_mode_no_transparent_leak(self):
+        """[회귀] 일반 picker mode (F3 누르기 전) 의 mouseover 누수 0 보장.
+
+        _detect_element_multi_backend 가 cursor tracking 을 위해 매 tick 마다
+        WS_EX_TRANSPARENT 토글하면 underlying app 에 mouseover 효과 누수.
+        어제 (2026-04-28) 사용자 보고로 0 토글 패턴 도입. 이 보장은 방향 B 통합
+        과 무관하게 유지 — F3 누르기 전 일반 picker mode 한정.
+
+        post_pause_mode 의 누수는 의도된 trade-off (test_42 참조).
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        mb_src = inspect.getsource(
+            ElementPickerOverlay._detect_element_multi_backend
+        )
+        # 일반 picker mode 의 detection 흐름은 SetWindowLongW 호출 0
+        # (docstring 에 WS_EX_TRANSPARENT 멘션은 OK — 실제 토글 코드 부재만 검증)
+        self.assert_true(
+            "SetWindowLongW" not in mb_src,
+            "[회귀] _detect_element_multi_backend 가 SetWindowLongW 호출하면 안 됨 "
+            "(매 tick WS_EX_TRANSPARENT 토글로 mouseover 누수 회귀 위험)",
+        )
+
+    def test_44_element_picker_mouse_hook_in_post_pause(self):
+        """[회귀] post_pause_mode 는 WS_EX_TRANSPARENT 켜져 있어 overlay 가
+        mouse 이벤트를 못 받음 → WH_MOUSE_LL hook 으로 click 감지 + 통과.
+
+        방향 B 통합으로 mouse hook 항상 설치 (이전에는 keep_submenu_mode 분기).
+
+        hook 함수 존재 + _resume_after_pause 가 항상 설치 + _exit_post_pause_mode
+        가 해제 + _on_hook_click 이 element_picked emit + stop_picking.
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        # 메서드 존재
+        for method_name in (
+            "_install_mouse_hook",
+            "_uninstall_mouse_hook",
+            "_on_hook_click",
+        ):
+            self.assert_true(
+                hasattr(ElementPickerOverlay, method_name),
+                f"[회귀] ElementPickerOverlay.{method_name} 가 존재해야 함",
+            )
+
+        # _install_mouse_hook 가 WH_MOUSE_LL + WM_LBUTTONDOWN 사용
+        imh_src = inspect.getsource(ElementPickerOverlay._install_mouse_hook)
+        self.assert_true(
+            "WH_MOUSE_LL" in imh_src,
+            "[회귀] _install_mouse_hook 가 WH_MOUSE_LL 사용 필수",
+        )
+        self.assert_true(
+            "WM_LBUTTONDOWN" in imh_src,
+            "[회귀] _install_mouse_hook 가 WM_LBUTTONDOWN 검사 필수",
+        )
+        self.assert_true(
+            "CallNextHookEx" in imh_src,
+            "[회귀] _install_mouse_hook 가 click 통과 (CallNextHookEx 호출) 필수",
+        )
+
+        # _resume_after_pause 가 keep_submenu_mode 시 mouse hook 설치
+        rsm_src = inspect.getsource(ElementPickerOverlay._resume_after_pause)
+        self.assert_true(
+            "_install_mouse_hook" in rsm_src,
+            "[회귀] _resume_after_pause 가 _install_mouse_hook 호출 필수",
+        )
+
+        # _exit_post_pause_mode 가 mouse hook 해제
+        epm_src = inspect.getsource(ElementPickerOverlay._exit_post_pause_mode)
+        self.assert_true(
+            "_uninstall_mouse_hook" in epm_src,
+            "[회귀] _exit_post_pause_mode 가 _uninstall_mouse_hook 호출 필수",
+        )
+
+        # _on_hook_click 이 element_picked emit (또는 cancelled)
+        ohc_src = inspect.getsource(ElementPickerOverlay._on_hook_click)
+        self.assert_true(
+            "element_picked.emit" in ohc_src or "pick_cancelled.emit" in ohc_src,
+            "[회귀] _on_hook_click 가 element_picked/pick_cancelled emit 필수",
+        )
+        self.assert_true(
+            "stop_picking" in ohc_src,
+            "[회귀] _on_hook_click 가 stop_picking 호출 (picker UI 종료) 필수",
+        )
+
+    def test_45_element_picker_post_pause_auto_transition(self):
+        """[회귀] post_pause_mode 후 자동 transition — settings 로 조정 가능.
+
+        실험 결과 (2026-04-29): transition 시 SetWindowLongW 가 OS hit-test 를
+        다시 트리거 → menu 닫힘 → 가설 실패. settings 의 post_pause_transition_ms
+        를 0 으로 두면 transition 비활성 (방향 B 직접 — post_pause_mode 가
+        click/ESC 까지 유지).
+
+        (1) POST_PAUSE_TRANSITION_MS 상수 존재 (default)
+        (2) update_settings 가 post_pause_transition_ms 읽기
+        (3) _resume_after_pause 가 _post_pause_transition_ms > 0 일 때만 timer 시작
+        (4) _start_pause 진입 시 timer 정지 (post_pause 중 F3 재진입)
+        (5) _exit_post_pause_mode idempotent (timer + user 액션 race 방어)
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        # (1) 상수
+        self.assert_true(
+            hasattr(ElementPickerOverlay, "POST_PAUSE_TRANSITION_MS"),
+            "[회귀] POST_PAUSE_TRANSITION_MS 상수 존재 필수",
+        )
+
+        # (2) update_settings 가 post_pause_transition_ms 처리
+        us_src = inspect.getsource(ElementPickerOverlay.update_settings)
+        self.assert_true(
+            "post_pause_transition_ms" in us_src,
+            "[회귀] update_settings 가 post_pause_transition_ms 키 처리 필수",
+        )
+        self.assert_true(
+            "_post_pause_transition_ms" in us_src,
+            "[회귀] update_settings 가 _post_pause_transition_ms 인스턴스 변수 셋 필수",
+        )
+
+        # (3) _resume_after_pause 가 0 가드 + 인스턴스 값 사용
+        rsm_src = inspect.getsource(ElementPickerOverlay._resume_after_pause)
+        self.assert_true(
+            "_post_pause_transition_ms" in rsm_src,
+            "[회귀] _resume_after_pause 가 _post_pause_transition_ms 인스턴스 값 사용 필수",
+        )
+        self.assert_true(
+            "> 0" in rsm_src or "!= 0" in rsm_src,
+            "[회귀] _resume_after_pause 가 0 가드 (transition 비활성 옵션) 필수",
+        )
+
+        # (4) _start_pause 가 timer 정지
+        sp_src = inspect.getsource(ElementPickerOverlay._start_pause)
+        self.assert_true(
+            "_post_pause_transition_timer" in sp_src and ".stop()" in sp_src,
+            "[회귀] _start_pause 가 transition timer 정지 (post_pause 중 F3 재진입 안전) 필수",
+        )
+
+        # (5) _exit_post_pause_mode idempotent
+        epm_src = inspect.getsource(ElementPickerOverlay._exit_post_pause_mode)
+        self.assert_true(
+            "if not self._post_pause_mode" in epm_src,
+            "[회귀] _exit_post_pause_mode 가 idempotent guard 필수 (race 방어)",
+        )
+
+    def test_46_element_picker_keyboard_hook_lifecycle(self):
+        """[회귀] 키보드 hook 이 picker 전체 lifecycle 동안 유지 — ESC/F3
+        응답성 보장 (focus 무관).
+
+        과거 (post_pause 한정) → 현재 (start_picking ~ stop_picking 전체):
+        - 일반 picker mode 에서도 ESC 즉각 처리
+        - hook 콜백이 `self._paused or not self.isHidden()` 로 active 검사
+        - _on_hook_esc 가 post_pause 도 처리 + stop_picking
+        - _on_hook_f3 가 일반 mode + post_pause 둘 다 처리
+        - _resume_after_pause / _exit_post_pause_mode 가 hook 재설치/해제 안 함
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        # start_picking 가 hook 설치
+        sp_src = inspect.getsource(ElementPickerOverlay.start_picking)
+        self.assert_true(
+            "_install_keyboard_hook" in sp_src,
+            "[회귀] start_picking 가 _install_keyboard_hook 호출 필수 (lifecycle 시작)",
+        )
+
+        # stop_picking 가 hook 해제
+        stop_src = inspect.getsource(ElementPickerOverlay.stop_picking)
+        self.assert_true(
+            "_uninstall_keyboard_hook" in stop_src,
+            "[회귀] stop_picking 가 _uninstall_keyboard_hook 호출 필수 (lifecycle 종료)",
+        )
+
+        # _install_keyboard_hook idempotent guard
+        ikh_src = inspect.getsource(ElementPickerOverlay._install_keyboard_hook)
+        self.assert_true(
+            "self._keyboard_hook" in ikh_src and "return" in ikh_src,
+            "[회귀] _install_keyboard_hook 가 재설치 방지 guard 필수 (leak 방지)",
+        )
+
+        # hook 콜백이 isHidden / _paused 검사 (post_pause 한정 X)
+        self.assert_true(
+            "isHidden" in ikh_src or "_paused" in ikh_src,
+            "[회귀] hook 콜백이 picker active 조건 (isHidden/paused) 검사 필수",
+        )
+
+        # _on_hook_esc 가 post_pause 분기 + stop_picking
+        oe_src = inspect.getsource(ElementPickerOverlay._on_hook_esc)
+        self.assert_true(
+            "stop_picking" in oe_src,
+            "[회귀] _on_hook_esc 가 stop_picking 호출 필수",
+        )
+        self.assert_true(
+            "pick_cancelled.emit" in oe_src,
+            "[회귀] _on_hook_esc 가 pick_cancelled emit 필수",
+        )
+
+        # _on_hook_f3 가 _paused guard + 일반 mode 도 처리
+        of_src = inspect.getsource(ElementPickerOverlay._on_hook_f3)
+        self.assert_true(
+            "_paused" in of_src,
+            "[회귀] _on_hook_f3 가 _paused guard 필수 (wait 중 F3 무시)",
+        )
+        self.assert_true(
+            "_start_pause" in of_src,
+            "[회귀] _on_hook_f3 가 _start_pause 호출 필수",
+        )
+
+    def test_41_element_picker_uses_element_from_point(self):
+        """[회귀] _detect_via_efp 가 IUIAutomation::ElementFromPoint 직호출 +
+        _detect_element_multi_backend 가 EFP 결과를 best 후보 초기화에 사용.
+
+        Walker (ControlView/RawView) 가 leaf 에서 멈추는 lazy a11y 트리 케이스
+        (MFC+WebView 등) 에서 OS-level path 가 reach 가능. 이 호출이 빠지면
+        해당 케이스 회귀.
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        efp_src = inspect.getsource(ElementPickerOverlay._detect_via_efp)
+        self.assert_true(
+            "ElementFromPoint" in efp_src,
+            "[회귀] _detect_via_efp 가 IUIAutomation::ElementFromPoint 호출 필수",
+        )
+        self.assert_true(
+            "IUIA" in efp_src,
+            "[회귀] _detect_via_efp 가 pywinauto.uia_defines.IUIA 사용 필수",
+        )
+
+        mb_src = inspect.getsource(ElementPickerOverlay._detect_element_multi_backend)
+        self.assert_true(
+            "_detect_via_efp" in mb_src,
+            "[회귀] _detect_element_multi_backend 가 _detect_via_efp 호출 필수",
+        )
 
 
 if __name__ == "__main__":

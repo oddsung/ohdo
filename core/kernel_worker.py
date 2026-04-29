@@ -37,15 +37,17 @@ _globals: dict = {
 
 def _run_loop():
     # UTF-8 강제 설정 (한글 출력 깨짐 방지)
+    # 일부 환경 (3.6 미만, redirected stream) 에서 reconfigure 가 OSError/AttributeError
+    # 던질 수 있으므로 폴백. 기능 자체는 best-effort.
     if hasattr(sys.stdout, 'reconfigure'):
         try:
             sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        except Exception:
+        except (OSError, AttributeError):
             pass
     if hasattr(sys.stdin, 'reconfigure'):
         try:
             sys.stdin.reconfigure(encoding='utf-8', errors='replace')
-        except Exception:
+        except (OSError, AttributeError):
             pass
 
     while True:

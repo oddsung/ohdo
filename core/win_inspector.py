@@ -198,14 +198,47 @@ class WindowInspector:
 
         return "\n".join(lines)
 
+    @staticmethod
+    def should_use_selenium(element_info: dict) -> bool:
+        """선택된 요소를 Selenium 경로로 자동화할지 판단.
+
+        라우팅 매트릭스 (하드코딩 0, picker 정보만 사용):
+
+            | browser? | CDP? | tagName? | 결정     | 의미                                     |
+            |----------|------|----------|----------|------------------------------------------|
+            | No       | -    | -        | False    | 데스크톱 앱 → pywinauto                  |
+            | Yes      | Yes  | 있음     | True     | 페이지 DOM 확정 → Selenium + DOM info    |
+            | Yes      | Yes  | 없음     | False    | browser chrome (탭/메뉴) → pywinauto     |
+            | Yes      | No   | -        | False    | CDP 없음, 사용자가 본 그 Chrome 인스턴스에  |
+            |          |      |          |          | attach 불가능 → pywinauto + pyautogui    |
+            |          |      |          |          | (HWND 기반: 탭 OK, HTML 콘텐츠는 좌표      |
+            |          |      |          |          | 클릭). Selenium 으로 보내면 새 Chrome    |
+            |          |      |          |          | 띄워 사용자 보던 페이지/탭 못 찾음.     |
+
+        마지막 케이스가 핵심: CDP 가 없으면 Selenium 으로 사용자의 기존 Chrome 에
+        attach 불가능하므로, AI 가 새 Chrome 띄우는 코드를 생성하면 사용자 의도와 어긋남.
+        대신 desktop path (pywinauto) 로 보내면 picker 가 식별한 윈도우 (parent_title)
+        를 그대로 connect 해서 기존 Chrome 윈도우의 element 를 정확히 찾을 수 있음.
+        클릭은 desktop path 의 코드 템플릿이 is_browser 기반으로 pyautogui 를 PRIMARY
+        로 사용 (HTML 콘텐츠도 OS 레벨 SendInput 으로 정확 전달).
+
+        Selenium 경로는 CDP 가 실제로 연결됐을 때만 사용 (DOM 정보 풍부하고 attach 가능).
+        """
+        browser = bool(element_info.get("browser_type"))
+        if not browser:
+            return False
+
+        dom_ctx = element_info.get("dom_context") or {}
+        # Selenium 은 CDP 가 실제 응답하고 DOM tagName 까지 있을 때만
+        return bool(dom_ctx.get("cdp_available") and dom_ctx.get("tagName"))
+
     def get_element_info_text(self, element_info: dict) -> str:
         """
         피커로 선택된 단일 요소 정보를 AI 프롬프트에 포함할 텍스트로 변환합니다.
-        브라우저 요소면 Selenium, 데스크톱 요소면 pywinauto 코드 예시를 생성합니다.
+        Selenium 가능 (CDP DOM 수집됨) → Selenium 코드 예시.
+        그 외 (browser chrome / CDP 없음 / 데스크톱 앱) → pywinauto 코드 예시.
         """
-        is_browser = element_info.get("is_browser", False)
-
-        if is_browser:
+        if self.should_use_selenium(element_info):
             return self._get_browser_element_info_text(element_info)
         else:
             return self._get_desktop_element_info_text(element_info)
@@ -230,7 +263,9 @@ class WindowInspector:
         if name:
             lines.append(f'- **텍스트/이름**: "{name}"')
         if auto_id:
-            lines.append(f"- **HTML ID**: {auto_id}")
+            # auto_id 는 UIA AutomationID (HTML id 와 별개). 실제 HTML id 는 아래
+            # DOM 컨텍스트 섹션에서 dom_attrs.id 로 따로 노출.
+            lines.append(f"- **AutomationID**: {auto_id}")
         if class_name:
             lines.append(f"- **클래스**: {class_name}")
         if rect:
@@ -397,6 +432,19 @@ class WindowInspector:
 
         locators_str = ",\n    ".join(locator_items)
 
+        # CDP 가용성에 따라 어떤 connection 방법을 추천할지 명확히
+        cdp_active = dom_ctx.get("cdp_available", False)
+        if cdp_active:
+            lines.append("**🌟 권장 connection: 방법 2 (기존 Chrome attach)** — picker 가 CDP 로 DOM")
+            lines.append("정보를 수집한 것은 사용자가 이미 `--remote-debugging-port=9222` 로 Chrome 을")
+            lines.append("실행했다는 뜻. 같은 브라우저에 attach 해야 picker 가 본 그 페이지/요소를 조작 가능.")
+        else:
+            lines.append("**💡 connection 선택 가이드**:")
+            lines.append("- 사용자가 새 페이지를 열어 자동화하는 시나리오 → 방법 1 (새 브라우저 + driver.get)")
+            lines.append("- 사용자가 이미 띄워둔 Chrome 의 페이지를 조작 → 방법 2 활성화 후 attach")
+            lines.append("  - 단, Chrome 이 `--remote-debugging-port=9222` 옵션으로 떠 있어야 함")
+            lines.append("  - 안 떠 있으면 방법 2 는 connection refused 발생")
+        lines.append("")
         lines.append("```python")
         lines.append("from selenium import webdriver")
         lines.append("from selenium.webdriver.common.by import By")
@@ -404,14 +452,27 @@ class WindowInspector:
         lines.append("from selenium.webdriver.support import expected_conditions as EC")
         lines.append("from selenium.webdriver.chrome.options import Options")
         lines.append("")
-        lines.append("# 방법 1: 새 브라우저 열기")
-        lines.append("options = Options()")
-        lines.append("options.add_experimental_option('detach', True)")
-        lines.append("driver = webdriver.Chrome(options=options)")
-        lines.append("")
-        lines.append("# 방법 2: 이미 열린 브라우저에 연결")
-        lines.append("# options.add_experimental_option('debuggerAddress', 'localhost:9222')")
-        lines.append("# driver = webdriver.Chrome(options=options)")
+        if cdp_active:
+            # 방법 2 가 권장 → 활성, 방법 1 이 주석
+            lines.append("# 방법 2 (권장): 이미 열린 Chrome 에 attach")
+            lines.append("options = Options()")
+            lines.append("options.add_experimental_option('debuggerAddress', 'localhost:9222')")
+            lines.append("driver = webdriver.Chrome(options=options)")
+            lines.append("")
+            lines.append("# 방법 1 (대안): 새 브라우저 열기 (필요 시)")
+            lines.append("# options = Options()")
+            lines.append("# options.add_experimental_option('detach', True)")
+            lines.append("# driver = webdriver.Chrome(options=options)")
+        else:
+            # 방법 1 이 default → 활성, 방법 2 가 주석
+            lines.append("# 방법 1: 새 브라우저 열기")
+            lines.append("options = Options()")
+            lines.append("options.add_experimental_option('detach', True)")
+            lines.append("driver = webdriver.Chrome(options=options)")
+            lines.append("")
+            lines.append("# 방법 2: 이미 열린 브라우저에 연결 (Chrome 이 --remote-debugging-port=9222 로 떠 있어야 함)")
+            lines.append("# options.add_experimental_option('debuggerAddress', 'localhost:9222')")
+            lines.append("# driver = webdriver.Chrome(options=options)")
         lines.append("")
         lines.append("")
         lines.append("def find_and_click(driver, locators, timeout=10, visible_only=False):")
@@ -571,6 +632,13 @@ class WindowInspector:
             lines.append(f"> - 이 요소는 `{detected_backend}` 방식으로 감지됨. `backend=\"win32\"` 사용 필수.")
         lines.append("")
 
+        # 참고: browser process 가 desktop path 로 오는 두 경우 — (1) CDP 미연결
+        # (Selenium 으로 attach 불가하니 새 Chrome 안 띄우고 사용자가 본 윈도우에 connect),
+        # (2) CDP 응답하지만 tagName 없음 (탭/메뉴 같은 chrome UI).
+        # 두 경우 모두 desktop path 의 코드 템플릿이 is_browser 기반 pyautogui PRIMARY
+        # 분기 (line ~735+) 로 처리. picker 의 parent_window_title 로 기존 윈도우에
+        # connect → 정확한 element → pyautogui 좌표 클릭 (HTML 콘텐츠도 OS 레벨 전달).
+
         # 요소 접근 코드 생성
         if recommended_backend == "win32":
             if name and class_name:
@@ -663,18 +731,38 @@ class WindowInspector:
         lines.append("    if root != hwnd:")
         lines.append("        print('경고: 클릭 좌표에 다른 창이 있습니다. 대상 창이 가려져 있을 수 있습니다.')")
         lines.append("")
-        lines.append("# 클릭 시도")
-        lines.append("try:")
-        lines.append("    element.click()  # WM 메시지 방식 (관리자 앱이면 실패)")
-        lines.append("    print('클릭 성공 (WM 메시지)')")
-        lines.append("except Exception as e:")
-        lines.append('    if "rights" in str(e).lower() or "privilege" in str(e).lower():')
-        lines.append("        print(f'WM 클릭 불가 (관리자 권한 앱): {e}')")
-        lines.append("        print('pyautogui SendInput 방식으로 재시도...')")
-        lines.append("        pyautogui.click(center_x, center_y)")
-        lines.append("        print('pyautogui 클릭 완료')")
-        lines.append("    else:")
-        lines.append("        raise")
+        # 클릭 전략: 브라우저 process 면 pyautogui PRIMARY (GPU compositor 영역까지 확실히 전달).
+        # 일반 데스크톱 앱은 pywinauto element.click() PRIMARY (WM 메시지가 빠르고 정확).
+        is_browser_process = element_info.get("is_browser", False)
+        if is_browser_process:
+            lines.append("# 클릭 시도 — 브라우저 process 라 pyautogui PRIMARY")
+            lines.append("# (HTML 콘텐츠는 GPU compositor 가 렌더하므로 element.click()/click_input()")
+            lines.append("#  이 silent 실패할 수 있음. pyautogui 의 OS 레벨 SendInput 은 탭/콘텐츠")
+            lines.append("#  모두에 일관 동작.)")
+            lines.append("try:")
+            lines.append("    pyautogui.click(center_x, center_y)")
+            lines.append("    print(f'pyautogui 클릭 완료 ({center_x}, {center_y})')")
+            lines.append("except Exception as e:")
+            lines.append("    print(f'pyautogui 클릭 실패: {e} — element.click() 폴백')")
+            lines.append("    try:")
+            lines.append("        element.click()")
+            lines.append("        print('element.click() 폴백 성공')")
+            lines.append("    except Exception as e2:")
+            lines.append("        print(f'element.click() 폴백도 실패: {e2}')")
+            lines.append("        raise")
+        else:
+            lines.append("# 클릭 시도")
+            lines.append("try:")
+            lines.append("    element.click()  # WM 메시지 방식 (관리자 앱이면 실패)")
+            lines.append("    print('클릭 성공 (WM 메시지)')")
+            lines.append("except Exception as e:")
+            lines.append('    if "rights" in str(e).lower() or "privilege" in str(e).lower():')
+            lines.append("        print(f'WM 클릭 불가 (관리자 권한 앱): {e}')")
+            lines.append("        print('pyautogui SendInput 방식으로 재시도...')")
+            lines.append("        pyautogui.click(center_x, center_y)")
+            lines.append("        print('pyautogui 클릭 완료')")
+            lines.append("    else:")
+            lines.append("        raise")
         lines.append("```")
 
         return "\n".join(lines)
