@@ -969,15 +969,20 @@ class CoreTest(TestCase):
             "[회귀] _exit_post_pause_mode 가 WS_EX_NOACTIVATE 제거 필수",
         )
 
-    def test_43_element_picker_general_mode_no_transparent_leak(self):
-        """[회귀] 일반 picker mode (F3 누르기 전) 의 mouseover 누수 0 보장.
+    def test_43_element_picker_efp_toggle_scoped_to_efp_call(self):
+        """[회귀] EFP 호출 동안만 WS_EX_TRANSPARENT 토글, walker/descendants 는
+        토글 밖.
 
-        _detect_element_multi_backend 가 cursor tracking 을 위해 매 tick 마다
-        WS_EX_TRANSPARENT 토글하면 underlying app 에 mouseover 효과 누수.
-        어제 (2026-04-28) 사용자 보고로 0 토글 패턴 도입. 이 보장은 방향 B 통합
-        과 무관하게 유지 — F3 누르기 전 일반 picker mode 한정.
+        이력:
+        - 2026-04-28: 사용자 누수 보고 → 토글 0 결정 (어제)
+        - 2026-04-29: Excel 셀 detection 회귀 발견 → EFP 만 토글 안으로 (오늘)
+          과거 코드와 동일 패턴이지만 무거운 walker/descendants (50-200ms) 는
+          토글 밖에서 호출 → 실제 토글 시간 수 ms (누수 시각 효과 미세).
 
-        post_pause_mode 의 누수는 의도된 trade-off (test_42 참조).
+        검증:
+        - try/finally 로 토글 보장
+        - WS_EX_TRANSPARENT 적용 직후 _detect_via_efp 호출
+        - finally 에서 ex_style 복원 (GetWindowLongW → SetWindowLongW 둘 다)
         """
         from ui.element_picker import ElementPickerOverlay
         import inspect
@@ -985,12 +990,26 @@ class CoreTest(TestCase):
         mb_src = inspect.getsource(
             ElementPickerOverlay._detect_element_multi_backend
         )
-        # 일반 picker mode 의 detection 흐름은 SetWindowLongW 호출 0
-        # (docstring 에 WS_EX_TRANSPARENT 멘션은 OK — 실제 토글 코드 부재만 검증)
+        # try/finally 로 토글 + 복원 보장
         self.assert_true(
-            "SetWindowLongW" not in mb_src,
-            "[회귀] _detect_element_multi_backend 가 SetWindowLongW 호출하면 안 됨 "
-            "(매 tick WS_EX_TRANSPARENT 토글로 mouseover 누수 회귀 위험)",
+            "try:" in mb_src and "finally:" in mb_src,
+            "[회귀] _detect_element_multi_backend 가 try/finally 로 ex_style 복원 보장 필수",
+        )
+        self.assert_true(
+            "WS_EX_TRANSPARENT" in mb_src,
+            "[회귀] _detect_element_multi_backend 가 WS_EX_TRANSPARENT 토글 (Excel 셀 detection) 필수",
+        )
+        self.assert_true(
+            "_detect_via_efp" in mb_src,
+            "[회귀] _detect_element_multi_backend 가 _detect_via_efp 호출 필수",
+        )
+        # 토글 후 EFP 호출이 finally 보다 앞 — try 블록 안에서 EFP 호출
+        try_idx = mb_src.find("try:")
+        finally_idx = mb_src.find("finally:")
+        efp_idx = mb_src.find("_detect_via_efp")
+        self.assert_true(
+            try_idx < efp_idx < finally_idx,
+            "[회귀] _detect_via_efp 가 try 블록 안에서 호출 (토글 보호 필수)",
         )
 
     def test_44_element_picker_mouse_hook_in_post_pause(self):
@@ -1176,6 +1195,29 @@ class CoreTest(TestCase):
         self.assert_true(
             "_start_pause" in of_src,
             "[회귀] _on_hook_f3 가 _start_pause 호출 필수",
+        )
+
+    def test_47_element_picker_descendants_area_threshold(self):
+        """[회귀] descendants() 폴백 호출이 area threshold 가드 적용 — 반응성.
+
+        walker 가 이미 작은 element (Excel cell, 메뉴 항목, 작은 버튼) 잡았으면
+        descendants 호출 skip. 매 tick 800-1000ms 절약 → cursor 이동 시
+        highlight 추적 지연 감소.
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        self.assert_true(
+            hasattr(ElementPickerOverlay, "NEEDS_DESCENDANTS_AREA_THRESHOLD"),
+            "[회귀] NEEDS_DESCENDANTS_AREA_THRESHOLD 상수 존재 필수",
+        )
+
+        # _detect_in_hwnd 의 descendants 호출 가드에 area threshold 적용
+        det_src = inspect.getsource(ElementPickerOverlay._detect_in_hwnd)
+        self.assert_true(
+            "NEEDS_DESCENDANTS_AREA_THRESHOLD" in det_src,
+            "[회귀] _detect_in_hwnd 가 NEEDS_DESCENDANTS_AREA_THRESHOLD 가드 사용 필수 "
+            "(반응성 - 작은 element 잡힌 후 descendants skip)",
         )
 
     def test_41_element_picker_uses_element_from_point(self):

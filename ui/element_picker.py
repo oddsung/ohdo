@@ -105,6 +105,11 @@ class ElementPickerOverlay(QWidget):
     # 그 후 TRANSPARENT 끄고 일반 mode 로 가도 submenu 유지 (가설).
     POST_PAUSE_TRANSITION_MS = 200
 
+    # walker 결과 area 가 이보다 작으면 descendants 폴백 skip — 이미 충분히 깊음.
+    # Excel cell ≈1600, 메뉴 항목 ≈1920, 작은 버튼 ≈3000 — 이런 케이스에서
+    # descendants() (800-1000ms) 호출 회피해서 picker 반응성 향상.
+    NEEDS_DESCENDANTS_AREA_THRESHOLD = 5000
+
     def __init__(self, parent=None, settings: dict | None = None):
         super().__init__(parent)
 
@@ -856,9 +861,12 @@ class ElementPickerOverlay(QWidget):
                     print(f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → 매칭 없음",
                           flush=True)
 
-            # 3) descendants() 폴백 — Chrome 같은 sparse children 케이스
+            # 3) descendants() 폴백 — Chrome 같은 sparse children 케이스.
+            #    walker 가 이미 작은 element (Excel cell, 메뉴 항목 등) 잡았으면
+            #    skip 해서 매 tick 800-1000ms 절약 (반응성 향상).
             budget_remaining = self._uia_time_budget_sec - (time.time() - t0)
-            if budget_remaining > 0.03:
+            if (budget_remaining > 0.03
+                    and current_area > self.NEEDS_DESCENDANTS_AREA_THRESHOLD):
                 t2 = time.time()
                 desc_result = self._find_deepest_descendant(
                     window_wrapper, x_phys, y_phys, budget_remaining,
@@ -896,11 +904,17 @@ class ElementPickerOverlay(QWidget):
         다중 백엔드를 사용하여 커서 위치의 UI 요소를 감지합니다.
 
         설계 (회귀 방지):
-          1. main HWND (e.g., Chrome_WidgetWin_1) 의 UIA tree 에서 검색 → 탭 strip / URL bar
-          2. child HWND (e.g., Chrome Legacy Window) 의 UIA tree 에서 검색 → HTML 콘텐츠
-          3. 둘 중 더 깊은 (= 더 작은 면적) 결과 채택
-        Chrome 같은 multi-process 앱은 메인/렌더러가 별도 UIA tree 라 둘 다 봐야 함.
-        WS_EX_TRANSPARENT 토글 0회 (mouse-leak 방지).
+          1. EFP (IUIAutomation::ElementFromPoint) — Excel 셀 같은 deeply-nested
+             가상 element reach. overlay 가 hit-test 에서 자기 자신을 잡지 않도록
+             WS_EX_TRANSPARENT 를 EFP 호출 동안만 짧게 토글 (수 ms).
+             누수 가능성 있지만 호출 시간이 매우 짧아 시각적 효과 거의 없음.
+          2. main HWND (e.g., Chrome_WidgetWin_1) 의 UIA tree 에서 검색 → 탭/URL bar
+          3. child HWND (e.g., Chrome Legacy Window) 의 UIA tree → HTML 콘텐츠
+          4. 셋 중 더 깊은 (= 더 작은 면적) 결과 채택
+
+        과거 회귀: 토글 안에서 walker / descendants (50-200ms) 까지 실행해서
+        underlying mouseover 누수 발견됨. 지금은 EFP 만 토글 안에서 (수 ms) +
+        walker 들은 토글 밖에서 (자체 트리 검색이라 overlay 영향 안 받음).
 
         Returns:
             tuple: (element, backend_name) 또는 (None, None)
@@ -911,11 +925,18 @@ class ElementPickerOverlay(QWidget):
         overlay_hwnd = int(self.winId())
         diag = getattr(self, "_diag_tick_count", 99) <= 10
 
-        # 0) IUIAutomation::ElementFromPoint — OS-level path (HWND 무관)
-        #    walker (ControlView/RawView) 가 leaf 에서 멈추는 lazy a11y 트리
-        #    (MFC+WebView, 일부 Chrome 케이스 등) 도 OS 가 직접 깊이 reach.
-        #    walker 결과보다 먼저 후보로 두고, 더 작은 area 가 나오면 walker 가 갱신.
-        best_element, best_rect, best_area = self._detect_via_efp(x_phys, y_phys)
+        # 0) IUIAutomation::ElementFromPoint — overlay 짧게 hit-test 제외 후 호출.
+        #    Excel 셀, MFC+WebView 같은 lazy/virtual element 까지 OS 가 reach.
+        ex_style = user32.GetWindowLongW(overlay_hwnd, GWL_EXSTYLE)
+        user32.SetWindowLongW(
+            overlay_hwnd, GWL_EXSTYLE, ex_style | WS_EX_TRANSPARENT,
+        )
+        try:
+            best_element, best_rect, best_area = self._detect_via_efp(
+                x_phys, y_phys,
+            )
+        finally:
+            user32.SetWindowLongW(overlay_hwnd, GWL_EXSTYLE, ex_style)
 
         # 1) z-order 순회로 main HWND 찾기 (e.g., Chrome_WidgetWin_1)
         main_hwnd = self._find_topmost_window_at_point(x_phys, y_phys, overlay_hwnd)
@@ -1631,12 +1652,13 @@ class ElementPickerOverlay(QWidget):
         import urllib.request
         import json as _json
 
-        # CDP 포트 탐색 (9222 → 9223 → 9224)
+        # CDP 포트 탐색 (9222 → 9223 → 9224). timeout 짧게 — 미연결 환경에서
+        # 사용자 click → 메인 화면 띄워지는 시간 단축 (3초 → ~1초).
         cdp_port: int | None = None
         for port in (9222, 9223, 9224):
             try:
                 with urllib.request.urlopen(
-                    f"http://localhost:{port}/json/version", timeout=1
+                    f"http://localhost:{port}/json/version", timeout=0.3
                 ) as resp:
                     if resp.status == 200:
                         cdp_port = port
