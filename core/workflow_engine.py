@@ -773,33 +773,89 @@ def extract_library_block(session) -> str:
     return "\n".join(import_lines)
 
 
+def _is_compilable(code: str) -> bool:
+    """코드가 단독 module-level 로 compile 가능한지 검사."""
+    if not code or not code.strip():
+        return False
+    try:
+        compile(code, '<delta_check>', 'exec')
+        return True
+    except SyntaxError:
+        return False
+
+
+def _extract_by_step_marker(code: str, step_id: int) -> str:
+    """generated_code 에서 ``# === Step {step_id}: ... (시작) === ~ (끝) ===`` 사이를 추출.
+
+    AI 가 누적 코드를 재출력할 때 이전 스텝 본문을 미세하게 변형(공백·따옴표·
+    주석 위치 등) 하더라도, 새 스텝의 본문은 마커 안에 깨끗히 격리돼 있어 diff
+    보다 신뢰도가 높음.
+
+    여러 시작 마커가 있으면 마지막 시작 ~ 그 뒤 첫 끝 마커. 추출 후
+    ``_smart_dedent`` + ``_unwrap_main_function`` 을 적용해 module-level 실행
+    가능 형태로 정리.
+    """
+    if not code or not step_id:
+        return ""
+    start_pattern = rf'# === Step {step_id}:.*?\(시작\) ==='
+    end_pattern = rf'# === Step {step_id}:.*?\(끝\) ==='
+    starts = [m.end() for m in re.finditer(start_pattern, code)]
+    ends = [m.start() for m in re.finditer(end_pattern, code)]
+    if not starts or not ends:
+        return ""
+    content_start = starts[-1]
+    valid_ends = [e for e in ends if e > content_start]
+    if not valid_ends:
+        return ""
+    body = code[content_start:valid_ends[0]].strip()
+    if not body:
+        return ""
+    from .import_manager import _smart_dedent, _unwrap_main_function
+    return _smart_dedent(_unwrap_main_function(body))
+
+
 def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
     """
     스텝의 델타 코드를 반환합니다.
 
-    우선순위:
-    1. step_code 필드가 있으면서 prev_step 의 step_code 와 누적 관계 아닐 때 → 그대로 사용
-    2. prev_step 이 있으면 generated_code 들의 diff 로 재계산 (저장된 step_code 가
-       누적이라 신뢰 못 하는 경우 자동 fix)
-    3. step_code 가 있으면 그대로
-    4. generated_code 의 step 경계 마커로 파싱
-    5. fallback: generated_code 전체
+    추출 우선순위 (앞 단계가 compile 검증 통과 시 즉시 반환):
+    1. **마커 추출** — ``generated_code`` 의 ``# === Step N: ... (시작/끝) ===``
+       사이. AI 가 이전 스텝을 미세 변형해도 안전하므로 최우선.
+    2. **diff 재계산** — prev_step.generated_code vs current.generated_code 의
+       line diff. 마커가 없을 때 사용.
+    3. **저장된 step_code** — unwrap + dedent.
+    4. **generated_code 전체** — 마지막 fallback.
+
+    각 후보는 ``_is_compilable`` 로 syntax 검증. 검증 통과한 첫 후보를 반환.
+    모두 실패하면 가장 짧은 후보를 반환 (런타임에 명확한 오류 표시).
 
     Args:
         step: 현재 스텝 dict
         prev_step: 직전 스텝 dict (None 이면 첫 스텝). 있으면 generated_code 들의
             diff 로 delta 재계산해 누적 step_code 도 자동 fix.
     """
-    step_code = step.get("step_code", "").strip()
-    generated_code = step.get("generated_code", "")
-
-    # ── prev_step 기반 재계산 (저장된 step_code 가 누적인 경우 fix) ──
     from .import_manager import (
         extract_imports,
         extract_code_delta as _ecd,
         _smart_dedent as _sd,
         _unwrap_main_function as _uwm,
     )
+
+    step_code = step.get("step_code", "").strip()
+    generated_code = step.get("generated_code", "")
+    step_id = step.get("step_id", 0)
+
+    candidates: list[str] = []
+
+    # ── 1) 마커 기반 추출 (최우선) ──
+    if step_id and generated_code:
+        marker = _extract_by_step_marker(generated_code, step_id)
+        if marker:
+            if _is_compilable(marker):
+                return marker
+            candidates.append(marker)
+
+    # ── 2) prev_step 기반 diff 재계산 ──
     if prev_step is not None and generated_code:
         prev_generated = (
             prev_step.get("generated_code", "") if isinstance(prev_step, dict) else ""
@@ -807,31 +863,27 @@ def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
         if prev_generated:
             _, prev_body = extract_imports(prev_generated)
             _, curr_body = extract_imports(generated_code)
-            recomputed = _ecd(curr_body, prev_body)  # 이미 dedent + unwrap 적용됨
+            recomputed = _ecd(curr_body, prev_body)
             if recomputed:
-                # 저장된 step_code 보다 짧으면 신뢰 (누적 fix)
-                if not step_code or len(recomputed) < len(step_code) * 0.8:
+                if _is_compilable(recomputed):
                     return recomputed
-            return _sd(_uwm(step_code)) or recomputed
+                candidates.append(recomputed)
 
+    # ── 3) 저장된 step_code ──
     if step_code:
-        # step_code 가 누적이거나 def main() 패턴이면 unwrap + dedent 적용
-        return _sd(_uwm(step_code))
+        normalized = _sd(_uwm(step_code))
+        if normalized:
+            if _is_compilable(normalized):
+                return normalized
+            candidates.append(normalized)
 
-    if not generated_code:
+    # ── 4) generated_code 전체 ──
+    if generated_code:
+        if _is_compilable(generated_code):
+            return generated_code
+        candidates.append(generated_code)
+
+    if not candidates:
         return ""
-
-    step_id = step.get("step_id", 0)
-    # 스텝 경계 마커 파싱: "# === Step N: ... (시작) ===" ~ "# === Step N: ... (끝) ==="
-    start_pattern = rf'# === Step {step_id}:.*?\(시작\) ==='
-    end_pattern = rf'# === Step {step_id}:.*?\(끝\) ==='
-
-    starts = [m.end() for m in re.finditer(start_pattern, generated_code)]
-    ends = [m.start() for m in re.finditer(end_pattern, generated_code)]
-
-    if starts and ends:
-        content_start = starts[-1]
-        content_end = ends[0] if ends[0] > content_start else (ends[-1] if ends else len(generated_code))
-        return generated_code[content_start:content_end].strip()
-
-    return generated_code
+    # 모두 syntax 깨졌으면 가장 짧은 후보 (오류가 한눈에 보이도록)
+    return min(candidates, key=len)

@@ -1606,6 +1606,137 @@ if __name__ == "__main__":
             f"(실제 delta: {delta!r})",
         )
 
+    def test_58_extract_step_delta_marker_priority(self):
+        """[회귀] AI 가 누적 코드 재출력 시 이전 스텝 본문을 미세하게 변경하면
+        diff 가 try 블록 안의 라인을 새 라인으로 잡아 들여쓰기된 orphan 코드를
+        반환 → IndentationError. ``# === Step N: ... (시작/끝) ===`` 마커가
+        있을 때 마커 본문을 우선 추출 + compile 검증으로 막는다.
+
+        실제 발생 케이스 재현 (data/sessions/568331e8-...):
+        - step2 try 블록 안 ``pyautogui.write('@06...')`` → ``pyautogui.write(' @06...')``
+          (leading space 추가) 로 변경
+        - diff 는 변경된 indent 4 라인 + Step 3 새 코드를 함께 추출
+        - _smart_dedent 는 Step 3 의 indent 0 라인 때문에 dedent 0 → 그대로
+        - 결과: ``    pyautogui.write(...)`` 가 module-level → IndentationError
+        """
+        from core.workflow_engine import extract_step_delta_code
+
+        prev_gen = (
+            "import time\n"
+            "import pyautogui\n"
+            "\n"
+            "# === Step 1: open (시작) ===\n"
+            "x = 1\n"
+            "# === Step 1: open (끝) ===\n"
+            "\n"
+            "# === Step 2: login (시작) ===\n"
+            "try:\n"
+            "    pyautogui.write('@06pwd')\n"
+            "    pyautogui.press('enter')\n"
+            "except Exception as e:\n"
+            "    print(e)\n"
+            "# === Step 2: login (끝) ===\n"
+        )
+        # AI 가 step3 생성 시 step2 비밀번호에 leading space 추가 + step3 try 블록 추가
+        curr_gen = (
+            "import time\n"
+            "import pyautogui\n"
+            "\n"
+            "# === Step 1: open (시작) ===\n"
+            "x = 1\n"
+            "# === Step 1: open (끝) ===\n"
+            "\n"
+            "# === Step 2: login (시작) ===\n"
+            "try:\n"
+            "    pyautogui.write(' @06pwd')\n"  # ← leading space 추가
+            "    pyautogui.press('enter')\n"
+            "except Exception as e:\n"
+            "    print(e)\n"
+            "# === Step 2: login (끝) ===\n"
+            "\n"
+            "# === Step 3: click (시작) ===\n"
+            "try:\n"
+            "    pyautogui.click(100, 200)\n"
+            "    time.sleep(1)\n"
+            "except Exception as e:\n"
+            "    print(e)\n"
+            "# === Step 3: click (끝) ===\n"
+        )
+        prev_step = {"step_id": 2, "generated_code": prev_gen}
+        curr_step = {"step_id": 3, "generated_code": curr_gen}
+
+        delta = extract_step_delta_code(curr_step, prev_step)
+
+        # ① delta 는 단독 compile 가능해야 함 (가장 중요한 회귀 가드)
+        try:
+            compile(delta, "<test>", "exec")
+            syntax_ok = True
+            err = None
+        except SyntaxError as e:
+            syntax_ok = False
+            err = e
+        self.assert_true(
+            syntax_ok,
+            f"[회귀] step3 delta 가 module-level compile 가능해야 함 "
+            f"(SyntaxError: {err!r}, delta: {delta!r})",
+        )
+
+        # ② Step 3 본문이 포함되어야 함
+        self.assert_true(
+            "pyautogui.click(100, 200)" in delta,
+            f"[회귀] step3 본문 (pyautogui.click) 포함 필수 (delta: {delta!r})",
+        )
+
+        # ③ Step 2 의 변경된 라인은 단독 try 없이 흘러들어오면 안 됨
+        # (마커 추출이면 Step 3 본문만 깨끗히 잡혀 ' @06pwd' 라인 자체가 안 들어옴)
+        self.assert_true(
+            " @06pwd" not in delta,
+            f"[회귀] step2 의 미세 변경된 라인이 step3 delta 에 섞이면 안 됨 "
+            f"(delta: {delta!r})",
+        )
+
+    def test_59_extract_step_delta_compile_validation(self):
+        """[회귀] 모든 후보가 compile 통과해야 채택. 첫 후보가 SyntaxError 면
+        다음 후보로 fallback (마커 → diff → step_code → generated_code 전체).
+        """
+        from core.workflow_engine import _is_compilable, _extract_by_step_marker
+
+        # _is_compilable 단독 검증
+        self.assert_true(
+            _is_compilable("x = 1\ny = 2"),
+            "[회귀] 정상 코드는 _is_compilable True",
+        )
+        self.assert_true(
+            not _is_compilable("    x = 1"),
+            "[회귀] indent 만 있는 orphan 코드는 _is_compilable False",
+        )
+        self.assert_true(
+            not _is_compilable(""),
+            "[회귀] 빈 문자열은 _is_compilable False",
+        )
+
+        # _extract_by_step_marker 단독 검증
+        code = (
+            "x = 1\n"
+            "# === Step 2: foo (시작) ===\n"
+            "y = 2\n"
+            "z = 3\n"
+            "# === Step 2: foo (끝) ===\n"
+            "w = 4\n"
+        )
+        marker = _extract_by_step_marker(code, 2)
+        self.assert_true(
+            "y = 2" in marker and "z = 3" in marker and "w = 4" not in marker,
+            f"[회귀] _extract_by_step_marker 가 마커 사이만 추출 (실제: {marker!r})",
+        )
+
+        # 마커가 없으면 빈 문자열
+        empty = _extract_by_step_marker("x = 1\ny = 2", 2)
+        self.assert_true(
+            empty == "",
+            f"[회귀] 마커 없으면 빈 문자열 (실제: {empty!r})",
+        )
+
     def test_52_extract_step_delta_code_uses_prev_step(self):
         """[회귀] extract_step_delta_code 가 prev_step 인자로 generated_code diff
         재계산 - 저장된 step_code 가 누적이라도 자동 fix.
