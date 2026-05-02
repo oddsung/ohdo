@@ -1014,12 +1014,15 @@ class CoreTest(TestCase):
 
     def test_44_element_picker_mouse_hook_in_post_pause(self):
         """[회귀] post_pause_mode 는 WS_EX_TRANSPARENT 켜져 있어 overlay 가
-        mouse 이벤트를 못 받음 → WH_MOUSE_LL hook 으로 click 감지 + 통과.
+        mouse 이벤트를 못 받음 → WH_MOUSE_LL hook 으로 click 감지 + 차단.
 
-        방향 B 통합으로 mouse hook 항상 설치 (이전에는 keep_submenu_mode 분기).
+        방향 B 통합으로 mouse hook 항상 설치. 사용자 요구로 click 을 underlying
+        으로 통과시키지 않고 차단 (일반 picker mode 와 동일 - picker 만 element
+        선택, underlying 메뉴는 발동 안 함). 좌/우 클릭 모두 차단.
 
         hook 함수 존재 + _resume_after_pause 가 항상 설치 + _exit_post_pause_mode
-        가 해제 + _on_hook_click 이 element_picked emit + stop_picking.
+        가 해제 + _on_hook_click 이 element_picked emit + stop_picking +
+        hook 콜백이 LBUTTONDOWN 차단 (return 1).
         """
         from ui.element_picker import ElementPickerOverlay
         import inspect
@@ -1035,7 +1038,7 @@ class CoreTest(TestCase):
                 f"[회귀] ElementPickerOverlay.{method_name} 가 존재해야 함",
             )
 
-        # _install_mouse_hook 가 WH_MOUSE_LL + WM_LBUTTONDOWN 사용
+        # _install_mouse_hook 가 WH_MOUSE_LL + LBUTTONDOWN/UP/RBUTTONDOWN/UP 처리
         imh_src = inspect.getsource(ElementPickerOverlay._install_mouse_hook)
         self.assert_true(
             "WH_MOUSE_LL" in imh_src,
@@ -1046,8 +1049,27 @@ class CoreTest(TestCase):
             "[회귀] _install_mouse_hook 가 WM_LBUTTONDOWN 검사 필수",
         )
         self.assert_true(
+            "WM_LBUTTONUP" in imh_src,
+            "[회귀] _install_mouse_hook 가 WM_LBUTTONUP 차단 필수 (down/up consistency)",
+        )
+        self.assert_true(
+            "WM_RBUTTONDOWN" in imh_src,
+            "[회귀] _install_mouse_hook 가 WM_RBUTTONDOWN 검사 필수 (cancel)",
+        )
+        self.assert_true(
+            "return 1" in imh_src,
+            "[회귀] _install_mouse_hook 가 click 차단 (return 1) 필수 - "
+            "underlying 메뉴/버튼 발동 방지",
+        )
+        self.assert_true(
             "CallNextHookEx" in imh_src,
-            "[회귀] _install_mouse_hook 가 click 통과 (CallNextHookEx 호출) 필수",
+            "[회귀] _install_mouse_hook 가 다른 mouse event 통과 (CallNextHookEx) 필수",
+        )
+
+        # _on_hook_rclick 존재
+        self.assert_true(
+            hasattr(ElementPickerOverlay, "_on_hook_rclick"),
+            "[회귀] _on_hook_rclick 존재 필수 (우클릭 = cancel)",
         )
 
         # _resume_after_pause 가 keep_submenu_mode 시 mouse hook 설치
@@ -1218,6 +1240,408 @@ class CoreTest(TestCase):
             "NEEDS_DESCENDANTS_AREA_THRESHOLD" in det_src,
             "[회귀] _detect_in_hwnd 가 NEEDS_DESCENDANTS_AREA_THRESHOLD 가드 사용 필수 "
             "(반응성 - 작은 element 잡힌 후 descendants skip)",
+        )
+
+    def test_48_element_picker_cdp_enabled_default_false(self):
+        """[회귀] cdp_enabled 설정 가드 - default False, 활성화 시에만 CDP 시도.
+
+        click 후 메인 화면 전환 시간 단축 (CDP 포트 timeout 회피).
+        사용자가 명시적으로 settings 활성화한 경우에만 _capture_dom_context 가
+        실제 CDP 시도. 기본은 즉시 빈 dict 반환.
+        """
+        from ui.element_picker import ElementPickerOverlay
+        import inspect
+
+        # __init__ 의 default 값
+        init_src = inspect.getsource(ElementPickerOverlay.__init__)
+        self.assert_true(
+            "_cdp_enabled" in init_src,
+            "[회귀] __init__ 에 _cdp_enabled 인스턴스 변수 초기화 필수",
+        )
+
+        # update_settings 가 cdp_enabled 키 처리
+        us_src = inspect.getsource(ElementPickerOverlay.update_settings)
+        self.assert_true(
+            "cdp_enabled" in us_src,
+            "[회귀] update_settings 가 cdp_enabled 키 처리 필수",
+        )
+
+        # _capture_dom_context 의 disabled 가드
+        cdc_src = inspect.getsource(ElementPickerOverlay._capture_dom_context)
+        self.assert_true(
+            "_cdp_enabled" in cdc_src,
+            "[회귀] _capture_dom_context 가 _cdp_enabled 가드 필수 (disabled 시 즉시 반환)",
+        )
+        self.assert_true(
+            'cdp_available' in cdc_src and 'False' in cdc_src,
+            "[회귀] _capture_dom_context 가 disabled 시 cdp_available=False 반환",
+        )
+
+    def test_49_workflow_engine_stop_after_step_id(self):
+        """[회귀] Phase 1 - Step 단독 실행. workflow_engine.execute_session_blocks
+        가 stop_after_step_id 인자 지원해서 N 만 실행하고 종료.
+
+        UI: BlockCard 의 '⏯ 단독' 버튼 → run_single_requested signal →
+        BlockViewWidget run_single_step_requested → CodeViewer 통과 →
+        main_window._on_run_single_step → _run_blocks_thread(start=stop=N).
+        """
+        from core.workflow_engine import WorkflowEngine
+        import inspect
+
+        sig = inspect.signature(WorkflowEngine.execute_session_blocks)
+        self.assert_true(
+            "stop_after_step_id" in sig.parameters,
+            "[회귀] execute_session_blocks 가 stop_after_step_id 파라미터 필수",
+        )
+        # default None
+        self.assert_true(
+            sig.parameters["stop_after_step_id"].default is None,
+            "[회귀] stop_after_step_id default None (기본은 끝까지 실행)",
+        )
+
+        # 본문에서 stop 후 break 하는 패턴 검증
+        body_src = inspect.getsource(WorkflowEngine.execute_session_blocks)
+        self.assert_true(
+            "stop_after_step_id" in body_src and "break" in body_src,
+            "[회귀] execute_session_blocks 본문에 stop_after_step_id 도달 시 break 필수",
+        )
+
+    def test_50_block_card_run_single_button(self):
+        """[회귀] Phase 1 - BlockCard 의 단독 실행 버튼 + signal chain.
+
+        BlockCard.run_single_requested -> BlockViewWidget.run_single_step_requested
+        -> CodeViewer.run_single_step_requested -> main_window._on_run_single_step
+        """
+        from ui.code_viewer import BlockCard, BlockViewWidget, CodeViewer
+        from ui.main_window import MainWindow
+        import inspect
+
+        # BlockCard signal
+        self.assert_true(
+            hasattr(BlockCard, "run_single_requested"),
+            "[회귀] BlockCard.run_single_requested signal 필수",
+        )
+        # 라이브러리 블럭 (step_id=0) 은 단독 실행 버튼 안 만듦
+        bc_src = inspect.getsource(BlockCard.__init__)
+        self.assert_true(
+            "if step_id > 0:" in bc_src and "run_single_btn" in bc_src,
+            "[회귀] step_id>0 일 때만 단독 실행 버튼 생성 (라이브러리 블럭 제외) 필수",
+        )
+
+        # BlockViewWidget 가 signal 통과 + _add_step_block 에서 connect
+        self.assert_true(
+            hasattr(BlockViewWidget, "run_single_step_requested"),
+            "[회귀] BlockViewWidget.run_single_step_requested signal 필수",
+        )
+        bv_src = inspect.getsource(BlockViewWidget._add_step_block)
+        self.assert_true(
+            "run_single_requested" in bv_src,
+            "[회귀] _add_step_block 가 run_single_requested signal connect 필수",
+        )
+
+        # CodeViewer 통과
+        self.assert_true(
+            hasattr(CodeViewer, "run_single_step_requested"),
+            "[회귀] CodeViewer.run_single_step_requested signal 필수",
+        )
+
+        # main_window 핸들러
+        self.assert_true(
+            hasattr(MainWindow, "_on_run_single_step"),
+            "[회귀] MainWindow._on_run_single_step 핸들러 필수",
+        )
+        mw_src = inspect.getsource(MainWindow._on_run_single_step)
+        self.assert_true(
+            "stop_after_step_id" in mw_src or "step_id, step_id" in mw_src,
+            "[회귀] _on_run_single_step 가 start=stop=N 으로 호출 필수",
+        )
+
+    def test_51_extract_code_delta_handles_minor_changes(self):
+        """[회귀] extract_code_delta 가 SequenceMatcher fallback 으로 AI 의
+        약간의 코드 변형 (들여쓰기, try 위치 등) 도 delta 추출.
+
+        과거 버그: prefix 매칭 실패 시 fallback = new_body 전체 → step_code 가
+        누적되어 매 step 마다 webdriver/Application 새로 생성 (브라우저 N개).
+        SequenceMatcher 로 새 라인만 추출.
+        """
+        from core.import_manager import extract_code_delta
+        import inspect
+
+        # 본문에 SequenceMatcher 사용 + ratio 검사
+        src = inspect.getsource(extract_code_delta)
+        self.assert_true(
+            "SequenceMatcher" in src,
+            "[회귀] extract_code_delta 가 SequenceMatcher fallback 사용 필수",
+        )
+        self.assert_true(
+            "ratio" in src,
+            "[회귀] SequenceMatcher ratio 검사 필수 (거의 다른 코드면 전체 반환)",
+        )
+
+        # prefix 매칭 성공 케이스 (기본 동작)
+        prev = "x = 1\ny = 2"
+        new = "x = 1\ny = 2\nz = 3"
+        delta = extract_code_delta(new, prev)
+        self.assert_true(
+            "z = 3" in delta and "x = 1" not in delta,
+            "[회귀] prefix 매칭 - 새 라인만 반환",
+        )
+
+        # prefix 매칭 실패 + SequenceMatcher 성공 케이스
+        # AI 가 들여쓰기 약간 바꾼 시뮬레이션
+        prev2 = "x = 1\ny = 2\n# step1 done"
+        new2 = "x = 1\ny = 2\n# step1 done\nprint('hi')\n# step2 done"
+        delta2 = extract_code_delta(new2, prev2)
+        self.assert_true(
+            "print" in delta2,
+            "[회귀] SequenceMatcher fallback - 누적된 새 코드 추출",
+        )
+
+    def test_57_blocks_finished_uses_signal(self):
+        """[회귀] _run_blocks_thread 의 finally 가 signal-slot 으로 _on_blocks_finished
+        호출 (이전 QTimer.singleShot 은 어떤 케이스에 호출 안 되는 회귀 발견됨).
+
+        signal 사용 시 Qt 가 main thread queued connection 으로 안전하게 전달.
+        """
+        from ui.main_window import MainWindow, AsyncSignals
+        import inspect
+
+        # AsyncSignals 에 blocks_finished signal
+        self.assert_true(
+            hasattr(AsyncSignals, "blocks_finished"),
+            "[회귀] AsyncSignals.blocks_finished signal 필수",
+        )
+
+        # _run_blocks_thread 가 finally 에서 emit
+        rt_src = inspect.getsource(MainWindow._run_blocks_thread)
+        self.assert_true(
+            "blocks_finished.emit" in rt_src,
+            "[회귀] _run_blocks_thread 의 finally 가 blocks_finished.emit 호출 필수",
+        )
+
+        # main_window __init__ 에서 connect
+        init_src = inspect.getsource(MainWindow.__init__)
+        self.assert_true(
+            "blocks_finished.connect" in init_src,
+            "[회귀] AsyncSignals.blocks_finished 가 _on_blocks_finished 에 connect 필수",
+        )
+
+    def test_56_run_stop_interaction_between_tabs(self):
+        """[회귀] 코드 뷰 탭 (CodeSandbox) <-> 블럭 뷰 탭 (ExecutionKernel) 의
+        실행/중단 상호작용.
+
+        - _on_run_code: 시작 시 set_running(True), finally 에 set_running(False)
+        - _on_stop_code: kernel 도 stop (블럭 모드 step 진행 중 즉시 종료) +
+          set_running(False) + _restore_main_window
+        """
+        from ui.main_window import MainWindow
+        import inspect
+
+        # _on_run_code 가 set_running(True) + finally 에 set_running(False)
+        rc_src = inspect.getsource(MainWindow._on_run_code)
+        self.assert_true(
+            "set_running(True)" in rc_src,
+            "[회귀] _on_run_code 가 set_running(True) 호출 필수 (UI 상태 일치)",
+        )
+
+        ec_src = inspect.getsource(MainWindow._execute_code_thread)
+        self.assert_true(
+            "set_running(False)" in ec_src,
+            "[회귀] _execute_code_thread finally 에 set_running(False) 호출 필수",
+        )
+
+        # _on_stop_code 가 kernel.stop 도 호출 + set_running(False)
+        sc_src = inspect.getsource(MainWindow._on_stop_code)
+        self.assert_true(
+            "kernel.stop" in sc_src or "kernel is not None" in sc_src,
+            "[회귀] _on_stop_code 가 ExecutionKernel.stop 도 호출 필수 "
+            "(블럭 모드 step 진행 중 즉시 종료)",
+        )
+        self.assert_true(
+            "set_running(False)" in sc_src,
+            "[회귀] _on_stop_code 가 set_running(False) 호출 필수 (UI 즉시 복원)",
+        )
+
+    def test_55_block_run_lowers_main_window(self):
+        """[회귀] 블럭 실행 시 메인 윈도우 lower (z-order 최하단 - underlying
+        element 가 가려지지 않도록), 완료/중지/에러 시 raise_/activateWindow 로 복원.
+
+        hide/minimize 가 Win11 foreground 정책에 막히는 케이스 회피 위해 lower 사용.
+        윈도우는 항상 visible + 작업표시줄 유지 → 사용자가 실행 상태 인지 가능.
+
+        - _on_run_from_step / _on_run_single_step: self.lower()
+        - _restore_main_window: raise_() + activateWindow() (+ isHidden 시 show)
+        - _on_blocks_finished + _on_stop_code: _restore_main_window 호출
+        """
+        from ui.main_window import MainWindow
+        import inspect
+
+        # _on_run_from_step
+        src1 = inspect.getsource(MainWindow._on_run_from_step)
+        self.assert_true(
+            "self.lower()" in src1,
+            "[회귀] _on_run_from_step 가 self.lower() 호출 필수 (z-order 최하단)",
+        )
+
+        # _on_run_single_step
+        src2 = inspect.getsource(MainWindow._on_run_single_step)
+        self.assert_true(
+            "self.lower()" in src2,
+            "[회귀] _on_run_single_step 가 self.lower() 호출 필수",
+        )
+
+        # _restore_main_window helper 존재
+        self.assert_true(
+            hasattr(MainWindow, "_restore_main_window"),
+            "[회귀] _restore_main_window 헬퍼 필수",
+        )
+        rest_src = inspect.getsource(MainWindow._restore_main_window)
+        self.assert_true(
+            "raise_" in rest_src and "activateWindow" in rest_src,
+            "[회귀] _restore_main_window 가 raise_ + activateWindow 호출 필수",
+        )
+
+        # _on_blocks_finished 가 _restore_main_window 호출
+        src3 = inspect.getsource(MainWindow._on_blocks_finished)
+        self.assert_true(
+            "_restore_main_window" in src3,
+            "[회귀] _on_blocks_finished 가 _restore_main_window 호출 필수",
+        )
+
+        # _on_stop_code 도 _restore_main_window 호출 (즉시 복원)
+        src4 = inspect.getsource(MainWindow._on_stop_code)
+        self.assert_true(
+            "_restore_main_window" in src4,
+            "[회귀] _on_stop_code 가 _restore_main_window 호출 필수 (stop 시 즉시 복원)",
+        )
+
+    def test_54_unwrap_main_function(self):
+        """[회귀] AI 가 def main(): + if __name__: main() 패턴으로 작성한 코드를
+        module-level 로 unwrap. 변수가 함수 local scope 가 아니라 _globals 에
+        들어가 다음 step 에서 사용 가능 (jupyter 모드 호환).
+        """
+        from core.import_manager import _unwrap_main_function
+        import ast
+
+        code = '''
+def main():
+    driver = "chrome"
+    print(driver)
+
+if __name__ == "__main__":
+    main()
+'''
+        unwrapped = _unwrap_main_function(code)
+        tree = ast.parse(unwrapped)
+
+        # def main 제거 + if __name__ 제거 + 본문은 module level
+        has_main = any(
+            isinstance(n, ast.FunctionDef) and n.name == "main" for n in tree.body
+        )
+        has_if_main = any(
+            isinstance(n, ast.If)
+            and isinstance(n.test, ast.Compare)
+            and isinstance(n.test.left, ast.Name)
+            and n.test.left.id == "__name__"
+            for n in tree.body
+        )
+        module_names = []
+        for n in tree.body:
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name):
+                        module_names.append(t.id)
+
+        self.assert_true(not has_main, "[회귀] def main 제거 필수")
+        self.assert_true(not has_if_main, "[회귀] if __name__ 블록 제거 필수")
+        self.assert_true(
+            "driver" in module_names,
+            f"[회귀] driver 가 module-level Assign 으로 unwrap 필수 (실제: {module_names})",
+        )
+
+        # main 함수 없는 코드는 그대로
+        plain = "x = 1\ny = 2"
+        self.assert_true(
+            _unwrap_main_function(plain) == plain,
+            "[회귀] main 함수 없으면 원본 그대로",
+        )
+
+    def test_53_extract_code_delta_smart_dedent(self):
+        """[회귀] delta 가 try/except 블록 안에서 추출되어 들여쓰기 4 칸이
+        남는 경우 _smart_dedent 가 module-level 실행 가능하게 정리.
+
+        과거 버그: SequenceMatcher 가 try 블록 안의 라인만 추출 → indent 4
+        그대로 → IndentationError. _smart_dedent 가 공통 indent 제거.
+        """
+        from core.import_manager import extract_code_delta, _smart_dedent
+
+        # _smart_dedent 단독 검증
+        code = "    x = 1\n    y = 2"
+        self.assert_true(
+            _smart_dedent(code) == "x = 1\ny = 2",
+            f"[회귀] indent 4 제거 (실제: {_smart_dedent(code)!r})",
+        )
+
+        # 주석 라인 indent 0 + 코드 라인 indent 4 (boundary 주석 + try 블록 내부)
+        mixed = "# === Step 2 ===\n    x = 1\n    y = 2"
+        result = _smart_dedent(mixed)
+        self.assert_true(
+            "x = 1" in result and "    x = 1" not in result,
+            f"[회귀] 주석 (indent 0) + 코드 (indent 4) 혼재 시 코드 라인만 dedent "
+            f"(실제: {result!r})",
+        )
+
+        # extract_code_delta 결과가 syntax OK 인지
+        prev = "try:\n    a = 1\n    b = 2\nexcept Exception:\n    pass"
+        new = "try:\n    a = 1\n    b = 2\n    c = 3\nexcept Exception:\n    pass"
+        delta = extract_code_delta(new, prev)
+        try:
+            compile(delta, "<test>", "exec")
+            syntax_ok = True
+        except SyntaxError:
+            syntax_ok = False
+        self.assert_true(
+            syntax_ok,
+            f"[회귀] extract_code_delta 결과가 module-level 컴파일 가능해야 함 "
+            f"(실제 delta: {delta!r})",
+        )
+
+    def test_52_extract_step_delta_code_uses_prev_step(self):
+        """[회귀] extract_step_delta_code 가 prev_step 인자로 generated_code diff
+        재계산 - 저장된 step_code 가 누적이라도 자동 fix.
+        """
+        from core.workflow_engine import extract_step_delta_code
+        import inspect
+
+        sig = inspect.signature(extract_step_delta_code)
+        self.assert_true(
+            "prev_step" in sig.parameters,
+            "[회귀] extract_step_delta_code 가 prev_step 인자 받기 필수",
+        )
+
+        src = inspect.getsource(extract_step_delta_code)
+        self.assert_true(
+            "extract_code_delta" in src,
+            "[회귀] extract_step_delta_code 가 extract_code_delta 사용 (재계산) 필수",
+        )
+
+        # 누적 시뮬레이션 - step1: 'driver = ...' / step2 step_code: 'driver = ...; driver.get(...)'
+        # prev_step 의 generated_code 와 비교해 step2 의 진짜 delta 만 반환해야
+        step1 = {
+            "step_id": 1,
+            "generated_code": "from selenium import webdriver\ndriver = webdriver.Chrome()",
+            "step_code": "driver = webdriver.Chrome()",
+        }
+        step2 = {
+            "step_id": 2,
+            "generated_code": "from selenium import webdriver\ndriver = webdriver.Chrome()\ndriver.get('https://example.com')",
+            "step_code": "driver = webdriver.Chrome()\ndriver.get('https://example.com')",  # 누적 step_code
+        }
+        delta = extract_step_delta_code(step2, step1)
+        self.assert_true(
+            "driver.get" in delta and "webdriver.Chrome()" not in delta,
+            f"[회귀] prev_step 기반 재계산 - step2 의 진짜 delta (driver.get) 만 반환 "
+            f"(실제: {delta!r})",
         )
 
     def test_41_element_picker_uses_element_from_point(self):

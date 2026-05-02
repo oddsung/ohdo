@@ -603,6 +603,7 @@ class WorkflowEngine:
         session,
         kernel,
         start_from_step_id: int = 1,
+        stop_after_step_id: Optional[int] = None,
         silent_replay: bool = True,
         on_step_start: Optional[Callable] = None,
         on_step_complete: Optional[Callable] = None,
@@ -619,6 +620,9 @@ class WorkflowEngine:
             session: Session 객체
             kernel: ExecutionKernel 인스턴스 (이미 start() 호출된 상태)
             start_from_step_id: 이 스텝 ID부터 실행 (이전 스텝은 silent replay)
+            stop_after_step_id: 지정 시 이 스텝까지만 실행하고 종료 (단독 실행 모드).
+                start_from == stop_after 면 정확히 그 step 한 개만 실행.
+                None 이면 끝까지 실행 (기본 동작).
             silent_replay: True이면 start_from 이전 스텝을 조용히 재실행
             on_step_start: 스텝 시작 콜백 (step_id)
             on_step_complete: 스텝 완료 콜백 (step_id, StepResult)
@@ -653,6 +657,7 @@ class WorkflowEngine:
                         on_log(f"⚠️ 라이브러리 블럭 실행 오류: {lib_result.error}")
 
         # ── 스텝 실행 루프 ──
+        prev_step_dict: dict | None = None
         for step_data in session.steps:
             if self.should_stop:
                 if on_log:
@@ -666,7 +671,9 @@ class WorkflowEngine:
 
             step = step_data if isinstance(step_data, dict) else {}
             step_id = step.get("step_id", 0)
-            delta_code = extract_step_delta_code(step)
+            # prev_step 전달 — 저장된 step_code 가 누적이라도 generated_code diff 로 재계산
+            delta_code = extract_step_delta_code(step, prev_step_dict)
+            prev_step_dict = step
 
             if not delta_code.strip():
                 if on_log:
@@ -720,6 +727,12 @@ class WorkflowEngine:
                 on_step_complete(step_id, result)
             report.step_results.append(result)
 
+            # 단독 실행 모드 — stop_after 도달 시 종료 (다음 step 안 함)
+            if stop_after_step_id is not None and step_id >= stop_after_step_id:
+                if on_log:
+                    on_log(f"⏹ stop_after_step_id={stop_after_step_id} 도달, 종료")
+                break
+
             if self.step_delay_ms > 0:
                 await self._async_sleep(self.step_delay_ms / 1000.0)
 
@@ -760,26 +773,56 @@ def extract_library_block(session) -> str:
     return "\n".join(import_lines)
 
 
-def extract_step_delta_code(step: dict) -> str:
+def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
     """
     스텝의 델타 코드를 반환합니다.
 
     우선순위:
-    1. step_code 필드 (이미 추출된 델타)
-    2. generated_code에서 스텝 경계 마커로 파싱
-    3. fallback: generated_code 전체
+    1. step_code 필드가 있으면서 prev_step 의 step_code 와 누적 관계 아닐 때 → 그대로 사용
+    2. prev_step 이 있으면 generated_code 들의 diff 로 재계산 (저장된 step_code 가
+       누적이라 신뢰 못 하는 경우 자동 fix)
+    3. step_code 가 있으면 그대로
+    4. generated_code 의 step 경계 마커로 파싱
+    5. fallback: generated_code 전체
+
+    Args:
+        step: 현재 스텝 dict
+        prev_step: 직전 스텝 dict (None 이면 첫 스텝). 있으면 generated_code 들의
+            diff 로 delta 재계산해 누적 step_code 도 자동 fix.
     """
     step_code = step.get("step_code", "").strip()
-    if step_code:
-        return step_code
-
-    step_id = step.get("step_id", 0)
     generated_code = step.get("generated_code", "")
+
+    # ── prev_step 기반 재계산 (저장된 step_code 가 누적인 경우 fix) ──
+    from .import_manager import (
+        extract_imports,
+        extract_code_delta as _ecd,
+        _smart_dedent as _sd,
+        _unwrap_main_function as _uwm,
+    )
+    if prev_step is not None and generated_code:
+        prev_generated = (
+            prev_step.get("generated_code", "") if isinstance(prev_step, dict) else ""
+        )
+        if prev_generated:
+            _, prev_body = extract_imports(prev_generated)
+            _, curr_body = extract_imports(generated_code)
+            recomputed = _ecd(curr_body, prev_body)  # 이미 dedent + unwrap 적용됨
+            if recomputed:
+                # 저장된 step_code 보다 짧으면 신뢰 (누적 fix)
+                if not step_code or len(recomputed) < len(step_code) * 0.8:
+                    return recomputed
+            return _sd(_uwm(step_code)) or recomputed
+
+    if step_code:
+        # step_code 가 누적이거나 def main() 패턴이면 unwrap + dedent 적용
+        return _sd(_uwm(step_code))
+
     if not generated_code:
         return ""
 
+    step_id = step.get("step_id", 0)
     # 스텝 경계 마커 파싱: "# === Step N: ... (시작) ===" ~ "# === Step N: ... (끝) ==="
-    # 시작 마커가 두 번 나올 수 있으므로 마지막 것 기준으로 추출
     start_pattern = rf'# === Step {step_id}:.*?\(시작\) ==='
     end_pattern = rf'# === Step {step_id}:.*?\(끝\) ==='
 
@@ -787,7 +830,6 @@ def extract_step_delta_code(step: dict) -> str:
     ends = [m.start() for m in re.finditer(end_pattern, generated_code)]
 
     if starts and ends:
-        # 마지막 시작 마커 이후 ~ 첫 끝 마커 이전
         content_start = starts[-1]
         content_end = ends[0] if ends[0] > content_start else (ends[-1] if ends else len(generated_code))
         return generated_code[content_start:content_end].strip()

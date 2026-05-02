@@ -514,8 +514,10 @@ class StepCard(QFrame):
 class BlockCard(QFrame):
     """Colab 스타일의 블럭 카드 — 라이브러리 블럭 또는 스텝 블럭"""
 
-    # 이 블럭부터 실행 요청 (step_id, 0 = 라이브러리 블럭)
+    # 이 블럭부터 실행 요청 (step_id, 0 = 라이브러리 블럭) — N 부터 끝까지
     run_from_here_requested = pyqtSignal(int)
+    # 이 블럭만 단독 실행 요청 (step_id) — N 만 실행, 다음 step 안 함
+    run_single_requested = pyqtSignal(int)
     # 코드 수정 완료 (step_id, new_code)
     block_code_edited = pyqtSignal(int, str)
     # 블럭 삭제 요청 (step_id)
@@ -641,12 +643,32 @@ class BlockCard(QFrame):
             )
             h_layout.addWidget(self.delete_btn)
 
+        # ── 단독 실행 버튼 (라이브러리 블럭=0 은 제외, 한 번만 실행되는 setup 이라 의미 없음) ──
+        if step_id > 0:
+            self.run_single_btn = QPushButton("⏯ 단독")
+            single_style = self._RUN_BTN_STYLE.replace(
+                "#1e3a1e", "#2a2a4a"
+            ).replace("#a6e3a1", "#cba6f7").replace("#2d5a2d", "#3a3a5a")
+            self.run_single_btn.setStyleSheet(single_style)
+            self.run_single_btn.setToolTip(
+                f"Step {step_id} 만 실행 (다음 step 으로 진행 안 함).\n"
+                f"이전 step 들이 이미 커널에 실행된 상태로 가정.\n"
+                f"커널 미준비 시 자동 silent replay."
+            )
+            self.run_single_btn.clicked.connect(
+                lambda: self.run_single_requested.emit(self.step_id)
+            )
+            self.run_single_btn.mousePressEvent = lambda e: (
+                QPushButton.mousePressEvent(self.run_single_btn, e)
+            )
+            h_layout.addWidget(self.run_single_btn)
+
         # ── 실행 버튼 ──
         self.run_btn = QPushButton("▶ 여기서 실행")
         self.run_btn.setStyleSheet(self._RUN_BTN_STYLE)
         self.run_btn.setToolTip(
             "라이브러리 블럭 재초기화" if step_id == 0
-            else f"Step {step_id}부터 이어서 실행"
+            else f"Step {step_id}부터 끝까지 이어서 실행"
         )
         self.run_btn.clicked.connect(lambda: self.run_from_here_requested.emit(self.step_id))
         self.run_btn.mousePressEvent = lambda e: (
@@ -763,6 +785,8 @@ class BlockViewWidget(QWidget):
     kernel_reset_requested = pyqtSignal()
     # N번 스텝부터 실행 요청 (0 = 라이브러리 블럭만 재실행)
     run_from_step_requested = pyqtSignal(int)
+    # N번 스텝 단독 실행 (Phase 1 — 다음 step 안 함)
+    run_single_step_requested = pyqtSignal(int)
     # 중지 요청
     stop_requested = pyqtSignal()
     # 블럭 코드 수정 완료 (step_id, new_code)
@@ -897,6 +921,7 @@ class BlockViewWidget(QWidget):
             status=status
         )
         card.run_from_here_requested.connect(self._on_run_from)
+        card.run_single_requested.connect(self.run_single_step_requested)
         card.block_code_edited.connect(self.block_code_edited)
         card.block_delete_requested.connect(self.block_delete_requested)
         self._block_cards.append(card)
@@ -969,6 +994,7 @@ class CodeViewer(QWidget):
     step_code_edited = pyqtSignal(int, str)        # 사용자가 코드 직접 수정 (step_id, new_code)
     # 블럭 뷰 전용 시그널
     run_from_step_requested = pyqtSignal(int)      # N번 스텝부터 블럭 실행 요청
+    run_single_step_requested = pyqtSignal(int)    # N번 스텝 단독 실행 (Phase 1)
     kernel_reset_requested = pyqtSignal()          # 커널 재시작 요청
     block_step_code_edited = pyqtSignal(int, str)  # 블럭에서 코드 수정 (step_id, new_code)
     block_step_delete_requested = pyqtSignal(int)  # 블럭 삭제 요청 (step_id)
@@ -1012,6 +1038,7 @@ class CodeViewer(QWidget):
         # ── 탭 2: Colab 블럭 뷰 ──
         self.block_view = BlockViewWidget()
         self.block_view.run_from_step_requested.connect(self.run_from_step_requested)
+        self.block_view.run_single_step_requested.connect(self.run_single_step_requested)
         self.block_view.kernel_reset_requested.connect(self.kernel_reset_requested)
         self.block_view.stop_requested.connect(self.stop_code_requested)
         self.block_view.block_code_edited.connect(self.block_step_code_edited)
@@ -1045,6 +1072,11 @@ class CodeViewer(QWidget):
                 padding: 6px 16px;
             }
             QPushButton:hover { background-color: #94e2d5; }
+            QPushButton:disabled {
+                background-color: #313244;
+                color: #6c7086;
+                border: 1px dashed #45475a;
+            }
         """)
         self.run_btn.clicked.connect(self._on_run)
         header_layout.addWidget(self.run_btn)
@@ -1059,6 +1091,11 @@ class CodeViewer(QWidget):
                 padding: 6px 16px;
             }
             QPushButton:hover { background-color: #eba0ac; }
+            QPushButton:disabled {
+                background-color: #313244;
+                color: #6c7086;
+                border: 1px dashed #45475a;
+            }
         """)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_code_requested.emit)

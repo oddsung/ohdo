@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 
 
 class SessionListPanel(QWidget):
@@ -21,6 +21,7 @@ class SessionListPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._sessions = []
+        self._active_session_id: str | None = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -66,9 +67,19 @@ class SessionListPanel(QWidget):
         layout.addWidget(btn_frame)
 
     def refresh(self, sessions: list):
-        """세션 목록 새로고침"""
+        """세션 목록 새로고침. active 세션은 set_active_session 으로 별도 지정."""
         self._sessions = sessions
-        self._update_list()
+        self._update_list(self.search_box.text())
+
+    def set_active_session(self, session_id: str | None):
+        """현재 작업 중인 세션 ID 지정 — 시각적으로 강조 표시.
+
+        강조: 좌측 ▶ marker + 강조색 배경 (#313244) + 강조색 텍스트 (#89b4fa) + bold.
+        """
+        if self._active_session_id == session_id:
+            return
+        self._active_session_id = session_id
+        self._update_list(self.search_box.text())
 
     def _update_list(self, filter_text: str = ""):
         """리스트 위젯 업데이트"""
@@ -82,10 +93,21 @@ class SessionListPanel(QWidget):
             # 표시 텍스트
             step_info = f"({session.completed_steps}/{session.total_steps} steps)"
             ptype = "🌐" if session.project_type == "web" else "🖥️"
-            display_text = f"{ptype} {title}\n   {step_info}"
+            is_active = session.session_id == self._active_session_id
+            marker = "▶ " if is_active else "   "
+            display_text = f"{marker}{ptype} {title}\n     {step_info}"
 
             item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, session.session_id)
+
+            if is_active:
+                # 활성 세션 — 배경색 + 강조 텍스트색 + bold
+                item.setBackground(QColor("#313244"))
+                item.setForeground(QColor("#89b4fa"))
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+
             self.list_widget.addItem(item)
 
     def _filter_sessions(self, text: str):

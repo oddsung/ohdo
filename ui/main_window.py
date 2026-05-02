@@ -60,6 +60,7 @@ class AsyncSignals(QObject):
     # 블럭 실행 전용
     block_step_started = pyqtSignal(int)     # 블럭 스텝 시작 (step_id)
     block_step_done = pyqtSignal(dict)       # 블럭 스텝 완료
+    blocks_finished = pyqtSignal()           # 블럭 실행 모두 완료 (UI 복원 트리거)
     kernel_status_changed = pyqtSignal()     # 커널 상태 변경
 
 
@@ -134,6 +135,7 @@ class MainWindow(QMainWindow):
         self.signals.error_occurred.connect(self._on_error)
         self.signals.block_step_started.connect(self._on_block_step_started)
         self.signals.block_step_done.connect(self._on_block_step_done)
+        self.signals.blocks_finished.connect(self._on_blocks_finished)
         self.signals.kernel_status_changed.connect(self._on_kernel_status_changed)
 
         # ── UI 구성 ──
@@ -212,6 +214,7 @@ class MainWindow(QMainWindow):
         self.code_viewer.step_code_edited.connect(self._on_step_code_edited)
         # 블럭 뷰 전용
         self.code_viewer.run_from_step_requested.connect(self._on_run_from_step)
+        self.code_viewer.run_single_step_requested.connect(self._on_run_single_step)
         self.code_viewer.kernel_reset_requested.connect(self._on_kernel_reset)
         self.code_viewer.block_step_code_edited.connect(self._on_block_step_code_edited)
         self.code_viewer.block_step_delete_requested.connect(self._on_step_delete)
@@ -591,9 +594,13 @@ class MainWindow(QMainWindow):
         self.console_panel.log(f"새 세션 생성: {title} (자동 탐지 모드)", "INFO")
 
     def _refresh_session_list(self):
-        """세션 목록 새로고침"""
+        """세션 목록 새로고침. 현재 작업 중인 세션 강조 표시."""
         sessions = self.session_manager.list_sessions()
         self.session_list.refresh(sessions)
+        active_id = (
+            self.current_session.session_id if self.current_session else None
+        )
+        self.session_list.set_active_session(active_id)
 
     def _on_session_selected(self, session_id: str):
         """세션 목록에서 세션 선택"""
@@ -601,6 +608,7 @@ class MainWindow(QMainWindow):
             # 이전 세션의 커널은 유지 (다시 돌아올 수 있으므로 stop하지 않음)
             self.current_session = self.session_manager.load_session(session_id)
             self._restore_session_ui()
+            self.session_list.set_active_session(session_id)
             self.statusBar().showMessage(f"세션 로드: {self.current_session.title}")
             self.console_panel.log(f"세션 로드: {self.current_session.title}", "INFO")
         except Exception as e:
@@ -1561,13 +1569,16 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────
 
     def _on_run_code(self, code: str):
-        """코드 실행 요청"""
+        """코드 실행 요청 (코드 뷰어 탭의 ▶ 실행 버튼)"""
         if not code.strip():
             QMessageBox.warning(self, "경고", "실행할 코드가 없습니다.")
             return
 
         self.console_panel.log("코드 실행 시작...", "INFO")
         self.statusBar().showMessage("코드 실행 중...")
+
+        # UI 상태 - 실행 중 표시 (run_btn 비활성, stop_btn 활성)
+        self.code_viewer.set_running(True)
 
         thread = threading.Thread(
             target=self._execute_code_thread,
@@ -1635,6 +1646,8 @@ class MainWindow(QMainWindow):
             self.signals.error_occurred.emit(f"코드 실행 오류: {str(e)}")
         finally:
             self._current_sandbox = None  # 실행 완료 후 참조 해제
+            # UI 복원 (메인 스레드로) — run_btn 다시 활성, stop_btn 비활성
+            QTimer.singleShot(0, lambda: self.code_viewer.set_running(False))
 
     # ──────────────────────────────────────────
     # 블럭 기반 실행 (Colab-style)
@@ -1656,7 +1669,7 @@ class MainWindow(QMainWindow):
         return self._kernels[sid]
 
     def _on_run_from_step(self, start_step_id: int):
-        """블럭 뷰: N번 스텝부터 실행 요청"""
+        """블럭 뷰: N번 스텝부터 실행 요청 (N부터 끝까지)"""
         if not self.current_session:
             QMessageBox.warning(self, "경고", "세션이 없습니다.")
             return
@@ -1673,9 +1686,50 @@ class MainWindow(QMainWindow):
             self.signals.error_occurred.emit("커널 생성 실패")
             return
 
+        # 실행 중 메인 윈도우를 z-order 최하단으로 보냄 (lower).
+        # hide/minimize 와 달리 visible 유지 + 작업표시줄에 남음 → 사용자가
+        # 실행 상태 확인 가능. 자동화 코드가 자기 윈도우 띄우면 자연스럽게 위로.
+        # 복원 시 raise_/activateWindow 가 안정적 (Win11 정책 회피).
+        self.lower()
+
         thread = threading.Thread(
             target=self._run_blocks_thread,
-            args=(kernel, start_step_id),
+            args=(kernel, start_step_id, None),
+            daemon=True
+        )
+        thread.start()
+
+    def _on_run_single_step(self, step_id: int):
+        """블럭 뷰: N번 스텝 단독 실행 (다음 step 으로 진행 안 함).
+
+        이전 step (1..N-1) 들이 커널에 이미 실행됐으면 skip,
+        없으면 silent replay 후 step N 만 실행하고 종료.
+        """
+        if not self.current_session:
+            QMessageBox.warning(self, "경고", "세션이 없습니다.")
+            return
+        if not self.current_session.steps:
+            QMessageBox.warning(self, "경고", "실행할 스텝이 없습니다.")
+            return
+
+        self.console_panel.log(f"⏯ Step {step_id} 단독 실행...", "INFO")
+        self.code_viewer.set_running(True)
+        self.statusBar().showMessage(f"Step {step_id} 단독 실행 중...")
+
+        kernel = self._get_or_create_kernel()
+        if kernel is None:
+            self.signals.error_occurred.emit("커널 생성 실패")
+            return
+
+        # 실행 중 메인 윈도우를 z-order 최하단으로 보냄 (lower).
+        # hide/minimize 와 달리 visible 유지 + 작업표시줄에 남음 → 사용자가
+        # 실행 상태 확인 가능. 자동화 코드가 자기 윈도우 띄우면 자연스럽게 위로.
+        # 복원 시 raise_/activateWindow 가 안정적 (Win11 정책 회피).
+        self.lower()
+
+        thread = threading.Thread(
+            target=self._run_blocks_thread,
+            args=(kernel, step_id, step_id),  # start = stop = step_id
             daemon=True
         )
         thread.start()
@@ -1691,8 +1745,16 @@ class MainWindow(QMainWindow):
         self.console_panel.log("커널 재시작 완료 — 변수 상태가 초기화되었습니다.", "INFO")
         self.signals.kernel_status_changed.emit()
 
-    def _run_blocks_thread(self, kernel: ExecutionKernel, start_step_id: int):
-        """블럭 기반 실행을 백그라운드 스레드에서 실행"""
+    def _run_blocks_thread(
+        self,
+        kernel: ExecutionKernel,
+        start_step_id: int,
+        stop_after_step_id: int | None = None,
+    ):
+        """블럭 기반 실행을 백그라운드 스레드에서 실행.
+
+        stop_after_step_id 가 None 이 아니면 그 step 까지만 실행 (단독 실행 모드).
+        """
         import asyncio
 
         def on_step_start(step_id):
@@ -1722,6 +1784,7 @@ class MainWindow(QMainWindow):
                     session=self.current_session,
                     kernel=kernel,
                     start_from_step_id=start_step_id,
+                    stop_after_step_id=stop_after_step_id,
                     silent_replay=True,
                     on_step_start=on_step_start,
                     on_step_complete=on_step_complete,
@@ -1733,14 +1796,30 @@ class MainWindow(QMainWindow):
             self.signals.error_occurred.emit(f"블럭 실행 오류: {e}")
         finally:
             self.signals.log_message.emit("블럭 실행 완료")
-            # 실행 완료 후 UI 복원 (메인 스레드로)
-            QTimer.singleShot(0, lambda: self._on_blocks_finished())
+            # signal 로 UI 복원 (Qt 가 main thread queued connection 으로 전달).
+            # 이전엔 QTimer.singleShot 썼지만 어떤 케이스에서 호출 안 되는 회귀 발견됨.
+            self.signals.blocks_finished.emit()
 
     def _on_blocks_finished(self):
-        """블럭 실행 완료 후 UI 복원"""
+        """블럭 실행 완료 후 UI 복원 (signals.blocks_finished slot)"""
+        self.console_panel.log("✅ 블럭 실행 완료 - UI 복원", "INFO")
         self.code_viewer.set_running(False)
         self.statusBar().showMessage("블럭 실행 완료")
         self._on_kernel_status_changed()
+        self._restore_main_window()
+
+    def _restore_main_window(self):
+        """lower() 로 z-order 최하단에 있던 메인 윈도우를 다시 위로 + active.
+
+        lower() 후 raise_/activateWindow 패턴 — 메인 윈도우는 항상 visible
+        상태였으므로 hide/show cycle 의 OS-side 이슈 (작업표시줄 사라짐 등) 없음.
+        멱등 — 이미 위에 있는 상태에서 호출해도 무해.
+        """
+        self.raise_()
+        self.activateWindow()
+        # 만약 hide 상태였다면 (이전 버전 호환) show 도 호출
+        if self.isHidden():
+            self.show()
 
     def _on_block_step_started(self, step_id: int):
         """블럭 스텝 시작 — UI 상태 표시"""
@@ -1790,6 +1869,7 @@ class MainWindow(QMainWindow):
 
         library_code = extract_library_block(self.current_session)
         steps_data = []
+        prev_step_dict: dict | None = None
         for step in self.current_session.steps:
             step_dict = step if isinstance(step, dict) else {}
             step_id = step_dict.get("step_id", 0)
@@ -1803,13 +1883,15 @@ class MainWindow(QMainWindow):
             if not title:
                 title = f"Step {step_id}"
 
-            delta_code = extract_step_delta_code(step_dict)
+            # prev_step 전달 — 저장된 step_code 가 누적이라도 generated_code diff 로 재계산
+            delta_code = extract_step_delta_code(step_dict, prev_step_dict)
             steps_data.append({
                 "step_id": step_id,
                 "title": title,
                 "delta_code": delta_code,
                 "status": "",
             })
+            prev_step_dict = step_dict
 
         self.code_viewer.refresh_block_view(library_code, steps_data)
         self._on_kernel_status_changed()
@@ -1875,17 +1957,37 @@ class MainWindow(QMainWindow):
         return sys.executable
 
     def _on_stop_code(self):
-        """코드 실행 강제 중지 (F9 단축키 또는 중지 버튼)"""
-        # 1. 현재 실행 중인 서브프로세스 즉시 kill
+        """코드 실행 강제 중지 (F9 단축키 또는 중지 버튼).
+
+        세 가지 실행 path 모두 stop:
+        - 코드 뷰어 탭 ▶ 실행: CodeSandbox 서브프로세스 → stop()
+        - 블럭 뷰 탭 (▶ 처음부터 / ⏯ 단독): WorkflowEngine.stop() + Kernel.stop()
+        """
+        # 1. CodeSandbox 서브프로세스 즉시 kill (코드 뷰어 탭 path)
         if self._current_sandbox is not None:
             self._current_sandbox.stop()
-        # 2. 워크플로우 엔진 중지 플래그 설정
+        # 2. 워크플로우 엔진 중지 플래그 설정 (블럭 뷰 path - 다음 step 시작 안 함)
         self.workflow_engine.stop()
-        # 3. UI 상태 복원
+        # 3. 현재 세션의 ExecutionKernel 도 stop (블럭 뷰 path - 진행 중 step 즉시 종료)
+        if self.current_session:
+            sid = self.current_session.session_id
+            kernel = self._kernels.get(sid)
+            if kernel is not None:
+                try:
+                    kernel.stop()
+                except Exception as e:
+                    logger.warning(f"kernel.stop() 실패: {e}")
+                # kernel 재시작 가능하도록 dict 에서 제거
+                self._kernels.pop(sid, None)
+        # 4. UI 상태 복원
         self.is_processing = False
         self.chat_panel.set_input_enabled(True)
+        self.code_viewer.set_running(False)  # run_btn 활성, stop_btn 비활성
         self.statusBar().showMessage("⛔ 실행 강제 중지 (F9)")
         self.console_panel.log("⛔ 실행 강제 중지 (F9)", "WARNING")
+        self._on_kernel_status_changed()
+        # 메인 윈도우 즉시 복원 (멱등 — thread finally 가 또 호출해도 무해)
+        self._restore_main_window()
 
     def _run_all_steps(self):
         """전체 스텝 실행"""

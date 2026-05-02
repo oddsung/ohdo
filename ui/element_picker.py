@@ -119,6 +119,10 @@ class ElementPickerOverlay(QWidget):
         # post_pause → 일반 picker mode 전환 지연 (ms). 0 이면 transition 비활성
         # (방향 B 직접 — post_pause_mode 가 click/ESC 까지 유지).
         self._post_pause_transition_ms = self.POST_PAUSE_TRANSITION_MS
+        # CDP 사용 여부 (default False). 활성화 시 element 선택 후 Chrome
+        # remote-debugging-port 시도 → DOM context 수집. 비활성화 시 click 후
+        # 메인 화면 전환 즉시 (CDP 포트 timeout 대기 없음).
+        self._cdp_enabled = False
         if settings:
             self.update_settings(settings)
 
@@ -216,6 +220,10 @@ class ElementPickerOverlay(QWidget):
             pp_ms = self.POST_PAUSE_TRANSITION_MS
         # 0 이면 transition 비활성 (방향 B 직접). 양수면 그 ms 후 자동 전환.
         self._post_pause_transition_ms = max(0, min(5000, pp_ms))
+
+        # cdp_enabled — Chrome remote-debugging-port 시도 여부.
+        # False (default) 면 element 선택 후 즉시 emit. True 면 DOM context 수집.
+        self._cdp_enabled = bool(ep.get("cdp_enabled", False))
 
     def start_picking(self):
         """요소 선택 시작 - 전체 화면 오버레이 표시"""
@@ -1641,6 +1649,9 @@ class ElementPickerOverlay(QWidget):
         Chrome CDP(포트 9222)를 통해 현재 페이지의 DOM 컨텍스트를 수집합니다.
         CDP 포트가 없거나 Selenium 연결 실패 시 빈 dict 반환 (비파괴적).
 
+        설정의 cdp_enabled=False (default) 면 즉시 빈 dict 반환 — 매 click
+        마다 CDP 포트 탐색 timeout (수백 ms) 회피해서 picker 응답성 유지.
+
         반환 키:
             cdp_available (bool)
             page_url, page_title (str)
@@ -1649,6 +1660,9 @@ class ElementPickerOverlay(QWidget):
             hasTitle (bool)
             parentOuterHTML (str)
         """
+        if not self._cdp_enabled:
+            return {"cdp_available": False}
+
         import urllib.request
         import json as _json
 
@@ -1979,12 +1993,17 @@ class ElementPickerOverlay(QWidget):
 
     def _install_mouse_hook(self):
         """
-        WH_MOUSE_LL 훅으로 좌클릭을 시스템 레벨에서 감지.
+        WH_MOUSE_LL 훅으로 좌/우 클릭을 시스템 레벨에서 감지 + 차단.
 
         post_pause_mode 의 overlay 는 WS_EX_TRANSPARENT 가 켜져 있어 mouse
-        이벤트를 받지 못함 (방향 B 통합). GetAsyncKeyState 폴링이 짧은 click 을
-        놓칠 수 있어 hook 으로 보강. hook 은 click 을 감지만 하고 통과시켜
-        underlying app (펼친 submenu 항목, 다른 창 활성화 등) 동작도 정상 진행.
+        이벤트를 받지 못함 (방향 B 통합). hook 으로 click 감지하고 underlying
+        에 전달은 차단 — 일반 picker mode 와 동일하게 picker 만 element 선택,
+        underlying 메뉴/버튼은 클릭 효과 발동 안 함 (사용자 의도).
+
+        - LBUTTONDOWN: element_picked emit + click 차단 (return 1)
+        - LBUTTONUP: down/up consistency 위해 차단
+        - RBUTTONDOWN: cancel + 차단 (일반 picker mode 의 우클릭 = cancel 과 일관)
+        - RBUTTONUP: 차단
         """
         if sys.platform != "win32":
             return
@@ -1997,12 +2016,22 @@ class ElementPickerOverlay(QWidget):
         )
 
         WM_LBUTTONDOWN = 0x0201
+        WM_LBUTTONUP = 0x0202
+        WM_RBUTTONDOWN = 0x0204
+        WM_RBUTTONUP = 0x0205
 
         def _mouse_hook_proc(nCode, wParam, lParam):
-            if (nCode >= 0 and self._post_pause_mode
-                    and wParam == WM_LBUTTONDOWN):
-                # click 감지 → element 정보 emit. underlying 에는 통과.
-                QTimer.singleShot(0, self._on_hook_click)
+            if nCode >= 0 and self._post_pause_mode:
+                if wParam == WM_LBUTTONDOWN:
+                    QTimer.singleShot(0, self._on_hook_click)
+                    return 1  # underlying 에 click 전달 차단
+                if wParam == WM_LBUTTONUP:
+                    return 1  # down/up consistency
+                if wParam == WM_RBUTTONDOWN:
+                    QTimer.singleShot(0, self._on_hook_rclick)
+                    return 1
+                if wParam == WM_RBUTTONUP:
+                    return 1
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
         # GC 방지용 레퍼런스 유지
@@ -2045,6 +2074,14 @@ class ElementPickerOverlay(QWidget):
             self.element_picked.emit(element_info)
         else:
             self.pick_cancelled.emit()
+
+    def _on_hook_rclick(self):
+        """훅에서 우클릭 감지 → picker 취소 (일반 picker mode 와 일관)."""
+        if not self._post_pause_mode:
+            return
+        self._exit_post_pause_mode()
+        self.stop_picking()
+        self.pick_cancelled.emit()
 
     def _on_hook_f3(self):
         """훅에서 F3 감지 → 일시정지 진입.

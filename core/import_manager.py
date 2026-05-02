@@ -169,26 +169,117 @@ def assemble_script(
     return '\n\n'.join(parts)
 
 
+def _unwrap_main_function(code: str) -> str:
+    """AI 가 ``def main(): ... ; if __name__ == "__main__": main()`` 패턴으로
+    감싸서 작성한 경우 main 함수 본문을 module-level 로 unwrap.
+
+    Jupyter 모드 호환: driver, app 같은 변수가 main 함수 local scope 면 다음
+    step 에서 못 씀 (NameError). 본문을 module-level 로 펼쳐 _globals 에 노출.
+
+    AST 기반 — `ast.parse` 실패 (syntax error) 시 원본 그대로 반환.
+    main 함수 없으면 원본 그대로.
+
+    Returns:
+        unwrap 된 코드 (main 함수 정의 + if __name__ 블록 제거, main 본문이
+        그 자리에 module-level 로 삽입). 실패 시 원본.
+    """
+    if not code or not code.strip():
+        return code
+    if "def main(" not in code:
+        return code  # 빠른 path — main 함수 없으면 처리 불필요
+
+    import ast
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+
+    main_func = None
+    new_body: list = []
+    for node in tree.body:
+        # def main(): 함수 정의 — 본문만 따로 보관
+        if isinstance(node, ast.FunctionDef) and node.name == "main":
+            main_func = node
+            continue
+        # if __name__ == "__main__": 블록 제거 (main() 호출 라인 자동 제거)
+        if isinstance(node, ast.If):
+            test = node.test
+            if (isinstance(test, ast.Compare)
+                    and isinstance(test.left, ast.Name)
+                    and test.left.id == "__name__"):
+                continue
+        new_body.append(node)
+
+    if main_func is None:
+        return code  # main 함수 없으면 unwrap 대상 아님
+
+    # main 함수 본문을 module-level 로 추가
+    new_body.extend(main_func.body)
+    tree.body = new_body
+
+    try:
+        return ast.unparse(tree)
+    except Exception:
+        return code
+
+
+def _smart_dedent(code: str) -> str:
+    """code 의 공통 indent 제거 — 코드 라인 (주석/빈 줄 제외) 의 최소 indent 기준.
+
+    delta 추출 시 try/except 블록 안의 라인들만 추출되면 들여쓰기 4 칸이
+    그대로 남아 module-level 실행 시 IndentationError. 이 함수가 자동 정리.
+
+    Args:
+        code: 추출된 delta 또는 코드 블록.
+
+    Returns:
+        공통 indent 제거된 코드. indent 가 이미 0 이면 그대로 반환.
+    """
+    if not code or not code.strip():
+        return code
+    lines = code.split('\n')
+    code_lines = [l for l in lines if l.strip() and not l.lstrip().startswith('#')]
+    if not code_lines:
+        return code
+    common_indent = min(len(l) - len(l.lstrip()) for l in code_lines)
+    if common_indent == 0:
+        return code
+    result = []
+    for line in lines:
+        if len(line) - len(line.lstrip()) >= common_indent:
+            result.append(line[common_indent:])
+        else:
+            # indent 가 common_indent 보다 적은 라인 (boundary 주석 등) — 그대로
+            result.append(line)
+    return '\n'.join(result)
+
+
 def extract_code_delta(new_body: str, prev_body: str) -> str:
     """
     새 누적 코드 body에서 이전 body 이후에 추가된 부분만 추출합니다.
 
-    AI는 매번 전체 누적 코드를 생성하므로, 이전 스텝의 body를 prefix로
-    제거하면 이번 스텝에서 새로 추가된 코드를 얻을 수 있습니다.
+    AI는 매번 전체 누적 코드를 생성하므로, 이번 스텝에서 새로 추가된 코드를
+    얻으려면 두 가지 path:
+      1. **prefix 매칭** (빠른 path): 이전 코드가 새 코드의 prefix 와 정확히
+         일치하면 그 뒤가 delta.
+      2. **SequenceMatcher diff** (fallback): AI 가 이전 코드를 약간 다듬은
+         경우 (들여쓰기, try 위치 등) prefix 매칭 실패. line-level diff 로
+         새/변경된 라인만 추출.
 
     Args:
         new_body: 이번 스텝의 전체 body (import 제외)
         prev_body: 이전 스텝의 전체 body (import 제외)
 
     Returns:
-        이번 스텝에서 새로 추가된 코드. prefix 매칭 실패 시 new_body 전체 반환.
+        이번 스텝에서 새로 추가된 코드. 모든 추출 실패 시 new_body 전체 반환.
     """
     if not prev_body or not prev_body.strip():
-        return new_body  # 첫 스텝은 전체가 새 코드
+        return _smart_dedent(_unwrap_main_function(new_body))  # 첫 스텝
 
     new_lines = new_body.split('\n')
     prev_lines = prev_body.rstrip().split('\n')
 
+    # ── 1) prefix 매칭 (빠른 path) ──
     n = len(prev_lines)
     if len(new_lines) >= n:
         prev_stripped = [line.rstrip() for line in prev_lines]
@@ -196,14 +287,43 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
 
         if prev_stripped == new_prefix_stripped:
             delta_lines = new_lines[n:]
-            # 앞의 빈 줄 제거
             while delta_lines and not delta_lines[0].strip():
                 delta_lines.pop(0)
             result = '\n'.join(delta_lines).strip()
-            return result if result else new_body
+            if result:
+                return _smart_dedent(_unwrap_main_function(result))
+            return _smart_dedent(_unwrap_main_function(new_body))
 
-    # prefix 매칭 실패 → 전체 body 반환 (경계 주석은 전체를 감쌈)
-    return new_body
+    # ── 2) SequenceMatcher diff (fallback) ──
+    # AI 가 이전 코드를 약간 변경해서 prefix 매칭 실패한 경우.
+    # opcodes 의 'insert' / 'replace' 의 b 측 (= 새 코드) 만 추출.
+    import difflib
+    prev_stripped = [line.rstrip() for line in prev_lines]
+    new_stripped = [line.rstrip() for line in new_lines]
+    sm = difflib.SequenceMatcher(
+        a=prev_stripped, b=new_stripped, autojunk=False,
+    )
+    # ratio 가 너무 낮으면 (거의 다른 코드) diff 의미 없음 → 전체 반환
+    if sm.ratio() < 0.3:
+        return _smart_dedent(_unwrap_main_function(new_body))
+
+    delta_lines: list[str] = []
+    for tag, _i1, _i2, j1, j2 in sm.get_opcodes():
+        if tag in ('insert', 'replace'):
+            delta_lines.extend(new_lines[j1:j2])
+
+    # 앞뒤 빈 줄 정리
+    while delta_lines and not delta_lines[0].strip():
+        delta_lines.pop(0)
+    while delta_lines and not delta_lines[-1].strip():
+        delta_lines.pop()
+
+    result = '\n'.join(delta_lines).strip()
+    # diff 결과 비어있거나 거의 전체 (90%+) 면 신뢰 못 함 → 전체 반환 (경계 주석으로 감쌈)
+    if not result or len(result) >= len(new_body) * 0.9:
+        return _smart_dedent(_unwrap_main_function(new_body))
+
+    return _smart_dedent(_unwrap_main_function(result))
 
 
 def extract_import_delta(new_imports: list[str], prev_imports: list[str]) -> list[str]:

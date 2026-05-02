@@ -246,6 +246,22 @@ class SettingsDialog(QDialog):
         )
         form.addRow("UIA 시간 예산:", self.uia_time_budget_spin)
 
+        # CDP 사용 여부 — Chrome remote-debugging-port 로 DOM context 수집
+        self.cdp_enabled_cb = QCheckBox("Chrome CDP 로 DOM 정보 수집 (느릴 수 있음)")
+        self.cdp_enabled_cb.setChecked(bool(ep_config.get("cdp_enabled", False)))
+        self.cdp_enabled_cb.setToolTip(
+            "활성화 시 element 선택 후 Chrome remote-debugging-port (9222) 에\n"
+            "접속해 DOM context (XPath, outerHTML, attributes 등) 수집.\n"
+            "AI 가 더 정확한 selector 를 만들 수 있지만 click → 메인 화면 전환에\n"
+            "수백 ms ~ 1초 추가 지연 (CDP 미연결 시 매번 timeout 대기).\n"
+            "\n"
+            "Chrome 을 다음 명령으로 띄운 경우만 활성화 권장:\n"
+            "  chrome.exe --remote-debugging-port=9222\n"
+            "\n"
+            "기본: 비활성 (반응성 우선)"
+        )
+        form.addRow("Chrome CDP:", self.cdp_enabled_cb)
+
         return widget
 
     def _create_prompt_tab(self) -> QWidget:
@@ -469,6 +485,7 @@ class SettingsDialog(QDialog):
             self.settings["element_picker"] = {}
         self.settings["element_picker"]["uia_max_depth"] = self.uia_max_depth_spin.value()
         self.settings["element_picker"]["uia_time_budget_ms"] = self.uia_time_budget_spin.value()
+        self.settings["element_picker"]["cdp_enabled"] = self.cdp_enabled_cb.isChecked()
 
         # UI
         self.settings["ui"]["theme"] = self.theme_combo.currentText()
