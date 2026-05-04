@@ -1545,10 +1545,21 @@ class CodeViewer(QWidget):
             self.add_step(step_id, code, capture)
 
     def clear(self):
-        """모든 스텝 카드 제거"""
+        """모든 스텝 카드 + 블럭 뷰 카드 제거 (양쪽 탭 통합 clear).
+
+        세션 추가/삭제 시 블럭 뷰가 stale 상태로 남는 회귀 방지 (5/4 사용자 보고).
+        """
         self._step_cards.clear()
         while self.cards_layout.count():
             item = self.cards_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self.cards_layout.addStretch()
+        # 블럭 뷰도 함께 비움 — 세션 추가/삭제 후 이전 세션의 library/initial/block
+        # 카드 잔존 회귀 방지 (5/4 사용자 보고). refresh 로 빈 상태 적용.
+        if hasattr(self, "block_view") and hasattr(self.block_view, "refresh"):
+            try:
+                self.block_view.refresh("", [], "", 500)
+            except Exception:
+                if hasattr(self.block_view, "clear"):
+                    self.block_view.clear()

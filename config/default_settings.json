@@ -4,6 +4,7 @@
     "available_engines": {
       "gemini_cli": {
         "command": "gemini",
+        "model": "gemini-2.5-flash",
         "flags": "-p",
         "timeout_seconds": 120,
         "max_retries": 3

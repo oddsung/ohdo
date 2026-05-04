@@ -1,5 +1,5 @@
 """
-PySide6 메인 윈도우
+PyQt6 메인 윈도우
 
 3패널 레이아웃: 세션 목록 | 대화 패널 | 코드+캡처 뷰어
 하단: 콘솔/로그 패널
@@ -7,9 +7,7 @@ PySide6 메인 윈도우
 
 import sys
 import json
-import asyncio
 import logging
-import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -40,7 +38,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # 시스템 모듈 import
 sys.path.insert(0, str(PROJECT_ROOT))
 from core.ai_engine import AIEngineManager
-from core.session_manager import SessionManager, Session, Step
+from core.session_manager import SessionManager, Session
 from core.prompt_builder import PromptBuilder
 from core.workflow_engine import WorkflowEngine, CodeSandbox, extract_library_block, extract_step_delta_code
 from core.import_manager import extract_initial_block
@@ -133,6 +131,10 @@ class MainWindow(QMainWindow):
         # ── 블럭/코드 실행 controller (코드 뷰어 ▶ + 블럭 뷰 ▶/⏯ + F9 stop) ──
         from ui.block_execution_handler import BlockExecutionHandler
         self.block_executor = BlockExecutionHandler(self)
+
+        # ── AI 호출 controller (사용자 메시지 → AI 어댑터 → 응답 처리 → step 누적) ──
+        from ui.ai_call_handler import AICallHandler
+        self.ai_handler = AICallHandler(self)
 
         # ── 비동기 시그널 ──
         self.signals = AsyncSignals()
@@ -739,268 +741,24 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────
 
     def _on_cancel_ai(self):
-        """AI 생성 중지 요청 처리"""
-        self.console_panel.log("사용자가 AI 요청을 취소했습니다.", "INFO")
-        self.statusBar().showMessage("취소 중...")
-        self.ai_engine.cancel()
+        """AI 생성 중지 요청 처리 (위임 → AICallHandler)"""
+        self.ai_handler.on_cancel_ai()
 
     def _on_user_message(self, message: str):
-        """사용자가 대화 패널에서 메시지를 전송"""
-        if not message.strip() and not self.pending_images:
-            return
-        if self.is_processing:
-            return
-        if not self.current_session:
-            QMessageBox.information(self, "안내", "먼저 새 세션을 생성해주세요. (Ctrl+N)")
-            return
-
-        self.is_processing = True
-        self.chat_panel.set_generating(True)
-        self.statusBar().showMessage("AI 응답 대기 중...")
-        self.console_panel.log(f"사용자 요청: {message[:100]}...", "INFO")
-
-        # 백그라운드 스레드에서 AI 호출
-        images = list(self.pending_images)
-        self.pending_images.clear()
-        self.chat_panel.clear_capture_status()
-
-        thread = threading.Thread(
-            target=self._call_ai_thread,
-            args=(message, images),
-            daemon=True
-        )
-        thread.start()
+        """사용자가 대화 패널에서 메시지를 전송 (위임 → AICallHandler)"""
+        self.ai_handler.on_user_message(message)
 
     def _call_ai_thread(self, user_message: str, images: list[str]):
-        """백그라운드 스레드: AI 프롬프트 전송 및 응답 수신"""
-        try:
-            # 방어 코드 추가
-            if not self.current_session:
-                raise ValueError("세션이 초기화되지 않았습니다.")
-
-            # 프롬프트 구성 (윈도우/요소 컨텍스트 포함)
-            window_ctx = self.pending_window_context if self.pending_window_context else None
-            self.pending_window_context = ""  # 사용 후 초기화
-
-            pending_elems = self.chat_panel.get_pending_elements()
-            element_summary = ""  # 세션 기록용 요소 요약
-            if pending_elems:
-                parts = [self.win_inspector.get_element_info_text(e) for e in pending_elems]
-                element_ctx: str | None = "\n\n---\n\n".join(parts)
-                # 세션 기록용 요소 요약 생성
-                summaries = []
-                for e in pending_elems:
-                    ctrl_type = e.get("control_type", "")
-                    name = e.get("name", "")
-                    auto_id = e.get("automation_id", "")
-                    if name:
-                        summaries.append(f"[{ctrl_type}] \"{name}\"")
-                    elif auto_id:
-                        summaries.append(f"[{ctrl_type}] (ID: {auto_id})")
-                    else:
-                        summaries.append(f"[{ctrl_type}]")
-                element_summary = "📌 선택된 요소: " + ", ".join(summaries) + "\n"
-                self.chat_panel.clear_pending_elements()
-            else:
-                element_ctx = None
-
-            # Selenium DOM 경로는 picker 가 CDP 로 실제 DOM 정보를 수집했을 때만.
-            # WinInspector.should_use_selenium 으로 단일 기준 적용 (하드코딩 0).
-            is_browser_elem = any(
-                self.win_inspector.should_use_selenium(e) for e in pending_elems
-            ) if pending_elems else False
-            prompt = self.prompt_builder.build_step_prompt(
-                session=self.current_session,
-                user_request=user_message,
-                image_paths=images if images else None,
-                window_context=window_ctx,
-                element_context=element_ctx,
-                project_type=self.current_session.project_type,
-                is_browser_element=is_browser_elem
-            )
-
-            self.signals.log_message.emit(f"[PROMPT] 프롬프트 전송 ({len(prompt)}자)")
-
-            # AI 호출 (비동기를 동기로 래핑)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            response = loop.run_until_complete(
-                self.ai_engine.generate(prompt, images)
-            )
-            loop.close()
-
-            self.signals.log_message.emit(
-                f"[AI] 응답 수신 ({response.response_time_ms}ms, "
-                f"코드 {len(response.code)}자)"
-            )
-
-            # AI 원본 응답 로깅 (디버깅용)
-            raw_preview = response.raw_response[:300] if response.raw_response else '(응답 없음)'
-            self.signals.log_message.emit(f"[AI] 원본 응답 미리보기: {raw_preview}")
-
-            # 결과 전달 (요소 정보 포함)
-            display_message = element_summary + user_message if element_summary else user_message
-            self.signals.ai_response_ready.emit({
-                "user_message": user_message,
-                "display_message": display_message,  # 세션 기록용 (요소 정보 포함)
-                "images": images,
-                "response": {
-                    "text": response.text,
-                    "code": response.code,
-                    "description": response.description,
-                    "packages": response.packages,
-                    "raw_response": response.raw_response,
-                    "tokens_used": response.tokens_used,
-                    "response_time_ms": response.response_time_ms,
-                    "success": response.success,
-                    "error": response.error,
-                    "cancelled": response.cancelled,
-                },
-                "prompt": prompt
-            })
-
-        except Exception as e:
-            self.signals.error_occurred.emit(f"AI 호출 실패: {str(e)}")
+        """백그라운드 스레드: AI 프롬프트 전송 및 응답 수신 (위임 → AICallHandler)"""
+        self.ai_handler.call_ai_thread(user_message, images)
 
     def _on_ai_response(self, data: dict):
-        """AI 응답 수신 처리 (메인 스레드)"""
-        response = data["response"]
-
-        # 프롬프트 탭에 상세 로그 기록
-        element_info = ""
-        display_msg = data.get("display_message", "")
-        if display_msg.startswith("📌"):
-            # 요소 정보 추출
-            lines = display_msg.split("\n", 1)
-            element_info = lines[0] if lines else ""
-
-        self.console_panel.log_prompt_detail(
-            user_message=data["user_message"],
-            full_prompt=data.get("prompt", ""),
-            ai_response=response.get("description") or response.get("text", ""),
-            code=response.get("code", ""),
-            tokens_used=response.get("tokens_used", 0),
-            response_time_ms=response.get("response_time_ms", 0),
-            ai_engine=self.ai_engine.current_engine if hasattr(self.ai_engine, 'current_engine') else "",
-            has_images=bool(data.get("images")),
-            element_info=element_info
-        )
-
-        # 취소된 경우: 안내 메시지만 표시하고 세션 기록 없이 종료
-        if response.get("cancelled"):
-            self.chat_panel.add_system_message("요청이 취소되었습니다.")
-            self.is_processing = False
-            self.chat_panel.set_generating(False)
-            self.statusBar().showMessage("취소됨")
-            return
-
-        # AI 응답을 대화 패널에 표시
-        if response["success"]:
-            ai_text = response["description"] or response["text"]
-            self.chat_panel.add_ai_message(ai_text.strip())
-
-            # 코드가 있으면 코드 뷰어에 추가
-            if response["code"]:
-                # 수동 편집된 값이 AI에 의해 되돌아가지 않도록 강제 복원
-                patched_code = self._apply_manual_edit_patches(response["code"])
-                if patched_code != response["code"]:
-                    self.console_panel.log(
-                        "[편집 복원] 수동 수정된 값이 AI 코드에 자동 복원되었습니다.", "INFO"
-                    )
-                    response["code"] = patched_code
-
-                self.current_code = response["code"]
-                step_id = len(self.current_session.steps) + 1
-                # 캡처 이미지가 있으면 첫 번째 이미지를 함께 표시
-                images = data.get("images", [])
-                capture_path = images[0] if images else None
-                self.code_viewer.add_step(step_id, response["code"], capture_path)
-                self.console_panel.log(f"코드 추출 완료 ({len(response['code'])}자)", "INFO")
-            else:
-                # 코드가 없는 경우 안내 (단, 역질문 등 정상적인 응답일 수도 있음)
-                self.console_panel.log(
-                    f"[INFO] 코드 추출 없음. 보조 텍스트 출력됨.",
-                    "INFO"
-                )
-        else:
-            self.chat_panel.add_system_message(
-                f"AI 응답 실패: {response['error']}"
-            )
-
-        # 세션에 스텝 추가 (요소 정보 포함된 메시지 사용)
-        recorded_message = data.get("display_message", data["user_message"])
-        # import/코드 분리
-        full_code = response.get("code", "")
-        from core.import_manager import extract_imports, extract_code_delta, extract_import_delta
-        separated_imports, separated_body = extract_imports(full_code)
-
-        # 이전 스텝의 누적 코드에서 이번 스텝에서 새로 추가된 부분만 추출
-        prev_body = ""
-        prev_imports: list = []
-        if self.current_session and self.current_session.steps:
-            last_step = self.current_session.steps[-1]
-            s = last_step if isinstance(last_step, dict) else {}
-            prev_full_code = s.get("generated_code", "")
-            prev_imports = s.get("step_imports", [])
-            if prev_full_code:
-                _, prev_body = extract_imports(prev_full_code)
-
-        delta_body = extract_code_delta(separated_body, prev_body)
-        delta_imports = extract_import_delta(separated_imports, prev_imports)
-
-        step = Step(
-            status="completed" if response["success"] else "failed",
-            conversation=[
-                {"role": "user", "content": recorded_message,
-                 "timestamp": datetime.now().isoformat()},
-                {"role": "assistant", "content": response.get("description", response["text"]),
-                 "timestamp": datetime.now().isoformat()}
-            ],
-            generated_code=full_code,
-            required_packages=response.get("packages", []),
-            captures=[
-                {"type": "screen", "path": img, "timestamp": datetime.now().isoformat()}
-                for img in data.get("images", [])
-            ],
-            prompt_log={
-                "full_prompt": data.get("prompt", ""),
-                "raw_response": response.get("raw_response", ""),
-                "tokens_used": response.get("tokens_used", 0),
-                "response_time_ms": response.get("response_time_ms", 0)
-            },
-            execution_result=None,
-            step_code=delta_body,
-            step_imports=delta_imports,
-        )
-        self.session_manager.add_step(self.current_session, step)
-
-        # 블럭 뷰 갱신 — add_step 이후에 호출해야 step_code가 포함됨
-        if response.get("code"):
-            self._refresh_block_view()
-
-        # 상태 복원
-        self.is_processing = False
-        self.chat_panel.set_generating(False)
-        self.statusBar().showMessage("준비 완료")
+        """AI 응답 수신 처리 (메인 스레드, 위임 → AICallHandler)"""
+        self.ai_handler.on_ai_response(data)
 
     def _on_step_executed(self, data: dict):
-        """스텝 실행 완료 처리"""
-        success = data.get("success")
-        step_id = data.get('step_id')
-        self.console_panel.log(
-            f"스텝 #{step_id} 실행 완료: {'성공' if success else '실패'}",
-            "INFO" if success else "ERROR"
-        )
-        if success and data.get("output"):
-            self.console_panel.log(f"  출력: {data['output'][:500]}", "DEBUG")
-        elif not success and data.get("error"):
-            # 에러 전체 내용을 줄별로 분리해서 빨간색으로 표시
-            self.console_panel.log("─" * 50, "ERROR")
-            for line in data["error"].splitlines():
-                if line.strip():
-                    self.console_panel.log(f"  {line}", "ERROR")
-            self.console_panel.log("─" * 50, "ERROR")
-        self.statusBar().showMessage("실행 완료" if success else "실행 실패")
+        """스텝 실행 완료 처리 (위임 → AICallHandler)"""
+        self.ai_handler.on_step_executed(data)
 
     def _on_log_message(self, message: str):
         """로그 메시지 처리"""
@@ -1186,96 +944,20 @@ class MainWindow(QMainWindow):
             )
 
     def _apply_manual_edit_patches(self, code: str) -> str:
-        """
-        AI가 생성한 코드에서 값이 변조되지 않도록 두 단계로 복원합니다.
-
-        Phase 1 - 수동 편집 복원:
-            사용자가 '수정' 버튼으로 직접 편집한 줄을 강제 복원합니다.
-
-        Phase 2 - AI 공백 변조 자동 복원:
-            수동 편집 없이도, AI가 이전 스텝의 send_keys() 등 인자를
-            공백만 다르게 변경했으면 이전 값으로 자동 복원합니다.
-        """
-        import re as _re
-
-        if not self.current_session:
-            return code
-
-        # ── Phase 1: 수동 편집(manually_edited) 복원 ──
-        for step_data in self.current_session.steps:
-            step = step_data if isinstance(step_data, dict) else {}
-            if not step.get("manually_edited"):
-                continue
-            old_code = step.get("edit_original_code", "")
-            edited_code = step.get("generated_code", "")
-            if not old_code or not edited_code:
-                continue
-
-            changed_map: dict[str, str] = {}
-            for ol, el in zip(old_code.splitlines(), edited_code.splitlines()):
-                ol_s, el_s = ol.strip(), el.strip()
-                if ol_s != el_s and ol_s:
-                    changed_map[ol_s] = el_s
-
-            if not changed_map:
-                continue
-
-            patched = []
-            for line in code.splitlines():
-                stripped = line.strip()
-                if stripped in changed_map:
-                    indent = len(line) - len(line.lstrip())
-                    patched.append(" " * indent + changed_map[stripped])
-                    self.console_panel.log(
-                        f"  [수동복원] '{stripped}' → '{changed_map[stripped]}'", "DEBUG"
-                    )
-                else:
-                    patched.append(line)
-            code = "\n".join(patched)
-
-        # ── Phase 2: AI 공백 변조 자동 복원 ──
-        # 이전 스텝 코드에서 send_keys 인자 목록 추출
-        prev_code = ""
-        for step_data in reversed(self.current_session.steps):
-            s = step_data if isinstance(step_data, dict) else {}
-            c = s.get("generated_code", "")
-            if c.strip():
-                prev_code = c
-                break
-
-        if prev_code:
-            # 패턴: variable.send_keys("value") 또는 variable.send_keys('value')
-            send_keys_pat = _re.compile(
-                r'([ \t]*)(\w+)\.send_keys\((["\'])(.*?)\3\)'
-            )
-
-            # 이전 코드의 send_keys 값 수집: {변수명: (따옴표, 값)}
-            prev_sends: dict[str, tuple[str, str]] = {}
-            for m in send_keys_pat.finditer(prev_code):
-                _, varname, quote, value = m.groups()
-                prev_sends[varname] = (quote, value)
-
-            # 새 코드에서 변수명이 같은 send_keys 호출의 값이 공백만 다르면 복원
-            def _restore(m: _re.Match) -> str:
-                indent, varname, quote, value = m.groups()
-                if varname in prev_sends:
-                    old_quote, old_value = prev_sends[varname]
-                    # 공백 제거 후 동일한 경우 → AI가 공백을 추가/삭제한 것으로 판단
-                    if value.strip() == old_value.strip() and value != old_value:
-                        self.console_panel.log(
-                            f"  [AI변조복원] {varname}.send_keys({repr(value)}) "
-                            f"→ send_keys({repr(old_value)})",
-                            "DEBUG"
-                        )
-                        return f'{indent}{varname}.send_keys({old_quote}{old_value}{old_quote})'
-                return m.group(0)
-
-            code = send_keys_pat.sub(_restore, code)
-
-        return code
+        """수동 편집 / AI 공백 변조 복원 (위임 → AICallHandler)"""
+        return self.ai_handler.apply_manual_edit_patches(code)
 
     def _on_block_step_code_edited(self, step_id: int, new_code: str):
-        """블럭 뷰에서 step_code 수정 시 세션에 반영"""
+        """블럭 뷰에서 step_code 수정 시 세션에 반영.
+
+        두 필드 동시 업데이트 + import 보존 — extract_step_delta_code 우선순위 (1) 마커 /
+        (2) diff 가 모두 generated_code 기반이라, step_code 만 업데이트하면 stale
+        generated_code 가 화면/실행에서 우선되어 수정이 무시되는 회귀 (5/4 사용자 보고).
+
+        block 카드 코드 영역에는 import 가 표시되지 않으므로, 새 generated_code 를
+        재구성할 때 원본 step.generated_code 의 import 들을 보존해야 함. 안 그러면
+        실행 시 NameError 발생 (5/4 사용자 2차 보고: 'Application'/'Keys' is not defined).
+        """
         if not self.current_session:
             return
         if step_id == 0:
@@ -1284,30 +966,104 @@ class MainWindow(QMainWindow):
                 "[편집] 라이브러리 블럭은 실행 시에만 적용됩니다 (세션 저장 대상 아님).", "INFO"
             )
             return
+
+        # prev step (step_id - 1) 의 generated_code 가져오기
+        prev_generated = ""
+        old_generated = ""
+        for step in self.current_session.steps:
+            s = step if isinstance(step, dict) else {}
+            sid = s.get("step_id")
+            if sid == step_id - 1:
+                prev_generated = s.get("generated_code", "")
+            elif sid == step_id:
+                old_generated = s.get("generated_code", "")
+
+        # 원본 step.generated_code 의 import 보존 — block 카드는 import 표시 안 함
+        # → 사용자가 수정할 때 import 안 건드림. 재구성 시 옛 import 그대로 살림.
+        from core.import_manager import extract_imports, merge_imports
+        old_imports, _ = extract_imports(old_generated) if old_generated else ([], "")
+        prev_imports, prev_body = extract_imports(prev_generated) if prev_generated else ([], "")
+        # 새 step_code 도 import 가 들어있을 수 있음 (사용자가 import 라인 추가 가능)
+        new_step_imports, new_step_body = extract_imports(new_code)
+
+        merged_imports = merge_imports([prev_imports, old_imports, new_step_imports])
+        import_block = "\n".join(merged_imports)
+
+        # 새 generated_code = imports + prev body + 새 step_code body
+        parts: list[str] = []
+        if import_block.strip():
+            parts.append(import_block)
+        if prev_body.strip():
+            parts.append(prev_body.rstrip())
+        if new_step_body.strip():
+            parts.append(new_step_body)
+        new_generated = "\n\n".join(parts) if parts else new_code
+
         self.session_manager.update_step(
             self.current_session, step_id,
-            {"step_code": new_code, "manually_edited": True}
+            {
+                "step_code": new_step_body,
+                "step_imports": new_step_imports if new_step_imports else old_imports,
+                "generated_code": new_generated,
+                "manually_edited": True,
+                "edit_original_code": old_generated,
+            }
         )
+        # 코드 뷰어 탭 (StepCard) 갱신 — 위젯이 stale 한 채로 남아 사용자가 변경을 못 보는
+        # 회귀 방지 (5/4 사용자 보고: 블럭 뷰 수정 후 코드 뷰어 탭은 옛 값 표시).
+        self._refresh_code_viewer()
         self.console_panel.log(
             f"[블럭 편집] Step #{step_id} delta 코드가 수정되었습니다.", "INFO"
         )
 
     def _on_step_code_edited(self, step_id: int, new_code: str):
-        """사용자가 코드 직접 수정 시 세션에 반영"""
+        """사용자가 코드 직접 수정 시 세션에 반영.
+
+        두 필드 + step_imports 동시 업데이트 — generated_code 만 업데이트하면 stale
+        step_code 가 남아 jupyter mode 단독 실행 시 이전 값이 사용되는 회귀.
+
+        코드 뷰는 generated_code 통째로 표시하므로 사용자가 import 도 수정 가능 →
+        새 generated_code 에서 import / body 분리해 step_imports / step_code 둘 다 갱신.
+        """
         if not self.current_session:
             return
-        # 수정 전 코드를 먼저 가져온 뒤 업데이트
+        # prev step 의 generated_code + 수정 전 코드 한 번에 수집
+        prev_generated = ""
         old_code = ""
         for step in self.current_session.steps:
             s = step if isinstance(step, dict) else {}
-            if s.get("step_id") == step_id:
+            sid = s.get("step_id")
+            if sid == step_id - 1:
+                prev_generated = s.get("generated_code", "")
+            elif sid == step_id:
                 old_code = s.get("generated_code", "")
-                break
+
+        # 새 step_code (delta) + step_imports 재계산
+        from core.import_manager import (
+            extract_imports, extract_code_delta, extract_import_delta,
+        )
+        new_imports_all, new_body_all = extract_imports(new_code)
+        if prev_generated.strip():
+            prev_imports, prev_body = extract_imports(prev_generated)
+            new_step_code = extract_code_delta(new_body_all, prev_body)
+            new_step_imports = extract_import_delta(new_imports_all, prev_imports)
+        else:
+            # 첫 스텝 — step_code = body (import 제외), step_imports = 전체 imports
+            new_step_code = new_body_all
+            new_step_imports = new_imports_all
+
         self.session_manager.update_step(
             self.current_session, step_id,
-            {"generated_code": new_code, "manually_edited": True,
-             "edit_original_code": old_code}
+            {
+                "generated_code": new_code,
+                "step_code": new_step_code,
+                "step_imports": new_step_imports,
+                "manually_edited": True,
+                "edit_original_code": old_code,
+            }
         )
+        # 블럭 뷰 (BlockCard) 도 갱신 — step_code 가 바뀌었으므로 화면 동기화 필수.
+        self._refresh_block_view()
         self.console_panel.log(
             f"[편집] Step #{step_id} 코드가 수정되었습니다. 다음 AI 요청에 반영됩니다.", "INFO"
         )
@@ -1500,7 +1256,7 @@ class MainWindow(QMainWindow):
             "<h2>AI RPA Solution v2.0</h2>"
             "<p>AI와 대화하면서 Python RPA 자동화 코드를"
             " 단계별로 생성·실행하는 솔루션입니다.</p>"
-            "<p><b>기술 스택:</b> PySide6, Gemini CLI, PyAutoGUI, Selenium</p>"
+            "<p><b>기술 스택:</b> PyQt6, Gemini CLI, PyAutoGUI, Selenium</p>"
             "<hr>"
             "<p>© 2025 AI RPA Solution</p>"
         )

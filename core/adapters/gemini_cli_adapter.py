@@ -33,8 +33,19 @@ class GeminiCLIAdapter(BaseAIAdapter):
         self.command = config.get("command", "gemini")
         self.timeout = config.get("timeout_seconds", 180)
         self.max_retries = config.get("max_retries", 3)
+        # config 의 model 필드를 -m 인자로 명시 전달 (5/4 사용자 보고: headless 모드
+        # default 가 preview 모델로 잡혀 capacity 부족 회귀).
+        self.model = config.get("model", "")
         self._proc: Optional[subprocess.Popen] = None  # 실행 중인 서브프로세스
         self._cancelled: bool = False                   # 사용자 취소 플래그
+
+    def _build_args(self, gemini_exec: str, *extra: str) -> list:
+        """gemini 실행 인자 빌드 — model 설정 시 -m 추가."""
+        args = [gemini_exec]
+        if self.model:
+            args.extend(["-m", self.model])
+        args.extend(extra)
+        return args
 
     def cancel(self) -> None:
         """진행 중인 Gemini CLI 프로세스를 강제 종료합니다."""

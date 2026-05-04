@@ -374,6 +374,12 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
 
     # SequenceMatcher 위치 기반 매칭의 한계 — prev 에 동일 라인이 있으면 제거.
     # except 블록 안의 print 같은 stale 단편 방지.
+    # 단, 컨트롤 헤더 (try:, except, else:, if:, for:, etc.) 는 prev 에 같은 패턴이
+    # 있어도 새 try/if/for 블록의 일부일 수 있음 — 헤더만 제거되면 본문이 module-level
+    # 로 평면화되어 try/except 의 의미가 깨지는 버그가 발생 (5/4 발견).
+    _control_header_re = re.compile(
+        r'^(try|except|else|elif|finally|if|for|while|with|def|class)\b'
+    )
     prev_set = {ln.strip() for ln in prev_stripped if ln.strip()}
     filtered: list[str] = []
     for line in delta_lines:
@@ -381,7 +387,7 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
         if not s or s.startswith('#'):
             filtered.append(line)
             continue
-        if s in prev_set:
+        if s in prev_set and not _control_header_re.match(s):
             continue
         filtered.append(line)
     delta_lines = filtered

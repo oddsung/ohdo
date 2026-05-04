@@ -165,9 +165,15 @@ class PromptBuilder:
         parts.append("- import문, try/except, print()를 포함하세요")
         parts.append("- 설명은 2~3줄로 짧게, 한국어로 작성하세요")
         parts.append("- 질문하지 말고 바로 코드를 생성하세요")
+        # ── Jupyter 모드 호환 (블럭 단독 실행) ──
+        # 각 스텝은 같은 Python 프로세스에서 차례로 exec() 됩니다. 변수가 module-level
+        # 에 노출되어야 다음 스텝에서 재사용 가능. 아래 규칙은 단독 실행 회귀 방지용.
+        parts.append("- [Jupyter 호환] 절대 `def main(): ...; main()` 패턴으로 코드를 감싸지 마세요. 모든 코드를 모듈 레벨(들여쓰기 0)에 직접 작성하세요. 함수 안에 정의된 변수(driver, app 등)는 다음 스텝에서 NameError 가 됩니다.")
+        parts.append("- [Jupyter 호환] try/except 의 캡처 변수(`except Exception as e:` 의 `e` 등)는 반드시 그 except 블록 안에서만 사용하세요. except 블록 밖에서 `print(f\"...{e}\")` 처럼 참조하면 다음 스텝 단독 실행 시 NameError 가 발생합니다.")
         if current_code:
             parts.append("- [중요] 이전 스텝의 모든 코드(함수 호출, 변수, 로직)를 빠짐없이 유지하세요")
             parts.append("- [중요] 새 동작은 기존 함수 내 마지막 실행 순서에 추가하세요. 별도 함수로 분리하지 마세요")
+            parts.append("- [Jupyter 호환] 이전 스텝에서 정의된 변수(driver, app, dlg, options 등)는 재정의하지 말고 그대로 사용하세요. `driver = webdriver.Chrome(...)` 같은 초기화는 첫 스텝에서만 — 이후 스텝은 기존 driver 변수를 그대로 참조합니다.")
 
         full_prompt = "\n".join(parts)
         logger.debug(f"프롬프트 생성 완료 ({len(full_prompt)}자)")
@@ -223,6 +229,15 @@ class PromptBuilder:
         parts.append("   - 🌟중요(URL 접속): driver.get()에 반드시 프로토콜(https://)을 포함하세요:")
         parts.append("     잘못된 예: driver.get('work.example.com')       ← 프로토콜 없으면 'data:' 페이지 열림!")
         parts.append("     올바른 예: driver.get('https://work.example.com')  ← 반드시 https:// 또는 http:// 포함")
+        parts.append("   - 🌟중요(페이지 로드 대기 — 추측성 ID 금지): driver.get() 직후 페이지 로드 대기를 위해")
+        parts.append("     실존 여부가 확실하지 않은 element ID 로 WebDriverWait 사용하지 마세요.")
+        parts.append("     잘못된 예: WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'nm_main_tab')))")
+        parts.append("                ← 'nm_main_tab' 같은 추측성 ID 가 페이지에 없으면 10초 timeout + Exception 발생")
+        parts.append("     올바른 예 (단순 대기): time.sleep(2)  ← 짧은 명시적 sleep")
+        parts.append("     올바른 예 (확실한 selector): WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))")
+        parts.append("     올바른 예 (사용자가 명시한 다음 동작 element): 다음 단계에서 클릭할 element 가 명확히 알려진 경우만")
+        parts.append("     원칙: 페이지 로드 직후의 generic 대기는 sleep 또는 'body'/'html' 같은 항상 존재하는 selector 사용.")
+        parts.append("           특정 element 대기는 그 element 의 ID/CSS 가 사용자/요소피커에서 확인된 경우에만.")
         parts.append("   - 🌟중요(브라우저 유지): 반드시 detach 옵션을 사용하세요:")
         parts.append("     ```python")
         parts.append("     from selenium.webdriver.chrome.options import Options")

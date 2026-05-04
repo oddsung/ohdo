@@ -1,11 +1,79 @@
 {
+  "ai": {
+    "selected": "gemini_cli",
+    "available_engines": {
+      "gemini_cli": {
+        "command": "gemini",
+        "model": "gemini-2.5-flash",
+        "flags": "-p",
+        "timeout_seconds": 180,
+        "max_retries": 3
+      },
+      "openai": {
+        "api_key_env": "OPENAI_API_KEY",
+        "model": "gpt-4o",
+        "max_tokens": 4096,
+        "temperature": 0.3
+      },
+      "claude": {
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 4096
+      }
+    }
+  },
+  "image": {
+    "capture_quality": 60,
+    "max_width": 1280,
+    "format": "jpeg",
+    "grayscale_for_ai": false
+  },
+  "recognition": {
+    "preferred_methods": [
+      "dom",
+      "automation_id",
+      "ocr",
+      "image_match"
+    ],
+    "ocr_language": "kor+eng",
+    "image_match_confidence": 0.8
+  },
+  "execution": {
+    "step_delay_ms": 1000,
+    "max_retry_count": 3,
+    "retry_delay_ms": 1000,
+    "screenshot_on_error": true,
+    "sandbox_mode": true
+  },
+  "visual_feedback": {
+    "enabled": true
+  },
+  "ui": {
+    "theme": "light",
+    "console_visible": false,
+    "font_size": 13,
+    "language": "ko"
+  },
+  "output_project": {
+    "default_output_dir": "",
+    "auto_readme": true,
+    "auto_requirements": true,
+    "auto_venv_guide": true,
+    "include_run_script": true,
+    "readme_language": "ko"
+  },
+  "logging": {
+    "level": "INFO",
+    "file_enabled": true,
+    "max_log_size_mb": 50,
+    "rotation_days": 30
+  },
   "hints": {
     "cdp_browser_hint_dismissed": true
   },
   "element_picker": {
-    "uia_max_depth": 15,
-    "uia_time_budget_ms": 500,
-    "post_pause_transition_ms": 0,
+    "uia_max_depth": 10,
+    "uia_time_budget_ms": 150,
     "cdp_enabled": false
   }
 }

@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-04 (저녁)
+> 마지막 업데이트: 2026-05-05 (5/4~5/5 작업 — 자세한 변경은 §5 변경 이력 참조). baseline: **core 73/73 그린**.
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -22,9 +22,10 @@
 ohdo/
 ├── main.py
 ├── ui/                              — PyQt6 GUI
-│   ├── main_window.py               — 1538줄 (2058 → 1823 → 1538, 분해 Step 3 완료)
+│   ├── main_window.py               — 1211줄 (2058 → 1823 → 1538 → 1211, 분해 Step 4 완료)
 │   ├── ui_inspection_handler.py     — element picker + window inspector 핸들러 (Step 2)
 │   ├── block_execution_handler.py   — 코드/블럭 실행 controller 16개 메서드 (Step 3, 478줄)
+│   ├── ai_call_handler.py           — AI 호출 controller 6개 메서드 (Step 4, 412줄)
 │   ├── element_picker.py            — element 검출 (EFP 토글 + walker)
 │   ├── code_viewer.py               — 코드 뷰 / 블럭 뷰 + BlockCard / _WaitSpinBox
 │   └── ...
@@ -53,13 +54,20 @@ ohdo/
 - **F3 wait + post_pause_mode**: 항상 TRANSPARENT 켬 (방향 B 통합) + WH_MOUSE_LL hook 으로 click 차단 + 키보드 hook 은 picker 전체 lifecycle 유지.
 - settings: `uia_max_depth=15`, `uia_time_budget_ms=500`, `descendants area threshold=5000 px²`, `cdp_enabled=false (default)`.
 
-### 4.2 Jupyter mode (블럭 단독 실행) — test_51~54, 64
-AI 생성 코드가 step 별 단독 실행되려면 **5가지 함수 모두** 필요:
+### 4.2 Jupyter mode (블럭 단독 실행) — test_51~54, 64, 66, 67
+AI 생성 코드가 step 별 단독 실행되려면 **6가지 함수/필터 모두** 필요:
 1. `extract_code_delta` — prefix + SequenceMatcher fallback
 2. `extract_step_delta_code(step, prev_step)` — generated_code diff 재계산
 3. `_smart_dedent` — try 블록 안 라인 indent 정리
 4. `_unwrap_main_function` — `def main(): ...; main()` 패턴 unwrap (AST)
 5. **except 캡처 변수 stale 라인 필터링** — 5/4 추가, NameError 'e' 회귀 방지
+6. **prev_set 필터의 컨트롤 헤더 화이트리스트** — 5/4 밤 추가 (test_67). `try:`, `except`, `else:`, `if`, `for`, `while`, `with`, `def`, `class` 등 컨트롤 헤더는 prev 에 동일 패턴 있어도 보존 (제거하면 새 try/if/for 블록의 본문이 module-level 로 평면화되어 try/except 의미 깨짐).
+
+추가로 **prompt 측 예방** (5/4 밤, test_66):
+- `prompt_builder.build_step_prompt` [3] 규칙 섹션 + `prompts.json/system_context` 절대 규칙 9~10 에 jupyter 호환 가이드 박힘:
+  - `def main(): ...; main()` 금지 (모듈 레벨 작성) — `_unwrap_main_function` 의존도 낮춤
+  - except 변수(e, ex 등) 는 except 블록 안에서만 사용 — stale 라인 필터 의존도 낮춤
+  - 후속 스텝은 이전 변수(driver, app, dlg) 재정의 X — globals 잃음 방지 (사후 필터 없음, 더 위험)
 
 ### 4.3 closeEvent 단일 정의 (test_62)
 이전 두 번 정의되어 buggy. 통합 closeEvent: 세션 저장 + 커널 정리.
@@ -76,6 +84,23 @@ subprocess (`kernel_worker`) 가 step 코드 안에서 `pyautogui.click/write/pr
 ### 4.6 Block 실행 controller 분리 (Step 3, test_50/55/56/57/63)
 [ui/main_window.py](../ui/main_window.py) 의 코드/블럭 실행 path 16개 메서드를 [ui/block_execution_handler.py](../ui/block_execution_handler.py) (`BlockExecutionHandler`) 로 분리. main_window 는 위임 stub 만 (`def _on_xxx: self.block_executor.on_xxx()`). 회귀 테스트는 `inspect.getsource(BlockExecutionHandler.method)` 로 검사 (self → mw 변환된 패턴, 예: `mw.lower()`).
 
+### 4.7 AI 호출 controller 분리 (Step 4, test_68)
+[ui/main_window.py](../ui/main_window.py) 의 AI 호출 path 6개 메서드를 [ui/ai_call_handler.py](../ui/ai_call_handler.py) (`AICallHandler`) 로 분리. 메서드: `on_cancel_ai`, `on_user_message`, `call_ai_thread` (백그라운드), `on_ai_response`, `on_step_executed`, `apply_manual_edit_patches`. main_window 는 위임 stub 만 (`def _on_xxx: self.ai_handler.on_xxx()`). 회귀 테스트는 `inspect.getsource(AICallHandler.method)` 로 검사 + `mw.xxx` 패턴. main_window unused imports (`asyncio`, `threading`, `Step`) 정리됨.
+
+### 4.8 코드 편집 시 두 필드 동시 업데이트 + manually_edited 우선 + import 보존 (test_69)
+사용자 수정 보호를 위한 4중 안전장치:
+
+1. **두 필드 동시 업데이트** ([ui/main_window.py](../ui/main_window.py)):
+   - `_on_block_step_code_edited`: `step_code` + 재구성한 `generated_code` (imports 보존 + prev_body + new_step_code).
+   - `_on_step_code_edited`: `generated_code = new` + 재계산한 `step_code` + `step_imports` (extract_code_delta + extract_import_delta).
+2. **`extract_step_delta_code` 우선순위 (0) manually_edited** ([core/workflow_engine.py](../core/workflow_engine.py)):
+   - `manually_edited=True` + `step_code` 있으면 step_code 무조건 우선 반환 (compile 검증 통과 시 즉시).
+   - generated_code 의 stale marker (1순위) / diff (2순위) 보다 앞 — 사용자 의도가 AI 원본보다 우선.
+3. **화면 갱신 호출**: `_on_block_step_code_edited` 끝에 `self._refresh_code_viewer()`, `_on_step_code_edited` 끝에 `self._refresh_block_view()` — 위젯이 stale 한 채 남아 사용자가 변경을 못 보는 회귀 방지.
+4. **import 보존**: 블럭 카드는 import 표시 안 함 → 사용자가 수정 시 import 안 건드림. 재구성 시 원본 step.generated_code 의 import 들을 prev_imports + old_imports + new_step_imports merge 로 모두 살림. 안 그러면 `extract_library_block` 이 imports 잃어 실행 시 NameError (5/4 사용자 2차 보고 'Application/Keys is not defined' 의 원인).
+
+이 4개 모두 사용자가 어느 뷰에서 수정해도 다른 뷰 + 실행 결과가 일관되게 동기화되도록 보장. 한 가지만 빠지면 회귀 (5/4 사용자 보고 1차/2차/3차 모두 이 4중 fix 로 해소).
+
 ## 5. 최근 작업 내역 (5/2 ~ 5/4)
 
 | 일자 | 작업 |
@@ -84,6 +109,16 @@ subprocess (`kernel_worker`) 가 step 코드 안에서 `pyautogui.click/write/pr
 | 5/3 | Step wait 시스템 (3단계 우선순위 + UI), 코드 뷰↔블럭 뷰 상호작용 fix (signal-slot blocks_finished) |
 | 5/4 | NameError 'e' fix (extract_code_delta 의 except 변수 필터), wait UI 개선 (_WaitSpinBox + editingFinished + 좌측 정렬) |
 | 5/4 (저녁) | main_window 분해 Step 3 (BlockExecutionHandler, 1880→1538줄, 16개 위임 stub), Win11 ForegroundLock 우회 (foreground 복원 보류 해제), test 64 → 65 |
+| 5/4 (밤) | AI prompt 강화 — jupyter mode 호환 가이드라인 3종 (`prompt_builder` + `prompts.json/system_context`), test_66 추가 (66/66 그린) |
+| 5/4 (밤) | extract_code_delta 컨트롤 헤더 보존 fix — prev_set 필터가 try:/except 헤더 제거해 본문이 module-level 평면화되는 버그 수정. test_67 추가 (67/67 그린) |
+| 5/4 (밤) | main_window 분해 Step 4 — AICallHandler (412줄) 신규, 6개 메서드 위임 stub. main_window 1538 → 1211 (-327줄). unused imports 정리. test_68 추가 (68/68 그린). |
+| 5/4 (밤) | 코드 편집 desync fix — `_on_block_step_code_edited` / `_on_step_code_edited` 가 step_code + generated_code 두 필드 동시 업데이트. 사용자 보고 (네이버 검색 시나리오: 삼성전자 → 하이닉스 수정이 무시되는 회귀) 해결. test_69 추가 (69/69 그린). |
+| 5/4 (밤) | 코드 편집 desync 2차 fix — 1차 fix 후에도 ① 코드 뷰어 탭 갱신 안 됨 ② 실행 시 잘못된 코드 추출 (사용자 보고). `extract_step_delta_code` 에 우선순위 (0) manually_edited + step_code 무조건 우선 추가. 두 핸들러에 _refresh_code_viewer/_refresh_block_view 호출 추가. 3중 안전장치 (§4.8). |
+| 5/4 (밤) | 코드 편집 desync 3차 fix — 2차 fix 후에도 사용자 보고 'NameError: name Application/Keys is not defined'. 원인: 새 generated_code 가 prev_step + step_code 만 합쳐 step 의 import 들을 잃음. block 카드는 import 표시 안 하므로 사용자가 수정 안 함. Fix: 원본 step.generated_code 의 import 보존 (prev_imports + old_imports + new_step_imports merge). 4중 안전장치 (§4.8). test_69 갱신. |
+| 5/4 (밤) | Selenium prompt 가이드 보강 — AI 가 driver.get() 직후 추측성 element ID (예: 'nm_main_tab') 로 WebDriverWait 사용 → 10초 timeout 회귀 (사용자 보고). prompt_builder 에 "추측성 ID 금지, time.sleep 또는 body/html 사용" 가이드 추가. test_70 (70/70 그린). |
+| 5/4 (밤) | Gemini CLI 모델 명시 — headless 모드 default 가 preview 모델 (gemini-3-flash-preview) 로 잡혀 Google 인프라 capacity 부족으로 429/180s timeout 회귀 (사용자 보고). adapter `__init__` 에 `self.model` + `_build_args` 헬퍼 추가. settings.json default = `gemini-2.5-flash` 안정 모델. test_71. **note**: `_build_args` 정의만 추가, 실제 두 subprocess.Popen path (stdin/-p) 에서 호출 안 됨 — 다음 작업으로 production path 적용 필요. |
+| 5/4 (밤) | 세션 추가/삭제 시 블럭 뷰 초기화 회귀 — 사용자 보고: `_new_session` / `_on_session_delete` 의 `self.code_viewer.clear()` 가 step 카드만 비웠음, 블럭 뷰는 이전 세션 카드 stale. Fix: `CodeViewer.clear()` 가 `block_view.refresh("", [], "", 500)` 도 호출 (try/except fallback 으로 `block_view.clear()`). test_72 (72/72 그린). |
+| 5/5 | 실행 종료 시 run/stop 버튼 자동 리셋 안전망 — 사용자 보고: 모든 step 완료 후에도 stop 버튼이 활성/run 버튼이 비활성 채로 남는 회귀. Fix: `AICallHandler.on_step_executed` (코드 뷰 path) 끝에 `mw.code_viewer.set_running(False)` catch-all 추가. `BlockExecutionHandler.on_blocks_finished` (블럭 뷰 path) 에 `mw.code_viewer.update()` 시각 갱신 강제. test_73 (73/73 그린). |
 
 상세는 [docs/triage.md](triage.md) 참조.
 
@@ -92,23 +127,29 @@ subprocess (`kernel_worker`) 가 step 코드 안에서 `pyautogui.click/write/pr
 1. **ROADMAP §1 라이선스 전략 결정**: AGPL 유지 / 폐쇄 소스 / 양쪽 유지 — 사용자 결정 대기.
 2. **PySide6 포트 GUI 검증**: 양쪽 동작 비교 — 사용자 직접 GUI 테스트 필요. 별도 venv 없어서 import sanity 도 사용자 환경에서.
 3. ~~**foreground 복원 보류**~~ → **5/4 저녁 해결됨** (§4.5 참조). 사용자 GUI 테스트 통과.
+4. **5/4-5/5 작업 사용자 GUI 검증 미확인**: 다음 항목들은 자동 회귀 테스트는 그린이지만 실제 GUI 동작은 사용자 테스트 미완료 — 새 세션에서 첫 sanity check 시 같이 확인하면 좋음:
+   - 코드 편집 desync 4중 안전장치 (§4.8) — 블럭 뷰/코드 뷰에서 코드 수정 → 양쪽 동기화 + 실행 정확
+   - 세션 추가/삭제 시 블럭 뷰 초기화
+   - 실행 종료 시 run/stop 버튼 자동 리셋 (코드 뷰 + 블럭 뷰 양쪽)
+   - Gemini CLI 모델 명시 — `gemini-2.5-flash` 로 명시 호출되는지 (단, `_build_args` 가 production path 에서 아직 사용 안 됨 — §7 #1 작업 필요)
 4. **PySide6 양쪽 동기화 정책**: 코드 수정 시 어디 먼저 적용할지. 현재 PyQt6 원본 먼저 → 수동 sed 로 sync (자동 스크립트 없음).
 
 ## 7. 다음 작업 후보 (우선순위 순)
 
 | 우선순위 | 작업 | 비고 |
 |---------|------|-----|
-| 1 | AI prompt 강화 — jupyter mode 호환 ("def main 안 쓰기", except 변수 stale 라인 회피 등) | 위험도 낮음. NameError 'e' 같은 회귀의 근본 예방 — §4.2 의 사후 필터 의존도 낮춤. [core/prompt_builder.py](../core/prompt_builder.py), [config/prompts.json](../config/prompts.json) 가 대상. |
-| 2 | main_window 분해 Step 4: AI 호출 controller (~280줄) | Step 3 와 동일 패턴 (BlockExecutionHandler) 재사용 가능. AI 어댑터 호출 + 응답 파싱 + 코드 누적. |
-| 3 | Phase 2.5: Initial 블럭 단독 실행 (변수 재정의용) | 옵션 |
-| 4 | SaaS M3.2+ 재개 | 데스크톱 안정화 + ROADMAP §1 라이선스 결정 후 |
+| 1 | **Gemini adapter `_build_args` production path 적용** — `_build_args` 헬퍼는 정의돼 있지만 두 subprocess.Popen path (stdin/-p) 가 아직 사용 X. `[gemini_exec]` / `[gemini_exec, "-p", full_prompt]` 직접 리터럴 → `self._build_args(...)` 로 교체. capacity 회귀 완전 차단. | 1시간 미만. test_71 은 `_build_args` 단위 검증만 — production path 검증 추가 필요. |
+| 2 | Phase 2.5: Initial 블럭 단독 실행 (변수 재정의용) | 옵션. 사용자가 driver 등을 재정의하고 싶을 때 첫 스텝부터 안 돌려도 되게. |
+| 3 | AI prompt 강화 + delta fix 효과 측정 — `ai_integration` suite 으로 실제 생성 코드 검증 | 5/4 밤 가이드/필터 추가 후 실 데이터로 회귀율 확인. |
+| 4 | main_window 추가 분해 (필요 시) — 남은 1211줄 중 분리 가능 영역 (캡처, 윈도우 검사, 스텝 CRUD 등) | main_window 분해 Step 5 후보. 우선순위 낮음. |
+| 5 | SaaS M3.2+ 재개 | 데스크톱 안정화 + ROADMAP §1 라이선스 결정 후 |
 
 ## 8. 첫 작업 권장
 
 새 세션에서 추천 흐름:
 
 1. **이 파일 + docs/triage.md 빠르게 읽기**
-2. `venv\Scripts\python.exe -m tests.test_runner --suite core` 실행 → **65/65 그린** 확인 (baseline 무손상 검증). venv 경로는 `venv/` (점 없음).
+2. `venv\Scripts\python.exe -m tests.test_runner --suite core` 실행 → **73/73 그린** 확인 (baseline 무손상 검증). venv 경로는 `venv/` (점 없음).
 3. 사용자에게 다음 작업 후보 (§7) 제시 + 결정 받기
 
 ## 9. 자주 하는 실수 / 주의사항
@@ -119,6 +160,7 @@ subprocess (`kernel_worker`) 가 step 코드 안에서 `pyautogui.click/write/pr
 - **wait UI signal**: `valueChanged` 사용하면 매 키 입력마다 emit → 카드 재생성 → 포커스 손실. `editingFinished` 만 사용.
 - **개별 step wait 변경 핸들러**: `_refresh_block_view` 호출하면 카드 재생성 → 포커스 손실. session 저장만.
 - **handler 분해 시 회귀 테스트**: `inspect.getsource(MainWindow._method)` 로 검사하던 테스트는 메서드가 handler 로 옮겨가면 fail. 검사 대상을 `Handler.method` 로 변경 + `self.xxx` → `mw.xxx` 변환된 패턴으로 assertion 갱신 필수.
+- **코드 편집 핸들러는 두 필드 동시 업데이트**: `step_code` 와 `generated_code` 가 desync 되면 `extract_step_delta_code` (실행/화면) 가 stale 한 쪽 우선해 사용자 수정 무시 회귀 발생 (§4.8).
 - **subprocess 의 SendInput 으로 ForegroundLock 이전**: pyautogui 같은 input 시뮬레이션 사용 시 권한이 subprocess 로 이동 — `OHDO_PARENT_PID` + `AllowSetForegroundWindow` 패턴 깨면 회귀 (§4.5).
 
 ## 10. 사용자에게 빠르게 물어볼 후보

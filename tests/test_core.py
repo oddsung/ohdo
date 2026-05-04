@@ -1888,6 +1888,595 @@ if __name__ == "__main__":
             "(ctypes.windll 사용 분기)",
         )
 
+    def test_66_prompt_contains_jupyter_mode_guidelines(self):
+        """[회귀] AI prompt 가 Jupyter 모드 호환 가이드라인 포함 — 단독 실행 회귀 예방.
+
+        세 가지 패턴이 import_manager 사후 필터에서 처리되지만, 근본적으로 AI 가
+        애초에 안 만들도록 prompt 에서 명시적으로 금지해야 함:
+          1. def main(): ...; main() 패턴 → _unwrap_main_function 의존도
+          2. except as e: 변수를 except 밖에서 참조 → except 변수 stale 필터 의존도
+          3. 이전 스텝 변수(driver, app) 재정의 → globals 잃음 (사후 필터 없음, 더 위험)
+
+        prompt_builder.build_step_prompt 와 prompts.json/system_context 양쪽에서 검증.
+        """
+        from core.prompt_builder import PromptBuilder
+        from core.session_manager import Session
+        import json
+        from pathlib import Path
+
+        # ── prompt_builder.build_step_prompt 검증 ──
+        builder = PromptBuilder(prompts_config={})
+
+        self.step("첫 스텝 (current_code 없음) - def main + except 변수 가이드")
+        session = Session(session_id="test", title="테스트")
+        prompt_first = builder.build_step_prompt(
+            session=session,
+            user_request="메모장 열어줘",
+            project_type="desktop"
+        )
+        self.assert_true(
+            "def main" in prompt_first and "모듈 레벨" in prompt_first,
+            "[회귀] 첫 스텝 prompt 도 def main() 금지 + 모듈 레벨 작성 가이드 필수 "
+            "(_unwrap_main_function 의존도 낮춤용)",
+        )
+        self.assert_true(
+            "except" in prompt_first and ("as e" in prompt_first or "캡처 변수" in prompt_first),
+            "[회귀] 첫 스텝 prompt 도 except 캡처 변수 격리 가이드 필수 "
+            "(NameError stale 라인 회귀 예방)",
+        )
+
+        self.step("후속 스텝 (current_code 있음) - 추가로 변수 재사용 가이드")
+        session_with_code = Session(session_id="test2", title="후속")
+        session_with_code.steps = [
+            {"step_id": 1, "status": "completed",
+             "generated_code": "from selenium import webdriver\ndriver = webdriver.Chrome()"}
+        ]
+        prompt_second = builder.build_step_prompt(
+            session=session_with_code,
+            user_request="https://example.com 으로 이동해줘",
+        )
+        self.assert_true(
+            "재정의" in prompt_second and "driver" in prompt_second,
+            "[회귀] 후속 스텝 prompt 는 이전 변수(driver 등) 재정의 금지 가이드 필수 "
+            "(globals 잃음 방지 - 사후 필터 없음)",
+        )
+
+        # ── prompts.json / system_context 검증 (어댑터가 직접 system_context 사용) ──
+        self.step("prompts.json system_context - 절대 규칙으로 jupyter 호환 박힘")
+        prompts_file = Path(__file__).parent.parent / "config" / "prompts.json"
+        prompts_cfg = json.loads(prompts_file.read_text(encoding="utf-8"))
+        sys_ctx = prompts_cfg.get("system_context", "")
+        self.assert_true(
+            "def main" in sys_ctx and "모듈 레벨" in sys_ctx,
+            "[회귀] system_context 절대 규칙에 def main() 금지 + 모듈 레벨 작성 필수",
+        )
+        self.assert_true(
+            "except" in sys_ctx and "NameError" in sys_ctx,
+            "[회귀] system_context 절대 규칙에 except 변수 격리 필수 (NameError 회피)",
+        )
+
+    def test_69_step_code_edit_keeps_fields_in_sync(self):
+        """[회귀] 코드 편집 시 step_code 와 generated_code 동기화 + manually_edited 우선.
+
+        Bug (2026-05-04 사용자 보고, 새 세션 네이버 검색 시나리오 — 두 차례):
+          1차: 블럭 뷰 '삼성전자' → '하이닉스' 수정 후 저장 → 실행 시 '삼성전자' 그대로,
+               다른 세션 갔다 오면 '하이닉스' 가 '삼성전자' 로 되돌아감.
+          2차 (1차 fix 후): 코드 뷰어 탭이 갱신 안 됨 + 실행 시 검색어 입력 안 되고 종료.
+
+        Root cause: extract_step_delta_code 의 우선순위 (1) 마커 추출 / (2) diff 재계산이
+        generated_code 기반. step_code 가 진실인 manually_edited 케이스에서 generated_code
+        의 stale marker 가 우선되어 사용자 수정 무시 + 잘못된 코드 추출.
+
+        Fix:
+        - workflow_engine.extract_step_delta_code: 우선순위 (0) manually_edited + step_code
+          → step_code 무조건 우선 사용 (사용자 의도 보호).
+        - main_window._on_block_step_code_edited / _on_step_code_edited: 두 필드 동시
+          업데이트 + _refresh_code_viewer / _refresh_block_view 호출 (화면 동기화).
+        """
+        from core.session_manager import SessionManager, Session, Step
+        from core.workflow_engine import extract_step_delta_code
+        import inspect
+        from ui.main_window import MainWindow
+
+        # ── (a) extract_step_delta_code 우선순위 0: manually_edited + step_code ──
+        # 사용자 시나리오 핵심 — step_code 와 generated_code 가 desync 한 상태에서
+        # manually_edited=True 면 step_code 가 진실로 사용되어야 함.
+        step_with_edit = {
+            "step_id": 2,
+            "manually_edited": True,
+            "step_code": "search.send_keys('하이닉스 주가')",
+            # generated_code 는 stale (옛 '삼성전자' 라인 + 옛 marker)
+            "generated_code": (
+                "from selenium import webdriver\n"
+                "driver = webdriver.Chrome()\n"
+                "driver.get('https://naver.com')\n\n"
+                "# === Step 2: 검색어 입력 (시작) ===\n"
+                "search.send_keys('삼성전자 주가')\n"
+                "# === Step 2: 검색어 입력 (끝) ==="
+            ),
+        }
+        prev_step_dict = {
+            "step_id": 1,
+            "generated_code": (
+                "from selenium import webdriver\n"
+                "driver = webdriver.Chrome()\n"
+                "driver.get('https://naver.com')"
+            ),
+        }
+        delta = extract_step_delta_code(step_with_edit, prev_step_dict)
+        self.assert_true(
+            "하이닉스" in delta and "삼성전자" not in delta,
+            f"[회귀] manually_edited=True + step_code 가 generated_code 의 stale marker 보다 "
+            f"우선 사용되어야 함 (사용자 수정 보호). 실제: {delta!r}",
+        )
+
+        # ── (b) handler source 검증 ──
+        block_edit_src = inspect.getsource(MainWindow._on_block_step_code_edited)
+        self.assert_true(
+            '"step_code"' in block_edit_src and '"generated_code"' in block_edit_src,
+            "[회귀] _on_block_step_code_edited 가 step_code + generated_code 둘 다 업데이트 필수",
+        )
+        self.assert_true(
+            "_refresh_code_viewer" in block_edit_src,
+            "[회귀] _on_block_step_code_edited 가 코드 뷰어 탭 (StepCard) 갱신 호출 필수 "
+            "(블럭 뷰 수정 후 코드 뷰어가 stale 한 채 남는 회귀 방지)",
+        )
+
+        code_edit_src = inspect.getsource(MainWindow._on_step_code_edited)
+        self.assert_true(
+            '"step_code"' in code_edit_src and '"generated_code"' in code_edit_src,
+            "[회귀] _on_step_code_edited 가 step_code + generated_code 둘 다 업데이트 필수",
+        )
+        self.assert_true(
+            "extract_code_delta" in code_edit_src,
+            "[회귀] _on_step_code_edited 가 extract_code_delta 로 새 step_code 재계산 필수",
+        )
+        self.assert_true(
+            "_refresh_block_view" in code_edit_src,
+            "[회귀] _on_step_code_edited 가 블럭 뷰 (BlockCard) 갱신 호출 필수",
+        )
+
+        # ── (c) import 보존 검증 (사용자 2차 보고: 'Application' is not defined) ──
+        # 시나리오: step 1 (selenium 만) + step 2 (pywinauto, Keys 추가). 사용자가 step 2
+        # 카드의 코드 (block delta) 만 수정. 새 generated_code 가 step 2 의 import 를
+        # 잃으면 extract_library_block 도 잃어 실행 시 NameError.
+        from core.import_manager import extract_imports
+
+        old_step2_generated = (
+            "from selenium import webdriver\n"
+            "from selenium.webdriver.common.keys import Keys\n"
+            "from pywinauto.application import Application\n"
+            "driver = webdriver.Chrome()\n"
+            "driver.get('https://naver.com')\n"
+            "app = Application(backend='uia').connect(title_re='.*NAVER.*')\n"
+            "search.send_keys('삼성전자 주가', Keys.ENTER)"
+        )
+        prev_generated = (
+            "from selenium import webdriver\n"
+            "driver = webdriver.Chrome()\n"
+            "driver.get('https://naver.com')"
+        )
+        new_block_step_code = "search.send_keys('하이닉스 주가', Keys.ENTER)"
+
+        # _on_block_step_code_edited 의 import 보존 로직 시뮬레이션
+        old_imports, _ = extract_imports(old_step2_generated)
+        prev_imports, prev_body = extract_imports(prev_generated)
+        new_step_imports, new_step_body = extract_imports(new_block_step_code)
+
+        from core.import_manager import merge_imports
+        merged = merge_imports([prev_imports, old_imports, new_step_imports])
+
+        # 핵심 검증: pywinauto.application.Application 과 Keys 가 import 에 보존
+        merged_str = "\n".join(merged)
+        self.assert_true(
+            "Application" in merged_str,
+            f"[회귀] block 뷰 수정 시 원본 step 의 'from pywinauto.application import "
+            f"Application' 보존 필수 (안 하면 실행 시 NameError). 실제: {merged!r}",
+        )
+        self.assert_true(
+            "Keys" in merged_str,
+            f"[회귀] block 뷰 수정 시 원본 step 의 'from ... import Keys' 보존 필수. "
+            f"실제: {merged!r}",
+        )
+
+        # 새 generated_code 재구성 검증 (extract_library_block 이 import 추출 가능)
+        parts = []
+        if merged_str:
+            parts.append(merged_str)
+        if prev_body.strip():
+            parts.append(prev_body.rstrip())
+        if new_step_body.strip():
+            parts.append(new_step_body)
+        new_generated = "\n\n".join(parts)
+        self.assert_true(
+            "Application" in new_generated and "Keys" in new_generated
+            and "하이닉스" in new_generated and "삼성전자" not in new_generated,
+            f"[회귀] 재구성된 generated_code 가 (import 보존 + 사용자 수정값) 둘 다 가져야 함. "
+            f"실제: {new_generated!r}",
+        )
+
+        # ── (d) 사용자 시나리오 통합: in-memory session 수정 + 디스크 reload ──
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mgr = SessionManager(data_dir=Path(tmpdir))
+            sess = mgr.create_session(title="검색 시나리오")
+
+            step1_code = (
+                "from selenium import webdriver\n"
+                "driver = webdriver.Chrome()\n"
+                "driver.get('https://naver.com')"
+            )
+            mgr.add_step(sess, Step(
+                step_id=1, generated_code=step1_code, step_code=step1_code,
+                conversation=[{"role": "user", "content": "네이버 접속"}],
+            ))
+
+            step2_full = step1_code + "\nsearch.send_keys('삼성전자 주가')"
+            step2_delta = "search.send_keys('삼성전자 주가')"
+            mgr.add_step(sess, Step(
+                step_id=2, generated_code=step2_full, step_code=step2_delta,
+                conversation=[{"role": "user", "content": "검색어 입력"}],
+            ))
+
+            # 블럭 뷰 수정: 삼성전자 → 하이닉스 (handler 핵심 로직 시뮬레이션)
+            new_step_code = "search.send_keys('하이닉스 주가')"
+            prev_gen = sess.steps[0]["generated_code"]
+            new_gen = prev_gen.rstrip() + "\n\n" + new_step_code
+            mgr.update_step(sess, 2, {
+                "step_code": new_step_code,
+                "generated_code": new_gen,
+                "manually_edited": True,
+                "edit_original_code": step2_full,
+            })
+
+            # 디스크 reload 후 extract_step_delta_code 결과
+            reloaded = mgr.load_session(sess.session_id)
+            r_curr = reloaded.steps[1]
+            r_prev = reloaded.steps[0]
+            r_delta = extract_step_delta_code(
+                r_curr if isinstance(r_curr, dict) else r_curr.__dict__,
+                r_prev if isinstance(r_prev, dict) else r_prev.__dict__,
+            )
+            self.assert_true(
+                "하이닉스" in r_delta and "삼성전자" not in r_delta,
+                f"[회귀] 세션 reload 후에도 수정값 유지 필수 (다른 세션 갔다 와도). "
+                f"실제: {r_delta!r}",
+            )
+
+    def test_68_ai_call_handler_separation(self):
+        """[회귀] main_window 분해 Step 4 — AI 호출 controller (AICallHandler) 로 분리.
+
+        6개 메서드: on_cancel_ai, on_user_message, call_ai_thread, on_ai_response,
+        on_step_executed, apply_manual_edit_patches.
+
+        main_window 의 위임 stub 은 유지 (signal connect 호환). 본문은 AICallHandler 에서
+        검사 (`mw.xxx` 패턴, self.xxx → mw.xxx 변환).
+        """
+        from ui.main_window import MainWindow
+        from ui.ai_call_handler import AICallHandler
+        import inspect
+
+        # __init__ 에 AICallHandler 인스턴스 생성
+        init_src = inspect.getsource(MainWindow.__init__)
+        self.assert_true(
+            "AICallHandler(self)" in init_src and "self.ai_handler" in init_src,
+            "[회귀] MainWindow.__init__ 가 self.ai_handler = AICallHandler(self) 생성 필수",
+        )
+
+        # 위임 stub 6개 — main_window 에 메서드는 유지하되 본문이 ai_handler 로 위임
+        for stub_name, handler_method in [
+            ("_on_cancel_ai", "on_cancel_ai"),
+            ("_on_user_message", "on_user_message"),
+            ("_call_ai_thread", "call_ai_thread"),
+            ("_on_ai_response", "on_ai_response"),
+            ("_on_step_executed", "on_step_executed"),
+            ("_apply_manual_edit_patches", "apply_manual_edit_patches"),
+        ]:
+            stub = getattr(MainWindow, stub_name, None)
+            self.assert_true(
+                stub is not None,
+                f"[회귀] MainWindow.{stub_name} stub 유지 필수 (signal connect 호환)",
+            )
+            stub_src = inspect.getsource(stub)
+            self.assert_true(
+                f"self.ai_handler.{handler_method}" in stub_src,
+                f"[회귀] {stub_name} stub 이 self.ai_handler.{handler_method} 위임 필수",
+            )
+
+        # AICallHandler 본문 — 핵심 동작 5건 (mw.xxx 패턴)
+        on_user_src = inspect.getsource(AICallHandler.on_user_message)
+        self.assert_true(
+            "mw.is_processing" in on_user_src and "mw.current_session" in on_user_src,
+            "[회귀] on_user_message 가 mw.is_processing / mw.current_session 가드 유지",
+        )
+
+        call_thread_src = inspect.getsource(AICallHandler.call_ai_thread)
+        self.assert_true(
+            "mw.prompt_builder.build_step_prompt" in call_thread_src
+            and "mw.ai_engine.generate" in call_thread_src,
+            "[회귀] call_ai_thread 가 prompt 구성 + ai_engine.generate 호출 유지",
+        )
+        self.assert_true(
+            "mw.signals.ai_response_ready.emit" in call_thread_src,
+            "[회귀] call_ai_thread 가 ai_response_ready signal emit 유지",
+        )
+
+        on_ai_resp_src = inspect.getsource(AICallHandler.on_ai_response)
+        self.assert_true(
+            "extract_code_delta" in on_ai_resp_src and "extract_imports" in on_ai_resp_src,
+            "[회귀] on_ai_response 가 extract_code_delta + extract_imports 호출 유지 "
+            "(step_code/step_imports 누적)",
+        )
+        self.assert_true(
+            "mw.session_manager.add_step" in on_ai_resp_src,
+            "[회귀] on_ai_response 가 session_manager.add_step 호출 유지",
+        )
+
+        patches_src = inspect.getsource(AICallHandler.apply_manual_edit_patches)
+        self.assert_true(
+            "manually_edited" in patches_src and "send_keys" in patches_src,
+            "[회귀] apply_manual_edit_patches 의 Phase 1 (manually_edited 복원) + "
+            "Phase 2 (send_keys 공백 변조 자동 복원) 유지",
+        )
+
+    def test_70_prompt_warns_against_speculative_element_id_wait(self):
+        """[회귀] AI prompt 가 driver.get() 직후 추측성 element ID 대기 금지 가이드 포함.
+
+        Bug (2026-05-04 사용자 보고, RPA_20260504_2206):
+          AI 가 step 1 (네이버 접속) 코드에 'nm_main_tab' 이라는 존재하지 않는 ID 로
+          WebDriverWait 10초 → TimeoutException → step 실행 12초 지연 + chromedriver
+          stacktrace 출력. 'nm_main_tab' 은 AI 가 추측한 가짜 ID.
+
+        Fix: prompt_builder selenium 가이드에 "추측성 element ID 로 WebDriverWait 금지,
+        대신 time.sleep 또는 body/html 같은 항상 존재하는 selector 사용" 가이드 추가.
+        """
+        from core.prompt_builder import PromptBuilder
+        from core.session_manager import Session
+
+        builder = PromptBuilder(prompts_config={})
+        session = Session(session_id="test", title="테스트")
+        prompt = builder.build_step_prompt(
+            session=session,
+            user_request="네이버 접속해줘",
+            project_type="auto",
+        )
+
+        # 핵심 키워드 검증 — 추측성 ID 금지 + 대안 (sleep, body 태그)
+        self.assert_true(
+            "추측성" in prompt or "추측" in prompt,
+            "[회귀] selenium 가이드에 '추측성' element ID 사용 금지 키워드 필수",
+        )
+        self.assert_true(
+            "time.sleep" in prompt and "body" in prompt,
+            "[회귀] 대안으로 time.sleep + 항상 존재하는 selector (body/html) 가이드 필수",
+        )
+        self.assert_true(
+            "WebDriverWait" in prompt and "timeout" in prompt.lower(),
+            "[회귀] WebDriverWait 의 timeout 부작용 명시 필수",
+        )
+
+    def test_71_gemini_adapter_passes_model_flag(self):
+        """[회귀] GeminiCLIAdapter 가 config.model 을 -m 인자로 명시 전달.
+
+        Bug (2026-05-04): gemini CLI headless (-p / stdin) default 가
+        gemini-3-flash-preview (preview) 로 잡혀 capacity 부족 → 180초 timeout 회귀.
+        Fix: config.model 을 -m 플래그로 명시 → preview 자동 매핑 회피.
+        """
+        from core.adapters.gemini_cli_adapter import GeminiCLIAdapter
+
+        adapter = GeminiCLIAdapter({"command": "gemini", "model": "gemini-2.5-flash"})
+        args_with_model = adapter._build_args("gemini.exe")
+        self.assert_true(
+            "-m" in args_with_model and "gemini-2.5-flash" in args_with_model,
+            f"[회귀] config.model 설정 시 -m <model> 추가 필수. args: {args_with_model!r}",
+        )
+        args_with_p = adapter._build_args("gemini.exe", "-p", "test")
+        self.assert_true(
+            "-m" in args_with_p and "-p" in args_with_p,
+            f"[회귀] -p 모드에서도 -m 보존. args: {args_with_p!r}",
+        )
+        adapter_no_model = GeminiCLIAdapter({"command": "gemini"})
+        self.assert_true(
+            "-m" not in adapter_no_model._build_args("gemini.exe"),
+            "[회귀] config.model 미설정 시 -m 추가 안 함",
+        )
+
+        import json
+        from pathlib import Path
+        cfg = json.loads(
+            (Path(__file__).parent.parent / "config" / "settings.json")
+            .read_text(encoding="utf-8")
+        )
+        gemini_cfg = cfg.get("ai", {}).get("available_engines", {}).get("gemini_cli", {})
+        self.assert_true(
+            gemini_cfg.get("model", "").startswith("gemini-2"),
+            f"[회귀] settings.json gemini_cli.model 안정 모델 default 필수. "
+            f"실제: {gemini_cfg.get('model')!r}",
+        )
+
+    def test_73_run_stop_buttons_reset_on_completion(self):
+        """[회귀] 모든 step 완료 시 run/stop 버튼 양쪽 탭 자동 리셋.
+
+        Bug (2026-05-05 사용자 보고): 코드 실행이 끝나도 stop 버튼이 활성화된 채로
+        남고 run 버튼이 비활성화된 채로 남는 회귀.
+
+        Fix: 모든 종료 path 에 set_running(False) 안전망:
+        1. AICallHandler.on_step_executed (코드 뷰 path 의 step_executed slot) catch-all
+        2. BlockExecutionHandler.on_blocks_finished (블럭 뷰 path) — 명시 update() 추가
+        3. (기존) execute_code_thread finally / blocks_finished signal — 유지
+        """
+        from ui.ai_call_handler import AICallHandler
+        from ui.block_execution_handler import BlockExecutionHandler
+        from ui.code_viewer import CodeViewer, BlockViewWidget
+        import inspect
+
+        # AICallHandler.on_step_executed 가 set_running(False) catch-all 호출
+        on_step_src = inspect.getsource(AICallHandler.on_step_executed)
+        self.assert_true(
+            "code_viewer.set_running(False)" in on_step_src,
+            "[회귀] AICallHandler.on_step_executed 끝에 mw.code_viewer.set_running(False) "
+            "catch-all 호출 필수 (실행 완료 시 stop 버튼 자동 비활성화 보장)",
+        )
+
+        # BlockExecutionHandler.on_blocks_finished 가 set_running(False) + update 호출
+        on_blocks_src = inspect.getsource(BlockExecutionHandler.on_blocks_finished)
+        self.assert_true(
+            "code_viewer.set_running(False)" in on_blocks_src,
+            "[회귀] BlockExecutionHandler.on_blocks_finished 가 "
+            "mw.code_viewer.set_running(False) 호출 필수",
+        )
+        self.assert_true(
+            "code_viewer.update()" in on_blocks_src,
+            "[회귀] on_blocks_finished 가 시각 갱신 위해 update() 명시 호출 필수 "
+            "(일부 케이스 즉시 repaint 안 됨 회귀)",
+        )
+
+        # CodeViewer.set_running 은 양쪽 탭 (run_btn/stop_btn + block_view) 동시 처리
+        cv_set_running_src = inspect.getsource(CodeViewer.set_running)
+        self.assert_true(
+            "run_btn.setEnabled(not running)" in cv_set_running_src,
+            "[회귀] CodeViewer.set_running 가 run_btn enable/disable 처리 필수",
+        )
+        self.assert_true(
+            "stop_btn.setEnabled(running)" in cv_set_running_src,
+            "[회귀] CodeViewer.set_running 가 stop_btn 처리 필수",
+        )
+        self.assert_true(
+            "block_view.set_running" in cv_set_running_src,
+            "[회귀] CodeViewer.set_running 가 block_view 동시 처리 필수 "
+            "(코드 뷰 + 블럭 뷰 양쪽 동기화)",
+        )
+
+        # BlockViewWidget.set_running 은 toolbar + 카드 별 run_btn 처리
+        bv_set_running_src = inspect.getsource(BlockViewWidget.set_running)
+        self.assert_true(
+            "run_all_btn.setEnabled(not running)" in bv_set_running_src
+            and "stop_btn.setEnabled(running)" in bv_set_running_src,
+            "[회귀] BlockViewWidget.set_running 가 toolbar run_all_btn/stop_btn 처리 필수",
+        )
+        self.assert_true(
+            "_update_run_buttons" in bv_set_running_src,
+            "[회귀] BlockViewWidget.set_running 가 _update_run_buttons 호출 필수 "
+            "(카드 별 run_btn / single_btn enable/disable)",
+        )
+
+    def test_72_codeviewer_clear_resets_block_view(self):
+        """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
+
+        Bug (2026-05-04 사용자 보고): _new_session / _on_session_delete 의
+        self.code_viewer.clear() 호출이 step 카드만 비워서 블럭 뷰는 이전 세션
+        카드가 잔존 → 화면 stale.
+        Fix: CodeViewer.clear() 가 block_view.refresh("", [], "", 500) 도 호출.
+        """
+        from ui.code_viewer import CodeViewer
+        from ui.main_window import MainWindow
+        import inspect
+
+        clear_src = inspect.getsource(CodeViewer.clear)
+        self.assert_true(
+            "block_view" in clear_src,
+            "[회귀] CodeViewer.clear() 가 block_view 도 비워야 함",
+        )
+        self.assert_true(
+            "refresh" in clear_src or ".clear()" in clear_src,
+            "[회귀] CodeViewer.clear 가 block_view.refresh 또는 .clear() 호출 필수",
+        )
+
+        new_session_src = inspect.getsource(MainWindow._new_session)
+        self.assert_true(
+            "self.code_viewer.clear()" in new_session_src,
+            "[회귀] _new_session 이 self.code_viewer.clear() 호출 필수",
+        )
+
+        delete_src = inspect.getsource(MainWindow._on_session_delete)
+        self.assert_true(
+            "self.code_viewer.clear()" in delete_src,
+            "[회귀] _on_session_delete 가 self.code_viewer.clear() 호출 필수",
+        )
+
+    def test_67_extract_code_delta_preserves_control_headers(self):
+        """[회귀] prev_set 필터가 try:/except/if:/for: 같은 컨트롤 헤더를 stale 단편으로
+        착각해 제거하면, 새 블록의 헤더가 사라지고 본문만 module-level 로 평면화 됨.
+
+        Bug (2026-05-04 발견, RPA_20260504_2035 세션 step 4):
+          prev: try: ...; except Exception: print('A 오류')
+          new:  prev + try: ...; except Exception: print('B 오류')
+          → SequenceMatcher 가 새 try/except 헤더와 본문을 'insert' 로 추출했는데
+            prev_set 필터가 'try:' 와 'except Exception:' 라인을 prev 에 동일 패턴이
+            있다는 이유로 제거 → except 본문만 살아남음 → 성공/에러 메시지 둘 다 출력.
+
+        Fix: prev_set 필터에 컨트롤 헤더 화이트리스트 추가 — 컨트롤 헤더는 prev 에
+        동일 패턴이 있어도 보존 (새 try/if/for 블록 일부일 수 있음).
+        """
+        from core.import_manager import extract_code_delta
+
+        # 실제 RPA_20260504_2035 step 4 시나리오 단순화
+        prev = (
+            "try:\n"
+            "    view_menu = app_window.child_window(title='보기')\n"
+            "    view_menu.click_input()\n"
+            "    print('보기 메뉴 클릭')\n"
+            "except Exception:\n"
+            "    print('보기 메뉴 오류')"
+        )
+        new = (
+            "try:\n"
+            "    view_menu = app_window.child_window(title='보기')\n"
+            "    view_menu.click_input()\n"
+            "    print('보기 메뉴 클릭')\n"
+            "except Exception:\n"
+            "    print('보기 메뉴 오류')\n"
+            "try:\n"
+            "    zoom_menu = app_window.child_window(title='확대/축소')\n"
+            "    zoom_menu.click_input()\n"
+            "    print('확대/축소 클릭')\n"
+            "except Exception:\n"
+            "    print('확대/축소 오류')"
+        )
+        delta = extract_code_delta(new, prev)
+
+        # 핵심: try/except 헤더 보존되어야 함 (본문만 module-level 평면화 되면 안 됨)
+        self.assert_true(
+            "try:" in delta,
+            f"[회귀] 새 try 블록의 try: 헤더 보존 필수 (prev_set 필터가 제거하면 안 됨) "
+            f"(실제 delta: {delta!r})",
+        )
+        self.assert_true(
+            "except" in delta,
+            f"[회귀] 새 except 블록의 except 헤더 보존 필수 "
+            f"(실제 delta: {delta!r})",
+        )
+
+        # 새 try/except 본문 모두 포함
+        self.assert_true(
+            "zoom_menu" in delta and "확대/축소 클릭" in delta,
+            f"[회귀] 새 try 본문 (zoom_menu 정의 + 성공 print) 추출 "
+            f"(실제 delta: {delta!r})",
+        )
+        self.assert_true(
+            "확대/축소 오류" in delta,
+            f"[회귀] 새 except 본문 (에러 print) 추출 "
+            f"(실제 delta: {delta!r})",
+        )
+
+        # AST 분석: 성공 print 가 try 블록 안 / 에러 print 가 except 블록 안 (module-level X)
+        import ast
+        tree = ast.parse(delta)
+        # module-level 에 print 가 있으면 안 됨 (try/except 안에 있어야 함)
+        module_level_prints = [
+            node for node in tree.body
+            if isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "print"
+        ]
+        self.assert_true(
+            len(module_level_prints) == 0,
+            f"[회귀] print 가 module-level 에 떠 있으면 안 됨 (try/except 안에 있어야 함) "
+            f"(module-level prints: {len(module_level_prints)})",
+        )
+
     def test_53_extract_code_delta_smart_dedent(self):
         """[회귀] delta 가 try/except 블록 안에서 추출되어 들여쓰기 4 칸이
         남는 경우 _smart_dedent 가 module-level 실행 가능하게 정리.

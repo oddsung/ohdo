@@ -328,10 +328,17 @@ class BlockExecutionHandler:
             mw.signals.blocks_finished.emit()
 
     def on_blocks_finished(self) -> None:
-        """블럭 실행 완료 후 UI 복원 (signals.blocks_finished slot)"""
+        """블럭 실행 완료 후 UI 복원 (signals.blocks_finished slot).
+
+        모든 step 완료 시 자동으로 stop 버튼 비활성화 + run 버튼 활성화 보장.
+        CodeViewer.set_running(False) 는 양쪽 탭 (코드 뷰 + 블럭 뷰) 의 run/stop 버튼
+        + 카드 별 run_btn 까지 일괄 처리. 시각 갱신 보장 위해 update() 명시 호출.
+        """
         mw = self.mw
         mw.console_panel.log("✅ 블럭 실행 완료 - UI 복원", "INFO")
         mw.code_viewer.set_running(False)
+        # 시각 갱신 강제 — 일부 케이스에서 Qt 가 즉시 repaint 안 하는 회귀 방지
+        mw.code_viewer.update()
         mw.statusBar().showMessage("블럭 실행 완료")
         self.on_kernel_status_changed()
         self.restore_main_window()

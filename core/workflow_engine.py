@@ -857,6 +857,18 @@ def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
 
     candidates: list[str] = []
 
+    # ── 0) 사용자 수동 편집 우선 (manually_edited + step_code 있음) ──
+    # 사용자가 블럭 뷰에서 직접 수정한 경우 step_code 가 진실. generated_code 의 marker
+    # (1) 나 diff (2) 를 우선하면 stale 한 AI 원본이 사용되어 사용자 수정이 무시됨
+    # (5/4 사용자 보고: 네이버 검색 '삼성전자' → '하이닉스' 수정 후 실행 시 '삼성전자' 그대로).
+    if step.get("manually_edited") and step_code:
+        normalized = _sd(_uwm(step_code))
+        if normalized and _is_compilable(normalized):
+            return normalized
+        # compile 실패해도 사용자 의도 우선 — 런타임 오류는 사용자가 보고 수정
+        if normalized:
+            candidates.append(normalized)
+
     # ── 1) 마커 기반 추출 (최우선) ──
     if step_id and generated_code:
         marker = _extract_by_step_marker(generated_code, step_id)

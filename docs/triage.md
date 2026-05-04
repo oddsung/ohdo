@@ -28,6 +28,119 @@
 
 <!-- 새 항목을 위에서부터 추가 -->
 
+### 2026-05-05 - 실행 종료 시 run/stop 버튼 자동 리셋 안전망
+- **상황**: 사용자 보고 — 모든 step 완료 후에도 코드 뷰/블럭 뷰의 stop 버튼이 활성화된 채 / run 버튼이 비활성화된 채로 남음.
+- **분석**: 모든 종료 path (`execute_code_thread` finally, `run_blocks_thread` finally → `blocks_finished` signal) 가 이미 `set_running(False)` 호출 중이었지만 timing/race 또는 시각 갱신 누락 의심.
+- **Fix**:
+  1. [ui/ai_call_handler.py](../ui/ai_call_handler.py) `AICallHandler.on_step_executed` 끝에 `mw.code_viewer.set_running(False)` catch-all 추가 — 코드 뷰 path 의 `step_executed` signal slot. `set_running` 은 멱등 → 중복 호출 무해.
+  2. [ui/block_execution_handler.py](../ui/block_execution_handler.py) `BlockExecutionHandler.on_blocks_finished` 에 `mw.code_viewer.update()` 호출 추가 — Qt 가 즉시 repaint 안 하는 케이스 방지.
+- **CodeViewer.set_running** 은 양쪽 탭 동시 처리 (run_btn/stop_btn + block_view.set_running → run_all_btn/stop_btn + 카드 별 run_btn).
+- **회귀 보호**: test_73 신규 — 4개 메서드 (`AICallHandler.on_step_executed`, `BlockExecutionHandler.on_blocks_finished`, `CodeViewer.set_running`, `BlockViewWidget.set_running`) 의 source 검증.
+- **자동 검증**: core 73/73 그린. PySide6 sync.
+
+### 2026-05-04 (밤) - 세션 추가/삭제 시 블럭 뷰 초기화 (CodeViewer.clear 통합)
+- **상황**: 사용자 보고 — 새 세션 생성 / 현재 세션 삭제 시 블럭 뷰가 이전 세션 카드를 그대로 표시 (stale).
+- **분석**: `_new_session` (line 574), `_on_session_delete` (line 627) 모두 `self.code_viewer.clear()` 호출하지만 그 메서드는 step 카드만 비움 (line 1547+). BlockViewWidget 은 별도 컴포넌트라 clear 안 됨 → library/initial/block 카드들이 이전 세션 그대로 남음.
+- **Fix**: [ui/code_viewer.py](../ui/code_viewer.py) `CodeViewer.clear()` 에 `self.block_view.refresh("", [], "", 500)` 호출 추가. try/except 로 감싸서 refresh 시그니처 변경 시 `block_view.clear()` fallback. 호출자 (_new_session, _on_session_delete, _restore_session_ui) 모두 자동으로 양쪽 비움.
+- **회귀 보호**: test_72 신규 — `inspect.getsource(CodeViewer.clear)` 가 `block_view` 호출 키워드 포함하는지 + 두 핸들러가 `code_viewer.clear()` 호출하는지 검증.
+- **자동 검증**: core 72/72 그린. PySide6 sync.
+
+### 2026-05-04 (밤) - Gemini CLI 어댑터: 모델 명시 (-m) 전달 + 안정 모델 default
+
+### 2026-05-04 (밤) - Selenium prompt: 추측성 element ID 대기 금지 가이드 추가
+- **상황**: 사용자 RPA_20260504_2206 세션 — step 1 (네이버 접속) 실행이 12초 걸리고 chromedriver stacktrace 출력. 우리 fix 와 무관 — AI 코드 품질 이슈.
+- **분석**: AI 가 step 1 코드에 `WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'nm_main_tab')))` 삽입. 'nm_main_tab' 은 네이버 메인페이지에 없는 가짜 ID → 10초 timeout → TimeoutException → except 절로 잡혀 stacktrace 가 print 됨 (driver 객체는 이미 만들어져 있어 다음 step 정상 동작).
+- **Fix**: [core/prompt_builder.py](../core/prompt_builder.py) `_append_selenium_guide` 에 "페이지 로드 대기 — 추측성 ID 금지" 가이드 추가:
+  - 잘못된 예: `WebDriverWait(...).until(EC.presence_of_element_located((By.ID, 'nm_main_tab')))` ← 추측성 ID
+  - 올바른 예: `time.sleep(2)` / `By.TAG_NAME, 'body'` / 사용자 명시한 다음 동작 element 만 대기
+  - 원칙: generic 페이지 로드 대기는 sleep 또는 body/html, 특정 element 대기는 ID/CSS 가 사용자/요소피커에서 확인된 경우만
+- **회귀 보호**: test_70 신규 — selenium 가이드에 '추측성', 'time.sleep + body', 'WebDriverWait + timeout' 키워드 검증.
+- **자동 검증**: core 70/70 그린. PySide6 sync.
+
+### 2026-05-04 (밤) - 코드 편집 desync 3차 fix: import 보존 (사용자 'NameError' 보고)
+- **상황**: 2차 fix 후 사용자가 동일 시나리오 재테스트 → 실행 시 `NameError: name 'Application' is not defined` (블럭 뷰 실행) / `NameError: name 'Keys' is not defined` (이전 첫 세션 코드 뷰 실행) 발생.
+- **분석**: 원본 step 2 의 generated_code 에는 `from pywinauto.application import Application`, `from selenium.webdriver.common.keys import Keys` 등이 포함. 사용자가 블럭 뷰에서 step 2 카드의 코드를 수정 — block 카드는 step_code (delta body) 만 표시하므로 사용자는 import 라인 안 건드림. 우리 2차 fix 가 새 generated_code 만들 때 `prev_step.generated_code (step 1) + new_step_code (사용자 수정값, import 없음)` → step 2 의 import 들이 사라짐. `extract_library_block` (마지막 step 의 generated_code 에서 imports 추출) 도 누락된 imports 만 가져옴 → 실행 시 NameError.
+- **Fix**: [ui/main_window.py](../ui/main_window.py) `_on_block_step_code_edited`:
+  - 원본 `step.generated_code` (`old_generated`) 에서 imports 추출 (`old_imports`)
+  - prev_step.generated_code 에서 imports + body 분리 (`prev_imports`, `prev_body`)
+  - 새 step_code 에서도 imports + body 분리 (`new_step_imports`, `new_step_body`) — 사용자가 import 추가 가능성 대응
+  - `merge_imports([prev_imports, old_imports, new_step_imports])` 로 통합 (중복제거 + 정렬)
+  - 새 generated_code = imports + prev_body + new_step_body 결합
+  - `step_imports` 도 같이 update (workflow_engine path 호환)
+- **`_on_step_code_edited` 도 갱신**: 코드 뷰는 사용자가 import 까지 수정 가능 → `extract_import_delta(new_imports, prev_imports)` 로 재계산해 `step_imports` 동기화.
+- **회귀 보호**: test_69 (c) 신규 추가 — 사용자 시나리오 (selenium + Keys + pywinauto.Application) 정확 시뮬레이션, 재구성된 generated_code 가 모든 imports 보존 + 사용자 수정값 포함 검증.
+- **자동 검증**: core 69/69 그린. PySide6 sync.
+
+### 2026-05-04 (밤) - 코드 편집 desync 2차 fix: manually_edited 우선 + 화면 갱신
+- **상황**: 1차 fix (두 필드 동시 업데이트) 후에도 사용자가 동일 시나리오 재테스트 시:
+  - **추가 증상 1**: 블럭 뷰에서 '하이닉스' 수정 → 코드 뷰어 탭은 여전히 '삼성전자' 표시.
+  - **추가 증상 2**: 실행하면 검색어 입력칸에 아무 입력 안 되고 종료 (의심: 우리 fix 가 만든 generated_code 의 marker 위치가 어긋나 stale 부분이 추출됨).
+- **분석**:
+  - 증상 1: `_on_block_step_code_edited` 가 update_step (디스크 저장) 만 하고 화면 위젯 갱신 trigger 안 함 → 코드 뷰어 탭 (StepCard) 위젯이 stale.
+  - 증상 2: `extract_step_delta_code` 의 (1) 마커 추출 / (2) diff 재계산이 generated_code 기반 — 우리가 새로 만든 generated_code 에 marker 가 있어도 그 marker 사이의 코드가 사용자 의도와 어긋날 수 있음 (특히 try/except 블록이 step_code 안에 통째로 들어있는 경우).
+- **Fix (3중 안전장치)**:
+  1. [core/workflow_engine.py](../core/workflow_engine.py) `extract_step_delta_code` — 우선순위 (0) `manually_edited + step_code` 추가. 사용자 수정값 무조건 우선 (compile 통과 시 즉시 반환).
+  2. [ui/main_window.py](../ui/main_window.py) `_on_block_step_code_edited` 끝에 `self._refresh_code_viewer()` 호출 — 코드 뷰어 탭 동기화.
+  3. [ui/main_window.py](../ui/main_window.py) `_on_step_code_edited` 끝에 `self._refresh_block_view()` 호출 — 블럭 뷰 동기화.
+- **회귀 보호**: test_69 갱신 — (a) manually_edited + step_code 가 stale generated_code marker 보다 우선되는지 in-memory 검증. (b) 두 핸들러 source 에 refresh 호출 키워드 검증.
+- **자동 검증**: core 69/69 그린. PySide6 sync.
+
+### 2026-05-04 (밤) - 코드 편집 desync fix: step_code ↔ generated_code 동시 업데이트
+- **상황**: 사용자가 새 세션에서 네이버 검색 시나리오로 테스트 — Chrome 으로 naver.com 접속 → "삼성전자 주가" 검색어 입력 코드 생성 → 블럭 뷰에서 직접 "하이닉스 주가" 로 수정.
+  - **증상 1**: 실행 버튼 누르면 여전히 "삼성전자 주가" 로 검색됨.
+  - **증상 2**: 다른 세션 갔다가 돌아오면 화면이 "하이닉스" → "삼성전자" 로 되돌아감.
+- **분석**: `_on_block_step_code_edited` 가 `step_code` 만 업데이트, `generated_code` 는 stale 채로 남음. `extract_step_delta_code` ([core/workflow_engine.py](../core/workflow_engine.py)) 의 우선순위 (1) 마커 추출 / (2) prev/curr generated_code diff 재계산이 모두 generated_code 기반이라 stale 값이 화면/실행에서 우선됨 — 사용자 수정 무시.
+- **Fix**: [ui/main_window.py](../ui/main_window.py)
+  - `_on_block_step_code_edited`: `step_code` + 새 `generated_code` (= prev_step.generated_code + "\n\n" + new_step_code) 동시 업데이트.
+  - `_on_step_code_edited`: `generated_code` + 새 `step_code` (= extract_code_delta(new_body, prev_body)) 동시 업데이트. 코드 뷰 수정도 동일 desync 가능성 사전 차단.
+  - 둘 다 `manually_edited=True`, `edit_original_code` 보존 (수동복원/AI 변조 자동복원 path 호환 유지).
+- **회귀 보호**: test_69 신규 — 사용자 보고 시나리오 (네이버 검색 step 1+2, 수정 후 extract_step_delta_code 결과 + 디스크 reload 후 결과) 검증.
+- **자동 검증**: core 69/69 그린. PySide6 sync.
+- **handoff §4.8 신규** — 코드 편집 핸들러 baseline 으로 등록.
+
+### 2026-05-04 (밤) - main_window 분해 Step 4: AICallHandler (327줄 분리)
+- **목표**: main_window.py 1538줄 → 더 슬림화. AI 호출 path (6개 메서드) 를 별도 controller 로 분리. Step 3 (BlockExecutionHandler) 와 동일 패턴.
+- **결과**:
+  - 신규 [ui/ai_call_handler.py](../ui/ai_call_handler.py) (412줄, 6개 메서드: `on_cancel_ai`, `on_user_message`, `call_ai_thread` (백그라운드 스레드), `on_ai_response`, `on_step_executed`, `apply_manual_edit_patches`).
+  - [ui/main_window.py](../ui/main_window.py) 1538 → 1211 (-327줄). 6개 메서드 1줄 위임 stub 으로 교체. `__init__` 에 `self.ai_handler = AICallHandler(self)` 추가. unused imports (`asyncio`, `threading`, `Step`) 제거.
+  - 회귀 테스트 1건 신규 (test_68) — `inspect.getsource(MainWindow._stub)` 위임 검증 + `inspect.getsource(AICallHandler.method)` 의 `mw.xxx` 패턴 검사 (prompt_builder.build_step_prompt, ai_engine.generate, extract_code_delta, session_manager.add_step, send_keys 복원 등).
+  - [pyside6_port/](../pyside6_port/) sed 치환 (`PyQt6` → `PySide6`) 로 sync. AST syntax 검증 OK.
+- **자동 검증**: core 68/68 그린.
+- **파일 구성** (분해 누적 결과):
+  - main_window.py: 2058 → 1823 → 1538 → **1211** (분해 4 step 누적)
+  - ui_inspection_handler.py (Step 2): 275줄
+  - block_execution_handler.py (Step 3): 478줄
+  - ai_call_handler.py (Step 4): 412줄
+
+### 2026-05-04 (밤) - extract_code_delta: 컨트롤 헤더 보존 fix
+- **상황**: 새 세션 RPA_20260504_2035 (메모장 자동화) step 4 의 step_code (단독 실행용 delta) 검증 중 발견. prev/new 모두 `try:`/`except Exception:` 패턴이 있을 때, SequenceMatcher 가 새 try/except 블록을 'insert' 로 추출하지만 직후 prev_set 필터가 `try:`/`except Exception:` 헤더를 "prev 에 동일 패턴 있음" 이라고 제거 → 본문만 module-level 로 평면화 → 성공 print 와 에러 print 가 둘 다 항상 출력되는 buggy 코드.
+- **재현 (실제 데이터)**:
+  ```python
+  # step 4 의 step_code (fix 전):
+  zoom_menu = app_window.child_window(...)
+  zoom_menu.click_input()
+  print("'확대/축소' 클릭")              # try 블록 본문
+  print("'확대/축소' 클릭 중 오류 발생")   # except 본문 — 같이 출력됨!
+  ```
+- **Fix**: [core/import_manager.py](../core/import_manager.py) `extract_code_delta` 의 prev_set 필터에 컨트롤 헤더 화이트리스트 추가. `try`, `except`, `else`, `elif`, `finally`, `if`, `for`, `while`, `with`, `def`, `class` 로 시작하는 라인은 prev 에 동일 라인 있어도 보존 (새 블록의 일부일 수 있음).
+- **회귀 보호**: test_67 신규 — 헤더 보존 + 본문 try/except 안에 위치 + module-level print 0 검증.
+- **검증**: core 67/67 그린 + 실제 세션 step 4 의 generated_code 로 delta 재계산 → try/except 보존된 정상 형태로 복원 확인.
+- **handoff §4.2 갱신**: jupyter mode baseline 5 → 6 (prev_set 필터 컨트롤 헤더 화이트리스트 추가).
+
+### 2026-05-04 (밤) - AI prompt 강화: jupyter mode 호환 가이드라인 3종
+- **목표**: §4.2 의 사후 필터 (extract_code_delta 의 except 변수 stale 라인 제거, _unwrap_main_function 등) 가 처리하는 회귀 패턴을 AI 가 애초에 안 만들도록 prompt 에서 명시적 금지. 사후 필터 의존도 낮추고 근본 예방.
+- **추가된 가이드라인**:
+  1. `def main(): ...; main()` 패턴 금지 — 모듈 레벨에 직접 작성. 함수 내 변수(driver, app)가 다음 스텝에서 NameError 됨.
+  2. except 캡처 변수(e, ex 등)는 except 블록 안에서만 사용. 밖에서 참조 시 단독 실행에서 NameError.
+  3. (current_code 있을 때만) 이전 스텝 변수 재정의 금지. globals 잃어 사후 필터로도 못 살림.
+- **수정 파일**:
+  - [core/prompt_builder.py](../core/prompt_builder.py) `build_step_prompt` [3] 규칙 섹션
+  - [config/prompts.json](../config/prompts.json) `system_context` 절대 규칙 9~10 추가
+  - [pyside6_port/](../pyside6_port/) 양쪽 sync (cp, 라이브러리 의존 없음)
+- **회귀 보호**: test_66 신규 — `build_step_prompt` 출력 + `prompts.json/system_context` 양쪽에서 가이드 키워드 검증.
+- **검증**: core 66/66 그린.
+- **다음 후보**: ai_integration suite 으로 실제 생성 코드의 회귀율 측정 (handoff §7 #3).
+
 ### 2026-05-04 - Win11 ForegroundLock 우회 (foreground 복원 보류 해제)
 - **상황**: 단독 실행 (⏯) 시 step1 (Selenium-only) 끝나면 메인 윈도우 정상 복원, step2 이후 (pyautogui.click/write/press 사용) 끝나면 메인 윈도우 안 떠오르고 작업표시줄에서 알림 깜빡임만.
 - **분석**: subprocess (kernel_worker) 가 `pyautogui.click` 등으로 SendInput 호출 → Windows 의 `SetForegroundWindow` 권한이 ohdo → kernel_worker 로 이전됨 → ohdo 의 `mw.activateWindow()` 가 ForegroundLock 으로 거부 → flash 만. step1 은 Selenium 만 써서 SendInput 미발동 → 권한 ohdo 에 잔존 → 정상 복원.
