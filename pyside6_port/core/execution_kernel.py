@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 # 라이브러리 블럭의 가상 step_id
 LIBRARY_BLOCK_STEP_ID = 0
+# Initial 블럭 (변수/초기값 setup) 의 가상 step_id — Phase 2.5 단독 실행용.
+# 사용자가 driver/options 등을 재정의하고 싶을 때 첫 step 안 돌리고 Initial 만 실행.
+INITIAL_BLOCK_STEP_ID = -1
 
 
 @dataclass

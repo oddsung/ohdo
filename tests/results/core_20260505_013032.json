@@ -1,0 +1,52 @@
+{
+  "suite_name": "core",
+  "run_time": "2026-05-05T01:30:31.956115",
+  "duration_ms": 331,
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "CoreTest.test_74_initial_block_standalone_execution",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-05T01:30:32.265800",
+      "duration_ms": 21,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[01:30:32.284] [PASS] [회귀] INITIAL_BLOCK_STEP_ID == -1 필수. 실제: -1",
+        "[01:30:32.284] [PASS] [회귀] LIBRARY_BLOCK_STEP_ID == 0 필수. 실제: 0",
+        "[01:30:32.286] [PASS] [회귀] BlockCard 가 step_id == -1 (Initial) 에 대해서도 run_single_btn 활성화 필수 (Phase 2.5 driver 재초기화 시나리오)",
+        "[01:30:32.286] [PASS] [회귀] BlockCard 의 step_id == -1 tooltip 에 'Initial 블럭 단독 실행' 안내 필수",
+        "[01:30:32.286] [PASS] [회귀] BlockViewWidget.refresh 가 init_card.run_single_requested -> run_single_step_requested 연결 필수 (signal 라우팅)",
+        "[01:30:32.286] [PASS] [회귀] on_run_single_step 가 step_id == INITIAL_BLOCK_STEP_ID 분기 후 on_run_initial_block() 호출 필수",
+        "[01:30:32.286] [PASS] [회귀] BlockExecutionHandler.on_run_initial_block 메서드 필수",
+        "[01:30:32.287] [PASS] [회귀] on_run_initial_block 가 Initial 카드의 code_edit.toPlainText() 로 사용자 편집 반영 코드 추출 필수",
+        "[01:30:32.287] [PASS] [회귀] on_run_initial_block 가 set_running(True) + mw.lower() 필수 (실행 중 UI 상태 + Win11 ForegroundLock 정책 회피)",
+        "[01:30:32.287] [PASS] [회귀] BlockExecutionHandler._run_initial_block_thread 워커 필수",
+        "[01:30:32.287] [PASS] [회귀] _run_initial_block_thread 가 라이브러리 블럭 미초기화 시 extract_library_block 으로 선행 실행 필수 (NameError 회귀 방지)",
+        "[01:30:32.287] [PASS] [회귀] _run_initial_block_thread 가 kernel.execute_block(initial_code, step_id=INITIAL_BLOCK_STEP_ID) 호출 필수",
+        "[01:30:32.287] [PASS] [회귀] _run_initial_block_thread finally 절에서 blocks_finished.emit() 호출 필수 (run/stop 버튼 자동 리셋 - test_73 와 일관)"
+      ],
+      "error": null,
+      "error_type": null
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.13.12",
+    "machine": "AMD64",
+    "timestamp": "2026-05-05T01:30:31.997578",
+    "screen_width": 2880,
+    "screen_height": 1800,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PyQt6": "installed",
+    "pkg_selenium": "4.43.0",
+    "pkg_Pillow": "12.2.0"
+  }
+}

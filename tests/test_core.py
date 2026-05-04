@@ -2295,6 +2295,29 @@ if __name__ == "__main__":
             f"실제: {gemini_cfg.get('model')!r}",
         )
 
+        # Production path 검증 (5/5 추가): _build_args 가 정의만 돼 있고
+        # 실제 subprocess.Popen 호출에서 사용 안 되면 -m 플래그가 안 붙어
+        # capacity 회귀 재발. 두 path 모두 _build_args 경유 필수.
+        import inspect
+        gen_src = inspect.getsource(GeminiCLIAdapter.generate)
+        self.assert_true(
+            "self._build_args(gemini_exec)" in gen_src,
+            "[회귀] stdin path Popen 가 self._build_args(gemini_exec) 사용 필수 "
+            "(raw [gemini_exec] 리터럴은 -m 플래그 누락 회귀)",
+        )
+        self.assert_true(
+            'self._build_args(gemini_exec, "-p"' in gen_src,
+            "[회귀] -p path Popen 가 self._build_args(gemini_exec, \"-p\", ...) 사용 필수 "
+            "(raw [gemini_exec, \"-p\", ...] 리터럴은 -m 플래그 누락 회귀)",
+        )
+        # raw 리터럴 패턴이 production path 에 남으면 안 됨
+        self.assert_true(
+            "Popen(\n                    [gemini_exec]" not in gen_src
+            and "Popen([gemini_exec]" not in gen_src,
+            "[회귀] subprocess.Popen 에 [gemini_exec] raw 리터럴 직접 전달 금지 "
+            "(_build_args 경유 필수)",
+        )
+
     def test_73_run_stop_buttons_reset_on_completion(self):
         """[회귀] 모든 step 완료 시 run/stop 버튼 양쪽 탭 자동 리셋.
 
@@ -2359,6 +2382,112 @@ if __name__ == "__main__":
             "_update_run_buttons" in bv_set_running_src,
             "[회귀] BlockViewWidget.set_running 가 _update_run_buttons 호출 필수 "
             "(카드 별 run_btn / single_btn enable/disable)",
+        )
+
+    def test_74_initial_block_standalone_execution(self):
+        """[회귀] Initial 블럭 단독 실행 (Phase 2.5).
+
+        사용자가 driver/options 등 setup 변수를 재정의하고 싶을 때 첫 step
+        안 돌리고 Initial 블럭만 실행하는 path 검증.
+
+        Path:
+        - core/execution_kernel.py: INITIAL_BLOCK_STEP_ID == -1 상수
+        - ui/code_viewer.py BlockCard: step_id == -1 도 run_single_btn 활성화
+        - ui/code_viewer.py BlockViewWidget.refresh: init_card.run_single_requested
+            -> self.run_single_step_requested 연결
+        - ui/block_execution_handler.py:
+          - on_run_single_step 가 step_id == INITIAL_BLOCK_STEP_ID 분기 -> on_run_initial_block
+          - on_run_initial_block 가 카드에서 코드 추출 + library 자동 선행 + kernel.execute_block
+        """
+        from core.execution_kernel import INITIAL_BLOCK_STEP_ID, LIBRARY_BLOCK_STEP_ID
+        from ui.code_viewer import BlockCard, BlockViewWidget
+        from ui.block_execution_handler import BlockExecutionHandler
+        import inspect
+
+        # 1. 상수 확정값
+        self.assert_true(
+            INITIAL_BLOCK_STEP_ID == -1,
+            f"[회귀] INITIAL_BLOCK_STEP_ID == -1 필수. 실제: {INITIAL_BLOCK_STEP_ID}",
+        )
+        self.assert_true(
+            LIBRARY_BLOCK_STEP_ID == 0,
+            f"[회귀] LIBRARY_BLOCK_STEP_ID == 0 필수. 실제: {LIBRARY_BLOCK_STEP_ID}",
+        )
+
+        # 2. BlockCard.__init__ 가 step_id == -1 에 대해서도 run_single_btn 생성
+        bc_src = inspect.getsource(BlockCard.__init__)
+        self.assert_true(
+            "step_id > 0 or step_id == -1" in bc_src,
+            "[회귀] BlockCard 가 step_id == -1 (Initial) 에 대해서도 run_single_btn 활성화 필수 "
+            "(Phase 2.5 driver 재초기화 시나리오)",
+        )
+        self.assert_true(
+            "Initial 블럭 단독 실행" in bc_src,
+            "[회귀] BlockCard 의 step_id == -1 tooltip 에 'Initial 블럭 단독 실행' 안내 필수",
+        )
+
+        # 3. BlockViewWidget.refresh 가 init_card.run_single_requested 연결
+        refresh_src = inspect.getsource(BlockViewWidget.refresh)
+        self.assert_true(
+            "init_card.run_single_requested.connect(self.run_single_step_requested)"
+            in refresh_src,
+            "[회귀] BlockViewWidget.refresh 가 init_card.run_single_requested ->"
+            " run_single_step_requested 연결 필수 (signal 라우팅)",
+        )
+
+        # 4. BlockExecutionHandler.on_run_single_step 가 INITIAL_BLOCK_STEP_ID 분기
+        on_single_src = inspect.getsource(BlockExecutionHandler.on_run_single_step)
+        self.assert_true(
+            "INITIAL_BLOCK_STEP_ID" in on_single_src
+            and "on_run_initial_block" in on_single_src,
+            "[회귀] on_run_single_step 가 step_id == INITIAL_BLOCK_STEP_ID 분기 후 "
+            "on_run_initial_block() 호출 필수",
+        )
+
+        # 5. on_run_initial_block 메서드 존재 + 핵심 동작
+        self.assert_true(
+            hasattr(BlockExecutionHandler, "on_run_initial_block"),
+            "[회귀] BlockExecutionHandler.on_run_initial_block 메서드 필수",
+        )
+        on_init_src = inspect.getsource(BlockExecutionHandler.on_run_initial_block)
+        # 카드에서 코드 텍스트 추출 (사용자 편집 반영)
+        self.assert_true(
+            "code_edit.toPlainText()" in on_init_src
+            and "INITIAL_BLOCK_STEP_ID" in on_init_src,
+            "[회귀] on_run_initial_block 가 Initial 카드의 code_edit.toPlainText() "
+            "로 사용자 편집 반영 코드 추출 필수",
+        )
+        # set_running(True) + lower() 호출
+        self.assert_true(
+            "set_running(True)" in on_init_src and "mw.lower()" in on_init_src,
+            "[회귀] on_run_initial_block 가 set_running(True) + mw.lower() 필수 "
+            "(실행 중 UI 상태 + Win11 ForegroundLock 정책 회피)",
+        )
+
+        # 6. _run_initial_block_thread 가 library 선행 + kernel.execute_block 사용
+        self.assert_true(
+            hasattr(BlockExecutionHandler, "_run_initial_block_thread"),
+            "[회귀] BlockExecutionHandler._run_initial_block_thread 워커 필수",
+        )
+        thread_src = inspect.getsource(BlockExecutionHandler._run_initial_block_thread)
+        self.assert_true(
+            "LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps" in thread_src
+            and "extract_library_block" in thread_src,
+            "[회귀] _run_initial_block_thread 가 라이브러리 블럭 미초기화 시 "
+            "extract_library_block 으로 선행 실행 필수 (NameError 회귀 방지)",
+        )
+        self.assert_true(
+            "kernel.execute_block(\n                initial_code, step_id=INITIAL_BLOCK_STEP_ID"
+            in thread_src
+            or "kernel.execute_block(initial_code, step_id=INITIAL_BLOCK_STEP_ID"
+            in thread_src,
+            "[회귀] _run_initial_block_thread 가 kernel.execute_block(initial_code, "
+            "step_id=INITIAL_BLOCK_STEP_ID) 호출 필수",
+        )
+        self.assert_true(
+            "blocks_finished.emit()" in thread_src,
+            "[회귀] _run_initial_block_thread finally 절에서 "
+            "blocks_finished.emit() 호출 필수 (run/stop 버튼 자동 리셋 - test_73 와 일관)",
         )
 
     def test_72_codeviewer_clear_resets_block_view(self):

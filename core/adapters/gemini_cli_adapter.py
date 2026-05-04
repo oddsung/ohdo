@@ -115,7 +115,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     prompt_file = f.name
 
                 self._proc = subprocess.Popen(
-                    [gemini_exec],
+                    self._build_args(gemini_exec),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -159,7 +159,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
                 # 짧은 프롬프트는 직접 인자로 전달 가능
                 if len(full_prompt) < 8000:
                     self._proc = subprocess.Popen(
-                        [gemini_exec, "-p", full_prompt],
+                        self._build_args(gemini_exec, "-p", full_prompt),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         encoding='utf-8',

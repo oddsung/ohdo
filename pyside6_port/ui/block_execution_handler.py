@@ -26,8 +26,12 @@ from typing import Optional, TYPE_CHECKING
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
-from core.workflow_engine import CodeSandbox
-from core.execution_kernel import ExecutionKernel
+from core.workflow_engine import CodeSandbox, extract_library_block
+from core.execution_kernel import (
+    ExecutionKernel,
+    LIBRARY_BLOCK_STEP_ID,
+    INITIAL_BLOCK_STEP_ID,
+)
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -181,12 +185,112 @@ class BlockExecutionHandler:
         )
         thread.start()
 
+    def on_run_initial_block(self) -> None:
+        """블럭 뷰: Initial 블럭 단독 실행 (Phase 2.5).
+
+        사용자가 driver/options 등 setup 변수를 재정의하고 싶을 때 첫 step 안
+        돌려도 되도록 Initial 블럭 (변수/초기값) 만 커널에 실행. 다른 step 들의
+        실행 상태 (kernel.executed_steps) 는 건드리지 않음.
+
+        실행 코드 = (라이브러리 블럭 코드 — 커널에 미초기화 시) + Initial 카드
+        현재 텍스트. 라이브러리 코드는 카드의 import/helper 가 빠져 NameError
+        나는 회귀 방지용. Initial 코드는 카드 텍스트를 직접 사용 (사용자 편집 반영).
+        """
+        mw = self.mw
+        if not mw.current_session:
+            QMessageBox.warning(mw, "경고", "세션이 없습니다.")
+            return
+
+        # Initial 블럭 카드에서 현재 텍스트 추출 (사용자 편집 반영)
+        initial_code = ""
+        block_view = getattr(mw.code_viewer, "block_view", None)
+        if block_view is not None:
+            for card in getattr(block_view, "_block_cards", []):
+                if card.step_id == INITIAL_BLOCK_STEP_ID:
+                    initial_code = card.code_edit.toPlainText()
+                    break
+        if not initial_code.strip():
+            QMessageBox.information(
+                mw, "안내",
+                "Initial 블럭 코드가 비어 있습니다. 첫 step 의 setup 코드가 "
+                "있어야 Initial 블럭이 추출됩니다."
+            )
+            return
+
+        kernel = self.get_or_create_kernel()
+        if kernel is None:
+            mw.signals.error_occurred.emit("커널 생성 실패")
+            return
+
+        mw.console_panel.log("⏯ Initial 블럭 단독 실행...", "INFO")
+        mw.code_viewer.set_running(True)
+        mw.statusBar().showMessage("Initial 블럭 단독 실행 중...")
+        mw.lower()
+
+        thread = threading.Thread(
+            target=self._run_initial_block_thread,
+            args=(kernel, initial_code),
+            daemon=True,
+        )
+        thread.start()
+
+    def _run_initial_block_thread(
+        self, kernel: ExecutionKernel, initial_code: str
+    ) -> None:
+        """Initial 블럭 단독 실행 워커 (백그라운드)."""
+        mw = self.mw
+        try:
+            # 라이브러리 블럭이 커널에 없으면 먼저 실행 (imports/helpers 보장).
+            # NameError 회귀 방지 — 카드는 imports 표시 안 함.
+            if LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps:
+                lib_block = extract_library_block(mw.current_session)
+                if lib_block.strip():
+                    mw.signals.log_message.emit("📦 라이브러리 블럭 초기화 중...")
+                    lib_result = kernel.execute_block(
+                        lib_block, step_id=LIBRARY_BLOCK_STEP_ID, timeout=30
+                    )
+                    if not lib_result.success:
+                        mw.signals.log_message.emit(
+                            f"⚠️ 라이브러리 블럭 실행 오류: {lib_result.error}"
+                        )
+
+            mw.signals.log_message.emit("🎬 Initial 블럭 실행 시작...")
+            result = kernel.execute_block(
+                initial_code, step_id=INITIAL_BLOCK_STEP_ID
+            )
+            if result.success:
+                mw.signals.log_message.emit(
+                    f"✅ Initial 블럭 완료 ({result.duration_ms}ms)"
+                )
+                if result.output:
+                    mw.signals.log_message.emit(f"  출력: {result.output[:300]}")
+            else:
+                mw.signals.log_message.emit(
+                    f"❌ Initial 블럭 실패 ({result.duration_ms}ms)"
+                )
+                if result.error:
+                    for line in result.error.splitlines():
+                        if line.strip():
+                            mw.signals.log_message.emit(f"  {line}")
+        except Exception as e:
+            mw.signals.error_occurred.emit(f"Initial 블럭 실행 오류: {e}")
+        finally:
+            mw.signals.log_message.emit("Initial 블럭 실행 완료")
+            mw.signals.blocks_finished.emit()
+
     def on_run_single_step(self, step_id: int) -> None:
         """블럭 뷰: N번 스텝 단독 실행 (다음 step 으로 진행 안 함).
 
         이전 step (1..N-1) 들이 커널에 이미 실행됐으면 skip,
         없으면 silent replay 후 step N 만 실행하고 종료.
+
+        step_id == INITIAL_BLOCK_STEP_ID (-1) 은 Initial 블럭 단독 실행 분기 (Phase 2.5).
         """
+        # Phase 2.5: Initial 블럭 단독 실행 분기
+        if step_id == INITIAL_BLOCK_STEP_ID:
+            self.on_run_initial_block()
+            return
+
         mw = self.mw
         if not mw.current_session:
             QMessageBox.warning(mw, "경고", "세션이 없습니다.")

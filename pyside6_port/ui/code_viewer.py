@@ -685,17 +685,26 @@ class BlockCard(QFrame):
             h_layout.addWidget(self.delete_btn)
 
         # ── 단독 실행 버튼 (라이브러리 블럭=0 은 제외, 한 번만 실행되는 setup 이라 의미 없음) ──
-        if step_id > 0:
+        # Initial 블럭=-1 도 허용 (Phase 2.5) — driver/options 등 변수 재정의 시나리오.
+        if step_id > 0 or step_id == -1:
             self.run_single_btn = QPushButton("⏯ 단독")
             single_style = self._RUN_BTN_STYLE.replace(
                 "#1e3a1e", "#2a2a4a"
             ).replace("#a6e3a1", "#cba6f7").replace("#2d5a2d", "#3a3a5a")
             self.run_single_btn.setStyleSheet(single_style)
-            self.run_single_btn.setToolTip(
-                f"Step {step_id} 만 실행 (다음 step 으로 진행 안 함).\n"
-                f"이전 step 들이 이미 커널에 실행된 상태로 가정.\n"
-                f"커널 미준비 시 자동 silent replay."
-            )
+            if step_id == -1:
+                tooltip = (
+                    "Initial 블럭 단독 실행 (driver/options 등 변수 재초기화).\n"
+                    "라이브러리 블럭이 커널에 없으면 자동으로 먼저 실행.\n"
+                    "다른 step 들의 실행 상태는 영향 없음."
+                )
+            else:
+                tooltip = (
+                    f"Step {step_id} 만 실행 (다음 step 으로 진행 안 함).\n"
+                    f"이전 step 들이 이미 커널에 실행된 상태로 가정.\n"
+                    f"커널 미준비 시 자동 silent replay."
+                )
+            self.run_single_btn.setToolTip(tooltip)
             self.run_single_btn.clicked.connect(
                 lambda: self.run_single_requested.emit(self.step_id)
             )
@@ -1134,6 +1143,7 @@ class BlockViewWidget(QWidget):
                 status=""
             )
             init_card.run_from_here_requested.connect(self._on_run_from)
+            init_card.run_single_requested.connect(self.run_single_step_requested)
             init_card.block_code_edited.connect(self.block_code_edited)
             self._block_cards.append(init_card)
             self._remove_stretch()

@@ -2,11 +2,11 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-05 (5/4~5/5 작업 — 자세한 변경은 §5 변경 이력 참조). baseline: **core 73/73 그린**.
+> 마지막 업데이트: 2026-05-05 (5/4~5/5 작업 — 자세한 변경은 §5 변경 이력 참조. 5/5 추가: Gemini adapter `_build_args` production path 적용 + 라이선스 전략 결정 확정 + Phase 2.5 Initial 블럭 단독 실행). baseline: **core 74/74 그린**.
 
 ## 1. 프로젝트 한 줄 요약
 
-**ohdo** — AI (Gemini CLI) 와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성/실행하는 PyQt6 기반 RPA 솔루션. SaaS 확장 계획 진행 중 ([docs/ROADMAP.md](ROADMAP.md) §1, AGPL-3.0 데스크톱 + 상업 SaaS 오픈코어 전략 — **라이선스 전략 재검토 사용자 결정 대기**).
+**ohdo** — AI (Gemini CLI) 와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성/실행하는 PyQt6 기반 RPA 솔루션. SaaS 확장 계획 진행 중 ([docs/ROADMAP.md](ROADMAP.md) §1, AGPL-3.0 데스크톱 + 상업 SaaS 오픈코어 전략 — **2026-05-05 사용자 결정 확정**).
 
 ## 2. 작업 환경 (사용자 preference)
 
@@ -101,7 +101,17 @@ subprocess (`kernel_worker`) 가 step 코드 안에서 `pyautogui.click/write/pr
 
 이 4개 모두 사용자가 어느 뷰에서 수정해도 다른 뷰 + 실행 결과가 일관되게 동기화되도록 보장. 한 가지만 빠지면 회귀 (5/4 사용자 보고 1차/2차/3차 모두 이 4중 fix 로 해소).
 
-## 5. 최근 작업 내역 (5/2 ~ 5/4)
+### 4.9 Initial 블럭 단독 실행 (Phase 2.5, test_74)
+사용자가 driver/options 등 setup 변수를 재정의하고 싶을 때 첫 step 안 돌리고 Initial 블럭만 실행. 4가지 contract:
+
+1. **상수**: `INITIAL_BLOCK_STEP_ID = -1` ([core/execution_kernel.py](../core/execution_kernel.py)) — `LIBRARY_BLOCK_STEP_ID = 0` 와 같은 가상 step_id 패밀리.
+2. **UI 노출**: `BlockCard` 가 `step_id > 0 or step_id == -1` 조건으로 "⏯ 단독" 버튼 표시. step_id == -1 전용 tooltip ("Initial 블럭 단독 실행 (driver/options 등 변수 재초기화)"). Library (step_id == 0) 은 여전히 제외 — "한 번만 실행되는 setup" 이라 의미 없음 유지.
+3. **Signal 라우팅**: `BlockViewWidget.refresh()` 가 `init_card.run_single_requested` 를 step 카드와 같은 `self.run_single_step_requested` 시그널로 forward. main_window → `BlockExecutionHandler.on_run_single_step(-1)` → 분기 → `on_run_initial_block()`.
+4. **실행 path**: `_run_initial_block_thread` 가 `LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps` 일 때 `extract_library_block(session)` 으로 라이브러리 선행 (NameError 회귀 방지 — 카드는 imports 표시 안 함). Initial 코드는 카드의 `code_edit.toPlainText()` 로 사용자 편집 반영. `kernel.execute_block(initial_code, step_id=INITIAL_BLOCK_STEP_ID)`. finally 절에서 `blocks_finished.emit()` (test_73 의 run/stop 자동 리셋과 일관).
+
+다른 step 들의 `kernel.executed_steps` 는 안 건드림 — Initial 만 재실행이고 step 1..N 의 silent replay 도 안 함.
+
+## 5. 최근 작업 내역 (5/2 ~ 5/5)
 
 | 일자 | 작업 |
 |------|------|
@@ -119,30 +129,39 @@ subprocess (`kernel_worker`) 가 step 코드 안에서 `pyautogui.click/write/pr
 | 5/4 (밤) | Gemini CLI 모델 명시 — headless 모드 default 가 preview 모델 (gemini-3-flash-preview) 로 잡혀 Google 인프라 capacity 부족으로 429/180s timeout 회귀 (사용자 보고). adapter `__init__` 에 `self.model` + `_build_args` 헬퍼 추가. settings.json default = `gemini-2.5-flash` 안정 모델. test_71. **note**: `_build_args` 정의만 추가, 실제 두 subprocess.Popen path (stdin/-p) 에서 호출 안 됨 — 다음 작업으로 production path 적용 필요. |
 | 5/4 (밤) | 세션 추가/삭제 시 블럭 뷰 초기화 회귀 — 사용자 보고: `_new_session` / `_on_session_delete` 의 `self.code_viewer.clear()` 가 step 카드만 비웠음, 블럭 뷰는 이전 세션 카드 stale. Fix: `CodeViewer.clear()` 가 `block_view.refresh("", [], "", 500)` 도 호출 (try/except fallback 으로 `block_view.clear()`). test_72 (72/72 그린). |
 | 5/5 | 실행 종료 시 run/stop 버튼 자동 리셋 안전망 — 사용자 보고: 모든 step 완료 후에도 stop 버튼이 활성/run 버튼이 비활성 채로 남는 회귀. Fix: `AICallHandler.on_step_executed` (코드 뷰 path) 끝에 `mw.code_viewer.set_running(False)` catch-all 추가. `BlockExecutionHandler.on_blocks_finished` (블럭 뷰 path) 에 `mw.code_viewer.update()` 시각 갱신 강제. test_73 (73/73 그린). |
+| 5/5 | Gemini adapter `_build_args` production path 적용 — 5/4 밤 작업 미완성 마감. 두 subprocess.Popen 호출 (stdin / -p) 가 여전히 raw `[gemini_exec, ...]` 리터럴 사용 중이라 -m 플래그가 실제 호출에서 누락 가능했던 문제 해결. 둘 다 `self._build_args(...)` 경유. test_71 확장 — production path source 검증 추가 (raw 리터럴 부재 + `_build_args` 호출 패턴 존재). core 73/73 유지. PySide6 sync. |
+| 5/5 | ROADMAP §1 라이선스 전략 결정 확정 — 사용자와 AGPL/폐쇄/오픈코어 비교 후 **오픈코어 (AGPL-3.0 데스크톱 + 추후 폐쇄 SaaS)** 확정. v1.0 은 100% AGPL-3.0 무료, SaaS 라인 긋기는 Phase 2 진입 시점에 결정. ROADMAP §1/§10 갱신, handoff §6 #1 결정 완료 표시. LICENSE 파일/코드 헤더 추가는 미실행 (사용자 결정 대기). |
+| 5/5 | Phase 2.5: Initial 블럭 단독 실행 — driver/options 등 setup 변수를 재정의하고 싶을 때 첫 step 안 돌리고 Initial 블럭만 실행하는 path 추가. `INITIAL_BLOCK_STEP_ID = -1` 상수 신설, BlockCard 의 "⏯ 단독" 버튼이 step_id == -1 도 활성화 (전용 tooltip), BlockViewWidget.refresh 가 init_card.run_single_requested 라우팅, BlockExecutionHandler 에 `on_run_initial_block` + `_run_initial_block_thread` 추가 (라이브러리 미초기화 시 자동 선행 → NameError 회귀 방지). 카드 텍스트로 사용자 편집 반영. test_74 (74/74 그린). PySide6 sync. |
 
 상세는 [docs/triage.md](triage.md) 참조.
 
 ## 6. 미해결 / 사용자 결정 대기
 
-1. **ROADMAP §1 라이선스 전략 결정**: AGPL 유지 / 폐쇄 소스 / 양쪽 유지 — 사용자 결정 대기.
+1. ~~**ROADMAP §1 라이선스 전략 결정**~~ → **2026-05-05 결정 확정**: 오픈코어 (AGPL-3.0 데스크톱 + 추후 폐쇄 SaaS). v1.0 은 100% AGPL-3.0, SaaS 유료/무료 라인은 Phase 2 진입 시점에 결정. (LICENSE 파일/코드 헤더 추가는 미실행 — 사용자 결정 대기)
 2. **PySide6 포트 GUI 검증**: 양쪽 동작 비교 — 사용자 직접 GUI 테스트 필요. 별도 venv 없어서 import sanity 도 사용자 환경에서.
 3. ~~**foreground 복원 보류**~~ → **5/4 저녁 해결됨** (§4.5 참조). 사용자 GUI 테스트 통과.
 4. **5/4-5/5 작업 사용자 GUI 검증 미확인**: 다음 항목들은 자동 회귀 테스트는 그린이지만 실제 GUI 동작은 사용자 테스트 미완료 — 새 세션에서 첫 sanity check 시 같이 확인하면 좋음:
    - 코드 편집 desync 4중 안전장치 (§4.8) — 블럭 뷰/코드 뷰에서 코드 수정 → 양쪽 동기화 + 실행 정확
    - 세션 추가/삭제 시 블럭 뷰 초기화
    - 실행 종료 시 run/stop 버튼 자동 리셋 (코드 뷰 + 블럭 뷰 양쪽)
-   - Gemini CLI 모델 명시 — `gemini-2.5-flash` 로 명시 호출되는지 (단, `_build_args` 가 production path 에서 아직 사용 안 됨 — §7 #1 작업 필요)
+   - Gemini CLI 모델 명시 — `gemini-2.5-flash` 로 명시 호출되는지 (5/5: `_build_args` 가 두 production path 에 적용됨, source 검증 test_71 통과 — 실 capacity 회귀 재현 여부 사용자 확인)
+   - **Phase 2.5: Initial 블럭 단독 실행** (§4.9) — Initial 블럭 카드의 "⏯ 단독" 버튼 클릭 → driver/options 등 재초기화되는지. 라이브러리 미초기화 상태 / 초기화된 상태 양쪽 시나리오 확인. 다른 step status 안 건드리는지.
 4. **PySide6 양쪽 동기화 정책**: 코드 수정 시 어디 먼저 적용할지. 현재 PyQt6 원본 먼저 → 수동 sed 로 sync (자동 스크립트 없음).
 
 ## 7. 다음 작업 후보 (우선순위 순)
 
 | 우선순위 | 작업 | 비고 |
 |---------|------|-----|
-| 1 | **Gemini adapter `_build_args` production path 적용** — `_build_args` 헬퍼는 정의돼 있지만 두 subprocess.Popen path (stdin/-p) 가 아직 사용 X. `[gemini_exec]` / `[gemini_exec, "-p", full_prompt]` 직접 리터럴 → `self._build_args(...)` 로 교체. capacity 회귀 완전 차단. | 1시간 미만. test_71 은 `_build_args` 단위 검증만 — production path 검증 추가 필요. |
-| 2 | Phase 2.5: Initial 블럭 단독 실행 (변수 재정의용) | 옵션. 사용자가 driver 등을 재정의하고 싶을 때 첫 스텝부터 안 돌려도 되게. |
-| 3 | AI prompt 강화 + delta fix 효과 측정 — `ai_integration` suite 으로 실제 생성 코드 검증 | 5/4 밤 가이드/필터 추가 후 실 데이터로 회귀율 확인. |
-| 4 | main_window 추가 분해 (필요 시) — 남은 1211줄 중 분리 가능 영역 (캡처, 윈도우 검사, 스텝 CRUD 등) | main_window 분해 Step 5 후보. 우선순위 낮음. |
-| 5 | SaaS M3.2+ 재개 | 데스크톱 안정화 + ROADMAP §1 라이선스 결정 후 |
+| 1 | AI prompt 강화 + delta fix 효과 측정 — `ai_integration` suite 으로 실제 생성 코드 검증 | 5/4 밤 가이드/필터 추가 후 실 데이터로 회귀율 확인. |
+| 2 | main_window 추가 분해 (필요 시) — 남은 1211줄 중 분리 가능 영역 (캡처, 윈도우 검사, 스텝 CRUD 등) | main_window 분해 Step 5 후보. 우선순위 낮음. |
+| 3 | LICENSE 파일 (AGPL-3.0) + README 라이선스 섹션 + 모든 source 파일 SPDX 헤더 | Phase 0 시작 시 묶어서 처리 권장 (uv/devcontainer/CI 와 함께). |
+| 4 | Phase 0 본격 진입 — `pyproject.toml + uv`, devcontainer, pre-commit, GitHub Actions CI | ROADMAP Phase 0. 데스크톱 안정화 ~80% 도달 시. |
+| 5 | SaaS M3.2+ 재개 | Phase 0/1 완료 후. |
+
+**5/5 완료**:
+- ~~Gemini adapter `_build_args` production path 적용~~ — 두 Popen 호출 모두 `_build_args` 경유, test_71 production path 검증 추가.
+- ~~ROADMAP §1 라이선스 전략 결정~~ — 오픈코어 (AGPL-3.0 데스크톱 + 추후 폐쇄 SaaS) 확정.
+- ~~Phase 2.5: Initial 블럭 단독 실행~~ — INITIAL_BLOCK_STEP_ID=-1, BlockCard 단독 버튼 확장, on_run_initial_block + library 자동 선행. test_74 (74/74 그린).
 
 ## 8. 첫 작업 권장
 
@@ -166,6 +185,6 @@ subprocess (`kernel_worker`) 가 step 코드 안에서 `pyautogui.click/write/pr
 ## 10. 사용자에게 빠르게 물어볼 후보
 
 세션 시작 직후 사용자에게 물어볼 만한 질문:
-- "AI prompt 강화 (jupyter mode 호환) 부터 갈까, 아니면 main_window 분해 Step 4 (AI 호출 controller) 부터?"
-- "ROADMAP §1 라이선스 전략 결정했어?"
+- "다음 작업 후보 (§7) 중 어느 거 진행할까?" (Phase 2.5 Initial 블럭 단독 실행 / AI prompt 효과 측정 / main_window 추가 분해)
 - "PySide6 포트 GUI 검증 결과는?"
+- "LICENSE 파일 (AGPL-3.0) 추가할까? README 라이선스 섹션도 같이 작성?"
