@@ -28,6 +28,74 @@
 
 <!-- 새 항목을 위에서부터 추가 -->
 
+### 2026-05-02 - PySide6 migration (라이선스 유연성) — pyside6_port/ 별도 디렉토리
+- **상황**: PyQt6 라이선스 (GPL/상용) 가 SaaS 또는 폐쇄 소스 운영 시 부담. PySide6 (LGPL) 가 더 유연.
+- **요청**: 사용자 결정 — "기존 보존 + PySide6 포트 추가". 동기화 정책은 추후 결정.
+- **분류**: **fix-now (적용 완료)**:
+  1. `pyside6_port/` 별도 디렉토리 (sub-directory pattern)
+  2. data/ junction 으로 공유, 별도 venv (`pyside6_port/.venv/`)
+  3. 자동 sed 변환 (6개 패턴: PyQt6→PySide6, pyqtSignal→Signal, pyqtSlot→Slot, pyqtProperty→Property, QtWidgets.QAction→QtGui.QAction, exec_()→exec())
+  4. enum 모두 long-form (Qt.WindowType.X) — PySide6 호환 자동
+  5. environment_scanner / test_runner 의 패키지 검증 PySide6 로 명시
+  6. requirements.txt 갱신 + PySide6 6.11 설치
+- **자동 검증**: 양쪽 core suite 59/59 그린.
+- **남은 결정**: ROADMAP §1 라이선스 전략 (AGPL 유지 / 폐쇄 소스 / 양쪽 유지) — 사용자 대기.
+- **회귀 위험**: 향후 fix 적용 시 양쪽 동기화 누락 위험. 메모리에 동기화 정책 미결로 표시.
+
+### 2026-05-02 - 코드 뷰 ↔ 블록 뷰 상호작용 + signal-slot fix
+- **상황**: step 1 단독 실행 후 코드 뷰 탭 ▶ 실행 버튼 비활성화 유지. 블록 뷰 ■ 중지 누르면 그제서야 활성화. F9 stop 가 블록 모드에선 안 멈춤.
+- **근본 원인**:
+  1. `_on_run_code` 가 set_running(True) 호출 안 함 → 양쪽 탭 UI 상태 불일치
+  2. `_execute_code_thread` 의 finally 에서 set_running(False) 호출 없음
+  3. `_on_stop_code` 가 sandbox 만 stop, ExecutionKernel 안 stop → 블록 모드 진행 중 step 안 멈춤
+  4. `_run_blocks_thread` 의 finally 가 `QTimer.singleShot(0, _on_blocks_finished)` 사용했는데 어떤 케이스에서 호출 안 됨
+- **분류**: **fix-now (적용 완료)**:
+  - AsyncSignals 에 `blocks_finished` signal 추가 → main thread queued connection 으로 안전 호출
+  - `_on_run_code` 시작에 set_running(True), `_execute_code_thread` finally 에 set_running(False)
+  - `_on_stop_code` 가 ExecutionKernel.stop() 도 호출 + set_running(False) + _restore_main_window
+  - 코드 뷰 탭 run/stop 버튼 disabled stylesheet 추가 (어두운 회색 + 점선 테두리 — 시각 구분 명확)
+  - 세션 목록 활성 세션 색상 구분 (▶ marker + #313244 배경 + #89b4fa 텍스트 + bold)
+- **자동 검증**: test_55 (lower/raise), test_56 (run/stop 상호작용), test_57 (blocks_finished signal). core 59/59 그린.
+
+### 2026-05-02 - 실행 중 메인 윈도우 가림 방지 (foreground 복원 미해결)
+- **상황**: 자동화 실행 시 ohdo 메인 윈도우가 underlying app element 를 가려 클릭 못 받는 경우.
+- **시도 4회** (모두 foreground 자동 복원 실패):
+  1. `showMinimized() + showNormal()` — Win11 정책 막힘
+  2. `showMinimized() + AttachThreadInput trick + SetForegroundWindow` — 막힘
+  3. `hide() + show()` (picker 패턴) — 작업표시줄 사라짐 + 막힘
+  4. `lower() + raise_()` — 가림 해결 OK, 단 foreground 복원은 여전히 실패
+- **현재 상태**: lower 패턴 채택 — 실행 중 가림 방지 OK, foreground 복원은 사용자 보류 결정 (수동 alt+tab 필요).
+- **분류**: **fix-now (부분 적용)** + foreground 복원은 보류.
+
+### 2026-05-02 - Step 단독 실행 (jupyter 블록 모드) 회귀 fix 4건
+1. **Excel 셀 detection 회귀** — EFP 만 토글 안으로 분리 (walker 들은 토글 밖). [project_element_picker_baseline.md](../memory/...) 의 EFP 토글 패턴 참조.
+2. **Delta 추출 누적 step_code** — `extract_code_delta` SequenceMatcher fallback + `extract_step_delta_code(prev_step)` 으로 generated_code diff 재계산. 7-step 세션 검증: step 2~7 의 step_code 가 4827c→666c 등으로 감소.
+3. **IndentationError** — `_smart_dedent` helper. try 블록 안 라인이 indent 4 로 추출되는 경우 코드 라인 (주석/빈 줄 제외) 의 최소 indent 만큼 left-shift.
+4. **NameError 'driver' is not defined** — `_unwrap_main_function` AST. AI 가 `def main(): driver = ...; main()` 패턴으로 작성한 경우 main 본문을 module-level 로 unwrap + `if __name__:` 블록 제거.
+- **회귀 보호**: test_51, test_52, test_53, test_54 (delta + dedent + unwrap).
+- **사용자 검증**: 7-step 세션에서 브라우저 1개만 띄우고 step 2~7 단독 실행 가능 확인.
+
+### 2026-05-02 - Phase 1: Step 단독 실행 기능 (블록 카드 ⏯ 단독)
+- **상황**: 사용자 요구 — step 5 만 단독 실행하고 싶은데 "▶ 여기서 실행" 누르면 5,6,7,...10 까지 실행됨. jupyter 처럼 N 만 실행 가능해야.
+- **분류**: **fix-now (적용 완료)**:
+  - `BlockCard` 에 "⏯ 단독" 버튼 (step_id>0 한정) + `run_single_requested` signal
+  - `BlockViewWidget`, `CodeViewer` signal 통과
+  - `workflow_engine.execute_session_blocks` 에 `stop_after_step_id` 인자 — 도달 시 break
+  - `MainWindow._on_run_single_step` 핸들러 — `_run_blocks_thread(start=stop=N)`
+  - 라이브러리 블럭 (step_id=0) 은 단독 버튼 없음 (한 번만 실행되는 setup)
+- **자동 검증**: test_49 (workflow_engine stop_after_step_id), test_50 (BlockCard 단독 버튼 + signal chain).
+
+### 2026-05-02 - Element picker 반응성 fix (descendants threshold + CDP 가드)
+- **상황**: cursor 이동 시 highlight 박스가 1초+ 지연. click 후 메인 화면 전환도 1-3초.
+- **근본 원인**:
+  1. `_detect_in_hwnd` 의 descendants 호출이 매 tick 마다 800-1000ms 사용. walker 가 이미 작은 element 잡아도 호출.
+  2. `_capture_dom_context` 의 CDP 포트 시도 (9222/9223/9224) 가 미연결 시 매번 timeout 대기 (3초).
+- **분류**: **fix-now (적용 완료)**:
+  - `NEEDS_DESCENDANTS_AREA_THRESHOLD = 5000` 가드 — walker 결과 area 작으면 descendants skip
+  - CDP timeout 1초 → 0.3초
+  - `cdp_enabled` settings (default false) — 매 click 마다 CDP 시도 회피. settings_dialog 에 체크박스.
+- **자동 검증**: test_47 (descendants threshold), test_48 (cdp_enabled 가드).
+
 ### 2026-04-28 늦은밤 - 웹페이지 요소 picker 리서치 정리 → [docs/element_picker_research.md](element_picker_research.md)
 - **배경**: Chrome 웹페이지 내부 요소를 picker 가 일관되게 못 잡음 (탭 갯수/타이밍에 따라 비결정적). 사용자 요청으로 기존 도구·라이브러리·방법론 검색 후 정리.
 - **핵심 발견**: Chrome accessibility 활성화의 **2단계 핸드셰이크** — `NotifyWinEvent(EVENT_SYSTEM_ALERT, kIdCustom=1)` + `WM_GETOBJECT(lParam=kIdCustom)` 응답. 우리는 현재 `OBJID_CLIENT(-4)` 로 보내고 있어 Chrome 의 custom check 와 매치 안 됨. 이게 가장 가능성 높은 원인.

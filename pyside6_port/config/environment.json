@@ -1,0 +1,134 @@
+{
+  "success": true,
+  "machine_id": "d2acbaab06f0091e",
+  "system_info": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "os_release": "11",
+    "architecture": "AMD64",
+    "processor": "AMD64 Family 23 Model 96 Stepping 1, AuthenticAMD",
+    "hostname": "HP-Laptop",
+    "username": "NeodaVinci",
+    "python_version": "3.12.1"
+  },
+  "python_path": "C:\\Users\\NeodaVinci\\ohdo\\.venv\\Scripts\\python.exe",
+  "python_version": "3.12.1",
+  "available_pythons": [
+    {
+      "path": "C:\\Users\\NeodaVinci\\ohdo\\.venv\\Scripts\\python.exe",
+      "version": "3.12.1",
+      "is_current": true,
+      "is_venv": true,
+      "exists": true
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Python38-32\\python.EXE",
+      "version": "3.8.7",
+      "is_current": false,
+      "is_venv": false,
+      "exists": true
+    },
+    {
+      "path": "C:\\Users\\NeodaVinci\\AppData\\Local\\Microsoft\\WindowsApps\\python3.EXE",
+      "version": "unknown",
+      "is_current": false,
+      "is_venv": false,
+      "exists": true
+    },
+    {
+      "path": "C:\\WINDOWS\\py.EXE",
+      "version": "3.12.1",
+      "is_current": false,
+      "is_venv": false,
+      "exists": true
+    },
+    {
+      "path": "C:\\Users\\NeodaVinci\\AppData\\Local\\Programs\\Python\\Python310-32\\python.exe",
+      "version": "3.10.11",
+      "is_current": false,
+      "is_venv": false,
+      "exists": true
+    },
+    {
+      "path": "C:\\Users\\NeodaVinci\\AppData\\Local\\Programs\\Python\\Python38\\python.exe",
+      "version": "3.8.5",
+      "is_current": false,
+      "is_venv": false,
+      "exists": true
+    }
+  ],
+  "packages": {
+    "required": [
+      {
+        "package": "PyQt6",
+        "import_name": "PyQt6",
+        "installed": true,
+        "version": "unknown",
+        "error": null
+      },
+      {
+        "package": "pyautogui",
+        "import_name": "pyautogui",
+        "installed": true,
+        "version": "0.9.54",
+        "error": null
+      },
+      {
+        "package": "Pillow",
+        "import_name": "PIL",
+        "installed": true,
+        "version": "12.2.0",
+        "error": null
+      },
+      {
+        "package": "mss",
+        "import_name": "mss",
+        "installed": true,
+        "version": "10.1.0",
+        "error": null
+      },
+      {
+        "package": "pywinauto",
+        "import_name": "pywinauto",
+        "installed": true,
+        "version": "0.6.9",
+        "error": null
+      },
+      {
+        "package": "pywin32",
+        "import_name": "win32api",
+        "installed": true,
+        "version": "unknown",
+        "error": null
+      }
+    ],
+    "optional": [
+      {
+        "package": "selenium",
+        "import_name": "selenium",
+        "installed": true,
+        "version": "4.43.0",
+        "error": null
+      },
+      {
+        "package": "playwright",
+        "import_name": "playwright",
+        "installed": false,
+        "version": null,
+        "error": null
+      }
+    ],
+    "all_required_installed": true
+  },
+  "gemini_cli": {
+    "installed": true,
+    "command": "gemini",
+    "path": "C:\\Users\\NeodaVinci\\AppData\\Roaming\\npm\\gemini.CMD",
+    "version": "0.39.1",
+    "error": null,
+    "detail": null
+  },
+  "scan_time": "2026-04-28T18:59:37.499222",
+  "last_scan": "2026-04-28T19:00:08.637017",
+  "hostname": "HP-Laptop"
+}

@@ -10,7 +10,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
     QLabel, QPushButton, QFrame, QPlainTextEdit, QSizePolicy,
-    QMessageBox, QTabWidget
+    QMessageBox, QTabWidget, QSpinBox, QCheckBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import (
@@ -511,6 +511,28 @@ class StepCard(QFrame):
 # 블럭 뷰 카드 (라이브러리 블럭 / 스텝 블럭 공통)
 # ──────────────────────────────────────────────────
 
+class _WaitSpinBox(QSpinBox):
+    """Wait 입력 전용 SpinBox - focus 시 숫자 부분만 자동 selectAll.
+
+    setSuffix(" ms") 가 적용되면 사용자가 클릭하는 위치에 따라 cursor 가
+    suffix 부근에 가거나 suffix 가 선택되는 케이스. focusIn 시 lineEdit
+    selectAll 호출해서 항상 숫자 부분이 선택되어 바로 덮어쓰기 가능하게 함.
+    """
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        # 즉시 selectAll 하면 lineEdit 처리 끝나기 전이라 효과 없음 - 0ms 후
+        QTimer.singleShot(0, self.lineEdit().selectAll)
+
+    def mousePressEvent(self, event):
+        # 이미 포커스 있는 상태에서 다시 클릭하면 normal cursor 처리.
+        # 포커스 없을 때 click 은 super 가 focus 잡고 focusInEvent 가 selectAll.
+        had_focus = self.hasFocus()
+        super().mousePressEvent(event)
+        if not had_focus:
+            QTimer.singleShot(0, self.lineEdit().selectAll)
+
+
 class BlockCard(QFrame):
     """Colab 스타일의 블럭 카드 — 라이브러리 블럭 또는 스텝 블럭"""
 
@@ -520,6 +542,8 @@ class BlockCard(QFrame):
     run_single_requested = pyqtSignal(int)
     # 코드 수정 완료 (step_id, new_code)
     block_code_edited = pyqtSignal(int, str)
+    # Step 후 대기시간 변경 요청 (step_id, new_wait_ms or None for default)
+    wait_changed = pyqtSignal(int, object)  # object 로 None 허용
     # 블럭 삭제 요청 (step_id)
     block_delete_requested = pyqtSignal(int)
 
@@ -568,20 +592,32 @@ class BlockCard(QFrame):
     """
 
     def __init__(self, step_id: int, title: str, code: str,
-                 status: str = "", parent=None):
+                 status: str = "", parent=None,
+                 wait_after_ms: int | None = None,
+                 default_wait_ms: int = 500):
         """
         Args:
-            step_id: 스텝 ID (0 = 라이브러리 블럭)
+            step_id: 스텝 ID (0 = 라이브러리 블럭, -1 = initial)
             title:   헤더에 표시할 제목
             code:    표시할 코드 (델타 코드 또는 import 목록)
             status:  "✅" / "❌" / "🔄" / "" 등 실행 상태 아이콘
+            wait_after_ms: 이 step 후 개별 대기시간 (None = default 사용)
+            default_wait_ms: settings 의 기본값 (라벨 회색 표시용)
         """
         super().__init__(parent)
         self.step_id = step_id
         self._expanded = True
         self._editing = False
+        self._wait_after_ms = wait_after_ms
+        self._default_wait_ms = default_wait_ms
 
-        border_color = "#89b4fa" if step_id == 0 else "#313244"
+        # 테두리 색: library(0)=파랑, initial(-1)=노랑, step(>0)=어둠
+        if step_id == 0:
+            border_color = "#89b4fa"
+        elif step_id < 0:
+            border_color = "#f9e2af"
+        else:
+            border_color = "#313244"
         self.setStyleSheet(f"""
             BlockCard {{
                 background-color: #181825;
@@ -609,7 +645,12 @@ class BlockCard(QFrame):
         self._expand_icon_label.setStyleSheet("color: #6c7086; border: none;")
         h_layout.addWidget(self._expand_icon_label)
 
-        title_color = "#89b4fa" if step_id == 0 else "#cba6f7"
+        if step_id == 0:
+            title_color = "#89b4fa"
+        elif step_id < 0:
+            title_color = "#f9e2af"
+        else:
+            title_color = "#cba6f7"
         self.title_label = QLabel(title)
         self.title_label.setFont(QFont("Malgun Gothic", 10, QFont.Weight.Bold))
         self.title_label.setStyleSheet(f"color: {title_color}; border: none;")
@@ -698,6 +739,60 @@ class BlockCard(QFrame):
         resize_handle = ResizeHandle([self.code_edit])
         c_layout.addWidget(resize_handle)
 
+        # ── Wait 입력 행 (step_id > 0 만, 코드 영역 하단에 인라인) ──
+        if step_id > 0:
+            wait_row = QFrame()
+            wait_row.setStyleSheet(
+                "QFrame { background: transparent; border-top: 1px dashed #313244; }"
+            )
+            wait_layout = QHBoxLayout(wait_row)
+            wait_layout.setContentsMargins(8, 4, 8, 4)
+            wait_layout.setSpacing(6)
+
+            wait_label = QLabel("⏱ 대기시간")
+            wait_label.setStyleSheet(
+                "color: #cdd6f4; border: none; font-size: 11px;"
+            )
+            wait_layout.addWidget(wait_label)
+
+            self.wait_spin = _WaitSpinBox()
+            self.wait_spin.setRange(0, 60000)
+            self.wait_spin.setSuffix(" ms")
+            # 화살표 버튼 제거 — ms 단위라 1씩 증감 불필요, 직접 입력
+            self.wait_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+            self.wait_spin.setValue(
+                wait_after_ms if wait_after_ms is not None else default_wait_ms
+            )
+            self.wait_spin.setToolTip(
+                "이 step 후 대기시간 (ms). 직접 입력.\n"
+                "오른쪽 '기본값 사용' 체크 시 세션/글로벌 default 사용."
+            )
+            self.wait_spin.setStyleSheet(self._wait_spin_style())
+            # editingFinished — 사용자가 enter 또는 focusOut 시점에만 emit.
+            # valueChanged 는 매 키 입력마다 발동 → 카드 재생성으로 포커스 손실 회귀.
+            self.wait_spin.editingFinished.connect(self._on_wait_spin_changed)
+            wait_layout.addWidget(self.wait_spin)
+
+            self.wait_default_cb = QCheckBox("기본값 사용")
+            self.wait_default_cb.setChecked(wait_after_ms is None)
+            self.wait_default_cb.setToolTip(
+                "체크: 세션/글로벌 default 사용 (개별 override 해제).\n"
+                "체크 해제: 위 입력란의 ms 값을 이 step 만 적용."
+            )
+            self.wait_default_cb.setStyleSheet(
+                "QCheckBox { color: #cdd6f4; font-size: 11px; border: none; }"
+                "QCheckBox::indicator { width: 14px; height: 14px; }"
+            )
+            self.wait_default_cb.toggled.connect(self._on_wait_default_toggled)
+            wait_layout.addWidget(self.wait_default_cb)
+
+            wait_layout.addStretch()  # 우측에 stretch — 위젯들 좌측 정렬
+
+            # 입력란 활성/비활성 초기 상태
+            self.wait_spin.setEnabled(wait_after_ms is not None)
+
+            c_layout.addWidget(wait_row)
+
         layout.addWidget(self.content_frame)
 
     # ──────────────────────────────────────
@@ -714,6 +809,72 @@ class BlockCard(QFrame):
 
     def get_code(self) -> str:
         return self.code_edit.toPlainText()
+
+    # ── Wait SpinBox 인라인 편집 + "기본값 사용" 체크박스 ──────────
+
+    def _wait_spin_style(self) -> str:
+        """개별 override 면 강조 테두리, 기본값이면 회색 + disabled 처럼"""
+        is_override = self._wait_after_ms is not None
+        border = "#f9e2af" if is_override else "#45475a"
+        text = "#f9e2af" if is_override else "#6c7086"
+        return f"""
+            QSpinBox {{
+                background-color: #11111b;
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 3px;
+                padding: 2px 6px;
+                font-size: 11px;
+                min-width: 90px;
+            }}
+            QSpinBox:focus {{ border-color: #89b4fa; }}
+            QSpinBox:disabled {{
+                background-color: #1e1e2e;
+                color: #6c7086;
+                border-color: #313244;
+            }}
+        """
+
+    def _on_wait_spin_changed(self):
+        """SpinBox editingFinished — 사용자가 enter/focusOut 시점에만 emit.
+
+        valueChanged 는 매 키 입력마다 발동해 카드 재생성으로 포커스 손실
+        (사용자가 '5555' 입력 시 첫 5 만 들어가고 포커스 잃는 회귀).
+        editingFinished 가 입력 완료 후 한번만 발동.
+        """
+        if self.wait_default_cb.isChecked():
+            return
+        value = self.wait_spin.value()
+        if value == self._wait_after_ms:
+            return  # 변경 없음 (focusOut 만으로 발동한 경우)
+        self._wait_after_ms = value
+        self.wait_changed.emit(self.step_id, value)
+
+    def _on_wait_default_toggled(self, checked: bool):
+        """기본값 사용 체크박스 — 체크: SpinBox 비활성화 + None emit"""
+        self.wait_spin.setEnabled(not checked)
+        if checked:
+            # default 사용 — SpinBox 값은 default_wait_ms 로 표시 (참고용)
+            self._wait_after_ms = None
+            self.wait_spin.blockSignals(True)
+            self.wait_spin.setValue(self._default_wait_ms)
+            self.wait_spin.blockSignals(False)
+            self.wait_spin.setStyleSheet(self._wait_spin_style())
+            self.wait_changed.emit(self.step_id, None)
+        else:
+            # override 모드 — 현재 SpinBox 값으로 emit
+            value = self.wait_spin.value()
+            self._wait_after_ms = value
+            self.wait_spin.setStyleSheet(self._wait_spin_style())
+            self.wait_changed.emit(self.step_id, value)
+
+    def update_default_wait(self, default_ms: int):
+        """세션 default 변경 시 — 체크 상태면 SpinBox 표시값도 갱신"""
+        self._default_wait_ms = default_ms
+        if hasattr(self, "wait_spin") and self.wait_default_cb.isChecked():
+            self.wait_spin.blockSignals(True)
+            self.wait_spin.setValue(default_ms)
+            self.wait_spin.blockSignals(False)
 
     # ──────────────────────────────────────
     # 내부 이벤트
@@ -787,6 +948,8 @@ class BlockViewWidget(QWidget):
     run_from_step_requested = pyqtSignal(int)
     # N번 스텝 단독 실행 (Phase 1 — 다음 step 안 함)
     run_single_step_requested = pyqtSignal(int)
+    # Step 후 대기시간 변경 (step_id, new_wait_ms or None)
+    wait_changed = pyqtSignal(int, object)
     # 중지 요청
     stop_requested = pyqtSignal()
     # 블럭 코드 수정 완료 (step_id, new_code)
@@ -797,6 +960,7 @@ class BlockViewWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._block_cards: list[BlockCard] = []
+        self._default_wait_ms = 500  # refresh 시 settings 에서 갱신
         self._setup_ui()
 
     def _setup_ui(self):
@@ -852,6 +1016,58 @@ class BlockViewWidget(QWidget):
         reset_btn.clicked.connect(self.kernel_reset_requested.emit)
         tb_layout.addWidget(reset_btn)
 
+        # 세션 default wait — 인라인 SpinBox + "글로벌 사용" 체크박스
+        sess_wait_label = QLabel("⏱ 세션 기본:")
+        sess_wait_label.setStyleSheet("color: #cdd6f4; font-size: 11px;")
+        tb_layout.addWidget(sess_wait_label)
+
+        self.session_wait_spin = _WaitSpinBox()
+        self.session_wait_spin.setRange(0, 60000)
+        self.session_wait_spin.setSuffix(" ms")
+        self.session_wait_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.session_wait_spin.setValue(500)
+        self.session_wait_spin.setToolTip(
+            "이 세션의 default 대기시간 (개별 step override 외엔 모두 이 값).\n"
+            "ms 단위로 직접 입력. 우측 '글로벌 사용' 체크 시 settings.execution.step_delay_ms 사용."
+        )
+        self.session_wait_spin.setStyleSheet("""
+            QSpinBox {
+                background-color: #11111b;
+                color: #cdd6f4;
+                border: 1px solid #45475a;
+                border-radius: 3px;
+                padding: 2px 6px;
+                font-size: 11px;
+                min-width: 90px;
+            }
+            QSpinBox:focus { border-color: #89b4fa; }
+            QSpinBox:disabled {
+                background-color: #1e1e2e; color: #6c7086; border-color: #313244;
+            }
+        """)
+        # editingFinished — 입력 완료 후에만 emit (포커스 손실 방지)
+        self.session_wait_spin.editingFinished.connect(
+            self._on_session_wait_spin_changed
+        )
+        # 직전 값 추적 (editingFinished 가 unchanged focusOut 도 trigger 하므로)
+        self._last_session_wait = 500
+        tb_layout.addWidget(self.session_wait_spin)
+
+        self.session_wait_global_cb = QCheckBox("글로벌 사용")
+        self.session_wait_global_cb.setChecked(True)
+        self.session_wait_global_cb.setToolTip(
+            "체크: 글로벌 settings.execution.step_delay_ms 사용.\n"
+            "체크 해제: 위 입력란의 ms 값을 이 세션 default 로."
+        )
+        self.session_wait_global_cb.setStyleSheet(
+            "QCheckBox { color: #cdd6f4; font-size: 11px; }"
+            "QCheckBox::indicator { width: 14px; height: 14px; }"
+        )
+        self.session_wait_global_cb.toggled.connect(self._on_session_wait_global_toggled)
+        # 초기 상태 — 글로벌 사용 (SpinBox 비활성)
+        self.session_wait_spin.setEnabled(False)
+        tb_layout.addWidget(self.session_wait_global_cb)
+
         self.kernel_status_label = QLabel("● 커널 없음")
         self.kernel_status_label.setStyleSheet("color: #6c7086; font-size: 11px;")
         tb_layout.addWidget(self.kernel_status_label)
@@ -874,14 +1090,24 @@ class BlockViewWidget(QWidget):
         self.scroll_area.setWidget(self.cards_container)
         layout.addWidget(self.scroll_area)
 
-    def refresh(self, library_code: str, steps_data: list[dict]):
+    def refresh(
+        self,
+        library_code: str,
+        steps_data: list[dict],
+        initial_code: str = "",
+        default_wait_ms: int = 500,
+    ):
         """
         블럭 뷰를 전체 갱신합니다.
 
         Args:
-            library_code: 라이브러리 블럭 코드 (imports + 헬퍼 함수)
-            steps_data:   [{"step_id": N, "title": "...", "delta_code": "...", "status": ""}, ...]
+            library_code: 라이브러리 블럭 코드 (imports + 헬퍼 함수, step_id=0)
+            steps_data:   각 step 의 dict. 키: step_id, title, delta_code, status,
+                wait_after_ms (None=default, int=개별)
+            initial_code: Initial 블럭 코드 (모듈 레벨 변수/상수, step_id=-1).
+            default_wait_ms: settings 의 기본값 (각 카드 라벨 회색 표시용).
         """
+        self._default_wait_ms = default_wait_ms
         self.clear()
 
         # 라이브러리 블럭
@@ -897,6 +1123,21 @@ class BlockViewWidget(QWidget):
             self._block_cards.append(lib_card)
             self._remove_stretch()
             self.cards_layout.addWidget(lib_card)
+            self.cards_layout.addStretch()
+
+        # Initial 블럭 (변수/초기값) — 첫 step 의 setup 변수만 추출 (없으면 skip)
+        if initial_code.strip():
+            init_card = BlockCard(
+                step_id=-1,
+                title="🎬 Initial 블럭 (변수/초기값)",
+                code=initial_code,
+                status=""
+            )
+            init_card.run_from_here_requested.connect(self._on_run_from)
+            init_card.block_code_edited.connect(self.block_code_edited)
+            self._block_cards.append(init_card)
+            self._remove_stretch()
+            self.cards_layout.addWidget(init_card)
             self.cards_layout.addStretch()
 
         # 스텝 블럭
@@ -918,12 +1159,15 @@ class BlockViewWidget(QWidget):
             step_id=step_id,
             title=f"📋 Step {step_id}: {title}",
             code=delta_code,
-            status=status
+            status=status,
+            wait_after_ms=data.get("wait_after_ms"),
+            default_wait_ms=self._default_wait_ms,
         )
         card.run_from_here_requested.connect(self._on_run_from)
         card.run_single_requested.connect(self.run_single_step_requested)
         card.block_code_edited.connect(self.block_code_edited)
         card.block_delete_requested.connect(self.block_delete_requested)
+        card.wait_changed.connect(self.wait_changed)
         self._block_cards.append(card)
         self._remove_stretch()
         self.cards_layout.addWidget(card)
@@ -949,6 +1193,45 @@ class BlockViewWidget(QWidget):
         self.run_all_btn.setEnabled(not running)
         self.stop_btn.setEnabled(running)
         self._update_run_buttons(disabled=running)
+
+    def _on_session_wait_spin_changed(self):
+        """세션 SpinBox editingFinished — 입력 완료 후에만 emit"""
+        if self.session_wait_global_cb.isChecked():
+            return
+        value = self.session_wait_spin.value()
+        if value == self._last_session_wait:
+            return  # 변경 없음 (focusOut 만)
+        self._last_session_wait = value
+        # sentinel step_id=0 으로 main_window 에 세션 settings 변경 신호
+        self.wait_changed.emit(0, value)
+
+    def _on_session_wait_global_toggled(self, checked: bool):
+        """글로벌 사용 체크박스 — 체크: SpinBox 비활성 + None emit"""
+        self.session_wait_spin.setEnabled(not checked)
+        if checked:
+            self.wait_changed.emit(0, None)
+        else:
+            self.wait_changed.emit(0, self.session_wait_spin.value())
+
+    def set_session_wait(self, ms):
+        """외부 (main_window) 에서 세션 default 변경 시 UI 갱신 (signal 차단)."""
+        self.session_wait_global_cb.blockSignals(True)
+        self.session_wait_spin.blockSignals(True)
+        if ms is None:
+            self.session_wait_global_cb.setChecked(True)
+            self.session_wait_spin.setValue(self._default_wait_ms)
+            self.session_wait_spin.setEnabled(False)
+        else:
+            self.session_wait_global_cb.setChecked(False)
+            self.session_wait_spin.setValue(int(ms))
+            self.session_wait_spin.setEnabled(True)
+        self.session_wait_global_cb.blockSignals(False)
+        self.session_wait_spin.blockSignals(False)
+        # 모든 BlockCard 의 default 정보 갱신
+        effective = ms if ms is not None else self._default_wait_ms
+        for card in self._block_cards:
+            if hasattr(card, "update_default_wait"):
+                card.update_default_wait(effective)
 
     def set_kernel_status(self, alive: bool, executed_steps: list[int]):
         """커널 상태 표시 갱신"""
@@ -995,6 +1278,7 @@ class CodeViewer(QWidget):
     # 블럭 뷰 전용 시그널
     run_from_step_requested = pyqtSignal(int)      # N번 스텝부터 블럭 실행 요청
     run_single_step_requested = pyqtSignal(int)    # N번 스텝 단독 실행 (Phase 1)
+    wait_changed = pyqtSignal(int, object)         # wait 변경 (step_id, ms or None)
     kernel_reset_requested = pyqtSignal()          # 커널 재시작 요청
     block_step_code_edited = pyqtSignal(int, str)  # 블럭에서 코드 수정 (step_id, new_code)
     block_step_delete_requested = pyqtSignal(int)  # 블럭 삭제 요청 (step_id)
@@ -1039,6 +1323,7 @@ class CodeViewer(QWidget):
         self.block_view = BlockViewWidget()
         self.block_view.run_from_step_requested.connect(self.run_from_step_requested)
         self.block_view.run_single_step_requested.connect(self.run_single_step_requested)
+        self.block_view.wait_changed.connect(self.wait_changed)
         self.block_view.kernel_reset_requested.connect(self.kernel_reset_requested)
         self.block_view.stop_requested.connect(self.stop_code_requested)
         self.block_view.block_code_edited.connect(self.block_step_code_edited)
@@ -1133,7 +1418,13 @@ class CodeViewer(QWidget):
     # 블럭 뷰 갱신
     # ──────────────────────────────────────
 
-    def refresh_block_view(self, library_code: str, steps_data: list[dict]):
+    def refresh_block_view(
+        self,
+        library_code: str,
+        steps_data: list[dict],
+        initial_code: str = "",
+        default_wait_ms: int = 500,
+    ):
         """
         블럭 뷰를 갱신합니다.
 
@@ -1141,7 +1432,7 @@ class CodeViewer(QWidget):
             library_code: 라이브러리 블럭 코드
             steps_data:   [{"step_id": N, "title": "...", "delta_code": "...", "status": ""}, ...]
         """
-        self.block_view.refresh(library_code, steps_data)
+        self.block_view.refresh(library_code, steps_data, initial_code, default_wait_ms)
 
     def update_block_step_status(self, step_id: int, status: str):
         """블럭 뷰의 특정 스텝 상태 갱신"""

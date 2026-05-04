@@ -2,6 +2,9 @@
 
 AI(Gemini CLI)와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성·실행하는 PyQt6 기반 RPA 솔루션.
 
+> **2026-05-02**: PySide6 포팅 버전이 [pyside6_port/](pyside6_port/) 에 추가됨 (라이선스 유연성 — LGPL).
+> 원본 PyQt6 는 그대로 유지. 양쪽 같은 `data/` (junction) 공유. 자세한 차이/실행법은 [pyside6_port/README.md](pyside6_port/README.md) 참조.
+
 ## 프로젝트 구조
 
 ```

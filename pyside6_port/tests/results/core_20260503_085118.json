@@ -1,0 +1,1171 @@
+{
+  "suite_name": "core",
+  "run_time": "2026-05-03T08:51:04.885080",
+  "duration_ms": 13226,
+  "total": 64,
+  "passed": 64,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "test_name": "CoreTest.test_01_session_create_and_load",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.463033",
+      "duration_ms": 32,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.477] ── 단계: 임시 디렉토리에 세션 매니저 생성 ──",
+        "[08:51:05.480] ── 단계: 세션 생성 ──",
+        "[08:51:05.484] [PASS] 세션 ID가 생성되어야 합니다",
+        "[08:51:05.484] [PASS] '테스트 세션' == '테스트 세션'",
+        "[08:51:05.484] [PASS] 'desktop' == 'desktop'",
+        "[08:51:05.484] 세션 생성됨: 5681e893-78c2-4821-b530-a1978f72820f",
+        "[08:51:05.484] ── 단계: 세션 로드 ──",
+        "[08:51:05.491] [PASS] 로드된 제목이 일치해야 합니다",
+        "[08:51:05.491] [PASS] 세션 ID가 일치해야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_02_session_step_management",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.495310",
+      "duration_ms": 23,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.498] ── 단계: 스텝 3개 추가 ──",
+        "[08:51:05.502] [PASS] 3개 스텝이 추가되어야 합니다",
+        "[08:51:05.502] ── 단계: 스텝 업데이트 ──",
+        "[08:51:05.512] [PASS] 스텝 2 상태가 업데이트되어야 합니다",
+        "[08:51:05.512] ── 단계: 스텝 삭제 ──",
+        "[08:51:05.514] [PASS] 스텝 삭제가 성공해야 합니다",
+        "[08:51:05.514] [PASS] 2개 스텝이 남아야 합니다",
+        "[08:51:05.514] [PASS] 첫 번째 스텝 ID = 1",
+        "[08:51:05.514] [PASS] 두 번째 스텝 ID = 2",
+        "[08:51:05.514] ── 단계: 스텝 이동 ──",
+        "[08:51:05.515] [PASS] 스텝 1이 아래로 이동해야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_03_session_list_and_delete",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.518700",
+      "duration_ms": 63,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.519] ── 단계: 세션 3개 생성 ──",
+        "[08:51:05.525] ── 단계: 세션 목록 조회 ──",
+        "[08:51:05.550] [PASS] 3개 세션이 목록에 있어야 합니다",
+        "[08:51:05.550] ── 단계: 세션 삭제 ──",
+        "[08:51:05.575] [PASS] 삭제 후 2개 세션이 남아야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_04_session_export_workflow",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.581949",
+      "duration_ms": 10,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.586] ── 단계: 워크플로우 내보내기 ──",
+        "[08:51:05.589] [PASS] import문이 포함되어야 합니다",
+        "[08:51:05.589] [PASS] os import가 포함되어야 합니다",
+        "[08:51:05.589] [PASS] 코드 본문이 포함되어야 합니다",
+        "[08:51:05.589] [PASS] 두 번째 스텝 코드도 포함되어야 합니다",
+        "[08:51:05.589] 내보낸 코드 길이: 264자"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_05_session_export_project",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.592642",
+      "duration_ms": 23,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.598] ── 단계: 프로젝트 내보내기 ──",
+        "[08:51:05.601] [PASS] main.py가 생성되어야 합니다",
+        "[08:51:05.601] [PASS] requirements.txt가 생성되어야 합니다",
+        "[08:51:05.601] [PASS] README.md가 생성되어야 합니다",
+        "[08:51:05.609] [PASS] main.py에 코드가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_06_prompt_builder_basic",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.616324",
+      "duration_ms": 2,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.618] ── 단계: PromptBuilder 생성 ──",
+        "[08:51:05.618] ── 단계: 스텝 프롬프트 생성 ──",
+        "[08:51:05.618] [PASS] 사용자 요청이 프롬프트에 포함되어야 합니다",
+        "[08:51:05.618] [PASS] pywinauto 가이드가 포함되어야 합니다",
+        "[08:51:05.618] [PASS] Selenium 가이드가 포함되어야 합니다",
+        "[08:51:05.618] [PASS] 코드블록 규칙이 포함되어야 합니다",
+        "[08:51:05.618] 프롬프트 길이: 13837자"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_07_prompt_builder_with_context",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.618846",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.618] ── 단계: 이전 코드 포함된 프롬프트 ──",
+        "[08:51:05.618] [PASS] 이전 스텝 코드가 포함되어야 합니다",
+        "[08:51:05.618] [PASS] 누적 코드 안내가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_08_prompt_builder_error_recovery",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.618846",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.618] ── 단계: 에러 복구 프롬프트 ──",
+        "[08:51:05.618] [PASS] 에러 메시지가 포함되어야 합니다",
+        "[08:51:05.618] [PASS] 현재 코드가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_09_prompt_builder_browser_element",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.618846",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.618] ── 단계: 브라우저 요소 컨텍스트 프롬프트 ──",
+        "[08:51:05.618] [PASS] 브라우저 요소일 때 Selenium 지시가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_10_sandbox_execute_success",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.618846",
+      "duration_ms": 70,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.623] ── 단계: 간단한 코드 실행 ──",
+        "[08:51:05.689] [PASS] 실행 성공해야 합니다: None",
+        "[08:51:05.689] [PASS] 출력이 캡처되어야 합니다",
+        "[08:51:05.689] 실행 시간: 64ms"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_11_sandbox_execute_error",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.689801",
+      "duration_ms": 61,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.689] ── 단계: 에러 코드 실행 ──",
+        "[08:51:05.751] [PASS] 실행 실패해야 합니다",
+        "[08:51:05.751] [PASS] 에러 메시지에 에러 타입이 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_12_sandbox_timeout",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:05.751605",
+      "duration_ms": 2021,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:05.751] ── 단계: 타임아웃 테스트 (2초 제한) ──",
+        "[08:51:07.772] [PASS] 타임아웃으로 실패해야 합니다",
+        "[08:51:07.773] [PASS] 타임아웃 에러 메시지가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_13_ai_engine_manager_init",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.773548",
+      "duration_ms": 11,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.779] ── 단계: 설정으로 초기화 ──",
+        "[08:51:07.779] [PASS] 기본 엔진이 gemini_cli이어야 합니다",
+        "[08:51:07.779] ── 단계: 사용 가능한 엔진 목록 ──",
+        "[08:51:07.785] [PASS] 최소 1개 엔진이 있어야 합니다",
+        "[08:51:07.785] 엔진 목록: [{'name': 'gemini_cli', 'display_name': 'Gemini CLI', 'available': True, 'is_current': True}]"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_14_ai_engine_switch",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.785430",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.785] ── 단계: 존재하지 않는 엔진 전환 시도 ──",
+        "[08:51:07.785] 예상된 에러 발생: 알 수 없는 AI 엔진: 'nonexistent'. 사용 가능: ['gemini_cli']"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_15_win_inspector_code_gen_desktop",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.785430",
+      "duration_ms": 2,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] ── 단계: 일반 데스크톱 요소 코드 생성 ──",
+        "[08:51:07.788] [PASS] pywinauto 코드가 포함되어야 합니다",
+        "[08:51:07.788] [PASS] automation_id가 포함되어야 합니다",
+        "[08:51:07.788] [PASS] DPI 설정 코드가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_16_win_inspector_code_gen_owner_drawn",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] ── 단계: Owner-drawn 요소 코드 생성 ──",
+        "[08:51:07.788] [PASS] owner-drawn 안내가 있어야 합니다",
+        "[08:51:07.788] [PASS] 좌표 기반 클릭 코드가 있어야 합니다",
+        "[08:51:07.788] [PASS] screen_x 좌표가 포함되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_17_win_inspector_code_gen_browser",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] ── 단계: 인터랙티브 브라우저 요소 (direct click) - CDP DOM 수집됨 ──",
+        "[08:51:07.788] [PASS] Button은 find_and_click 패턴이어야 합니다",
+        "[08:51:07.788] ── 단계: 비인터랙티브 브라우저 요소 (JS click) - CDP DOM 수집됨 ──",
+        "[08:51:07.788] [PASS] Text 요소는 JS click이어야 합니다",
+        "[08:51:07.788] [PASS] script 태그 제외 XPath가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_18_win_inspector_dynamic_autoid_warning",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] [PASS] 순수 숫자 auto_id에 대한 경고가 있어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_19_extract_imports_basic",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] [PASS] import 3개 추출",
+        "[08:51:07.788] [PASS] 첫 번째 import",
+        "[08:51:07.788] [PASS] body에 코드 포함",
+        "[08:51:07.788] [PASS] body에 import가 없어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_20_extract_imports_with_docstring",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] [PASS] docstring 이후 import 2개 추출",
+        "[08:51:07.788] [PASS] body에 코드 포함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_21_extract_imports_midcode_import_stays",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] [PASS] 상단 import만 1개 추출",
+        "[08:51:07.788] [PASS] 중간 import는 body에 남아야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_22_merge_imports_dedup",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] [PASS] 중복 제거 후 4개",
+        "[08:51:07.788] [PASS] import os는 1번만"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_23_assemble_script",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] [PASS] import 포함",
+        "[08:51:07.788] [PASS] 코드1 포함",
+        "[08:51:07.788] [PASS] import가 코드보다 먼저 나와야 합니다",
+        "[08:51:07.788] [PASS] 스텝1 시작 주석",
+        "[08:51:07.788] [PASS] 스텝1 끝 주석",
+        "[08:51:07.788] [PASS] 스텝2 시작 주석",
+        "[08:51:07.788] [PASS] 스텝1 코드 포함",
+        "[08:51:07.788] [PASS] 스텝2 코드 포함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_24_extract_package_names",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.788156",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.788] [PASS] pywinauto 포함",
+        "[08:51:07.788] [PASS] selenium 포함",
+        "[08:51:07.788] [PASS] pyautogui 포함",
+        "[08:51:07.789] [PASS] os는 stdlib이므로 제외",
+        "[08:51:07.789] [PASS] time은 stdlib이므로 제외"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_25_export_workflow_with_step_comments",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.789162",
+      "duration_ms": 2,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.789] ── 단계: 스텝 2개로 export (conversation 포함) ──",
+        "[08:51:07.790] [PASS] export에서 import os 중복 제거",
+        "[08:51:07.790] [PASS] 스텝1 시작 주석",
+        "[08:51:07.790] [PASS] 스텝1 끝 주석",
+        "[08:51:07.790] [PASS] 스텝2 시작 주석",
+        "[08:51:07.790] [PASS] 스텝2 끝 주석",
+        "[08:51:07.790] [PASS] 스텝1 코드 포함",
+        "[08:51:07.790] [PASS] 스텝2 코드 포함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_26_env_machine_id_stable",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.791162",
+      "duration_ms": 54,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.844] [PASS] machine_id 가 동일 환경에서 안정적이어야 합니다",
+        "[08:51:07.844] [PASS] machine_id 는 16자 hex 문자열이어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_27_env_save_load_roundtrip",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.845585",
+      "duration_ms": 16,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.847] ── 단계: 환경 데이터 저장 ──",
+        "[08:51:07.848] [PASS] save_environment 는 성공해야 합니다",
+        "[08:51:07.848] ── 단계: 저장된 환경 로드 ──",
+        "[08:51:07.859] [PASS] 저장 직후 로드는 dict 를 반환해야 합니다",
+        "[08:51:07.859] [PASS] 'C:\\\\Users\\\\NeodaVinci\\\\ohdo\\\\pyside6_port\\\\.venv\\\\Scripts\\\\python.exe' == 'C:\\\\Users\\\\NeodaVinci\\\\ohdo\\\\pyside6_port\\\\.venv\\\\Scripts\\\\python.exe'",
+        "[08:51:07.859] [PASS] machine_id 가 자동으로 박혀야 합니다",
+        "[08:51:07.859] [PASS] last_scan 타임스탬프가 박혀야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_28_env_load_other_machine_resets",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.861826",
+      "duration_ms": 11,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.863] ── 단계: 타 컴퓨터의 환경 파일 시뮬레이션 ──",
+        "[08:51:07.864] [PASS] 사전 조건: 환경 파일이 존재",
+        "[08:51:07.864] ── 단계: load_saved_environment 호출 ──",
+        "[08:51:07.872] [PASS] 다른 머신의 설정은 None 을 반환해야 합니다",
+        "[08:51:07.872] [PASS] 다른 머신 감지 시 파일이 삭제되어야 합니다"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_29_probe_python_version_current",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.872964",
+      "duration_ms": 35,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.908] [PASS] sys.executable(C:\\Users\\NeodaVinci\\ohdo\\pyside6_port\\.venv\\Scripts\\python.exe) 의 버전 = 3.12.1"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_30_check_gemini_cli_not_found",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.908069",
+      "duration_ms": 6,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:07.913] [PASS] 없는 명령은 installed=False",
+        "[08:51:07.913] [PASS] 'not_found' == 'not_found'",
+        "[08:51:07.913] [PASS] PATH 에서 못 찾으면 path=None",
+        "[08:51:07.913] [PASS] 사용자에게 보일 detail 메시지가 있어야 함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_31_check_gemini_cli_shape",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:07.914639",
+      "duration_ms": 1356,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:09.270] [PASS] 결과 dict 에 'installed' 키가 있어야 합니다",
+        "[08:51:09.270] [PASS] 결과 dict 에 'command' 키가 있어야 합니다",
+        "[08:51:09.270] [PASS] 결과 dict 에 'path' 키가 있어야 합니다",
+        "[08:51:09.270] [PASS] 결과 dict 에 'version' 키가 있어야 합니다",
+        "[08:51:09.270] [PASS] 결과 dict 에 'error' 키가 있어야 합니다",
+        "[08:51:09.270] [PASS] 결과 dict 에 'detail' 키가 있어야 합니다",
+        "[08:51:09.270] [PASS] 'gemini' == 'gemini'",
+        "[08:51:09.270] [PASS] installed 는 bool",
+        "[08:51:09.270] [PASS] installed=True 면 error=None",
+        "[08:51:09.270] [PASS] installed=True 면 version 존재"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_32_full_scan_includes_gemini_section",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:09.271558",
+      "duration_ms": 4242,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:13.513] [PASS] full_scan 성공",
+        "[08:51:13.513] [PASS] 결과에 gemini_cli 섹션 포함",
+        "[08:51:13.513] [PASS] gemini_cli 는 dict",
+        "[08:51:13.513] [PASS]"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_33_kernel_basic_lifecycle",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:13.514367",
+      "duration_ms": 1103,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:13.517] [PASS] 초기 not alive",
+        "[08:51:13.517] ── 단계: start() ──",
+        "[08:51:13.525] [PASS] start 후 alive",
+        "[08:51:13.525] ── 단계: ping() ──",
+        "[08:51:13.602] [PASS] ping 응답",
+        "[08:51:13.602] ── 단계: stop() ──",
+        "[08:51:14.105] [PASS] stop 후 not alive",
+        "[08:51:14.105] ── 단계: 재기동 ──",
+        "[08:51:14.112] [PASS] 재기동 alive"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_34_kernel_executes_code_with_namespace",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:14.617821",
+      "duration_ms": 579,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:14.622] ── 단계: 첫 블럭에서 변수 정의 ──",
+        "[08:51:14.685] [PASS] 첫 블럭 성공해야 함 (error=None)",
+        "[08:51:14.685] ── 단계: 두 번째 블럭에서 이전 변수 사용 ──",
+        "[08:51:14.687] [PASS] 둘째 블럭 성공",
+        "[08:51:14.687] [PASS] 변수 x 보존",
+        "[08:51:14.687] [PASS] 변수 y 보존",
+        "[08:51:14.687] ── 단계: executed_steps 추적 ──",
+        "[08:51:14.687] [PASS] 1, 2 가 추적됨"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_35_kernel_stop_terminates_subprocess",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:15.196902",
+      "duration_ms": 523,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:15.201] [PASS] start 후 _proc 존재",
+        "[08:51:15.201] 커널 PID=111284",
+        "[08:51:15.201] ── 단계: stop() 호출 ──",
+        "[08:51:15.719] [PASS] stop() 후 자식 프로세스가 종료되어야 함 (poll=1, PID=111284)",
+        "[08:51:15.719] 종료 코드: 1"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_36_kernel_timeout_triggers_restart_capability",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:15.720778",
+      "duration_ms": 2112,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:15.727] ── 단계: 긴 sleep 코드 1초 timeout 으로 실행 → 강제 종료 유발 ──",
+        "[08:51:17.255] [PASS] 타임아웃은 실패로 보고",
+        "[08:51:17.255] [PASS] 에러 메시지에 시간 초과 표시",
+        "[08:51:17.255] [PASS] 타임아웃 후 커널 종료 상태",
+        "[08:51:17.255] ── 단계: 재기동 후 정상 실행 ──",
+        "[08:51:17.261] [PASS] 재기동 alive",
+        "[08:51:17.330] [PASS] 재기동 후 정상 실행 (error=None)",
+        "[08:51:17.331] [PASS] 재기동 후 출력 정상"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_37_element_picker_force_topmost_exists",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.832784",
+      "duration_ms": 67,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.896] [PASS] [회귀] ElementPickerOverlay._force_topmost 메서드가 존재해야 함",
+        "[08:51:17.896] [PASS] [회귀] HWND_TOPMOST 상수 존재해야 함",
+        "[08:51:17.896] [PASS] HWND_TOPMOST=-1",
+        "[08:51:17.896] [PASS] [회귀] SWP_NOMOVE/SWP_NOSIZE/SWP_NOACTIVATE 상수 존재",
+        "[08:51:17.900] [PASS] [회귀] start_picking 이 _force_topmost() 를 호출해야 함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_38_element_picker_detection_helpers_exist",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.900755",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay._find_topmost_window_at_point 가 존재해야 함",
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay._walk_uia_to_deepest 가 존재해야 함",
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay._find_deepest_descendant 가 존재해야 함",
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay._raw_walk_at_point 가 존재해야 함",
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay._detect_via_efp 가 존재해야 함",
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay._detect_element_multi_backend 가 존재해야 함",
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay._update_element_under_cursor 가 존재해야 함",
+        "[08:51:17.900] [PASS] [회귀] ElementPickerOverlay.mousePressEvent 가 존재해야 함"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_39_element_picker_walkers_in_helper",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.900755",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.900] [PASS] [회귀] _detect_in_hwnd helper 메서드 존재 필수",
+        "[08:51:17.901] [PASS] [회귀] _detect_in_hwnd 가 children walk 호출 필수",
+        "[08:51:17.901] [PASS] [회귀] _detect_in_hwnd 가 raw walker 호출 필수",
+        "[08:51:17.901] [PASS] [회귀] _detect_in_hwnd 가 descendants 폴백 호출 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_40_element_picker_tries_main_and_child_hwnd",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.901765",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.903] [PASS] [회귀] main HWND 추출 (EnumWindows 기반) 필수",
+        "[08:51:17.903] [PASS] [회귀] child HWND 추출 필수 (HTML 콘텐츠 detection)",
+        "[08:51:17.903] [PASS] [회귀] _detect_in_hwnd helper 호출 필수",
+        "[08:51:17.903] [PASS] [회귀] HWND 후보 리스트 (main + child) 패턴 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_41_element_picker_uses_element_from_point",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.903301",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.903] [PASS] [회귀] _detect_via_efp 가 IUIAutomation::ElementFromPoint 호출 필수",
+        "[08:51:17.903] [PASS] [회귀] _detect_via_efp 가 pywinauto.uia_defines.IUIA 사용 필수",
+        "[08:51:17.904] [PASS] [회귀] _detect_element_multi_backend 가 _detect_via_efp 호출 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_42_element_picker_post_pause_always_transparent",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.904310",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.905] [PASS] [회귀] _resume_after_pause 가 WS_EX_TRANSPARENT 적용 필수 (방향 B 통합)",
+        "[08:51:17.905] [PASS] [회귀] _resume_after_pause 가 WS_EX_NOACTIVATE 적용 필수 (focus 빼앗기 방지)",
+        "[08:51:17.905] [PASS] [회귀] _exit_post_pause_mode 가 WS_EX_TRANSPARENT 제거 필수",
+        "[08:51:17.905] [PASS] [회귀] _exit_post_pause_mode 가 WS_EX_NOACTIVATE 제거 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_43_element_picker_efp_toggle_scoped_to_efp_call",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.905330",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.905] [PASS] [회귀] _detect_element_multi_backend 가 try/finally 로 ex_style 복원 보장 필수",
+        "[08:51:17.905] [PASS] [회귀] _detect_element_multi_backend 가 WS_EX_TRANSPARENT 토글 (Excel 셀 detection) 필수",
+        "[08:51:17.905] [PASS] [회귀] _detect_element_multi_backend 가 _detect_via_efp 호출 필수",
+        "[08:51:17.905] [PASS] [회귀] _detect_via_efp 가 try 블록 안에서 호출 (토글 보호 필수)"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_44_element_picker_mouse_hook_in_post_pause",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.905840",
+      "duration_ms": 2,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.905] [PASS] [회귀] ElementPickerOverlay._install_mouse_hook 가 존재해야 함",
+        "[08:51:17.905] [PASS] [회귀] ElementPickerOverlay._uninstall_mouse_hook 가 존재해야 함",
+        "[08:51:17.905] [PASS] [회귀] ElementPickerOverlay._on_hook_click 가 존재해야 함",
+        "[08:51:17.906] [PASS] [회귀] _install_mouse_hook 가 WH_MOUSE_LL 사용 필수",
+        "[08:51:17.906] [PASS] [회귀] _install_mouse_hook 가 WM_LBUTTONDOWN 검사 필수",
+        "[08:51:17.906] [PASS] [회귀] _install_mouse_hook 가 WM_LBUTTONUP 차단 필수 (down/up consistency)",
+        "[08:51:17.906] [PASS] [회귀] _install_mouse_hook 가 WM_RBUTTONDOWN 검사 필수 (cancel)",
+        "[08:51:17.906] [PASS] [회귀] _install_mouse_hook 가 click 차단 (return 1) 필수 - underlying 메뉴/버튼 발동 방지",
+        "[08:51:17.906] [PASS] [회귀] _install_mouse_hook 가 다른 mouse event 통과 (CallNextHookEx) 필수",
+        "[08:51:17.906] [PASS] [회귀] _on_hook_rclick 존재 필수 (우클릭 = cancel)",
+        "[08:51:17.908] [PASS] [회귀] _resume_after_pause 가 _install_mouse_hook 호출 필수",
+        "[08:51:17.908] [PASS] [회귀] _exit_post_pause_mode 가 _uninstall_mouse_hook 호출 필수",
+        "[08:51:17.908] [PASS] [회귀] _on_hook_click 가 element_picked/pick_cancelled emit 필수",
+        "[08:51:17.908] [PASS] [회귀] _on_hook_click 가 stop_picking 호출 (picker UI 종료) 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_45_element_picker_post_pause_auto_transition",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.908527",
+      "duration_ms": 2,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.908] [PASS] [회귀] POST_PAUSE_TRANSITION_MS 상수 존재 필수",
+        "[08:51:17.909] [PASS] [회귀] update_settings 가 post_pause_transition_ms 키 처리 필수",
+        "[08:51:17.909] [PASS] [회귀] update_settings 가 _post_pause_transition_ms 인스턴스 변수 셋 필수",
+        "[08:51:17.910] [PASS] [회귀] _resume_after_pause 가 _post_pause_transition_ms 인스턴스 값 사용 필수",
+        "[08:51:17.910] [PASS] [회귀] _resume_after_pause 가 0 가드 (transition 비활성 옵션) 필수",
+        "[08:51:17.910] [PASS] [회귀] _start_pause 가 transition timer 정지 (post_pause 중 F3 재진입 안전) 필수",
+        "[08:51:17.910] [PASS] [회귀] _exit_post_pause_mode 가 idempotent guard 필수 (race 방어)"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_46_element_picker_keyboard_hook_lifecycle",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.910536",
+      "duration_ms": 3,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.912] [PASS] [회귀] start_picking 가 _install_keyboard_hook 호출 필수 (lifecycle 시작)",
+        "[08:51:17.912] [PASS] [회귀] stop_picking 가 _uninstall_keyboard_hook 호출 필수 (lifecycle 종료)",
+        "[08:51:17.913] [PASS] [회귀] _install_keyboard_hook 가 재설치 방지 guard 필수 (leak 방지)",
+        "[08:51:17.913] [PASS] [회귀] hook 콜백이 picker active 조건 (isHidden/paused) 검사 필수",
+        "[08:51:17.913] [PASS] [회귀] _on_hook_esc 가 stop_picking 호출 필수",
+        "[08:51:17.913] [PASS] [회귀] _on_hook_esc 가 pick_cancelled emit 필수",
+        "[08:51:17.913] [PASS] [회귀] _on_hook_f3 가 _paused guard 필수 (wait 중 F3 무시)",
+        "[08:51:17.913] [PASS] [회귀] _on_hook_f3 가 _start_pause 호출 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_47_element_picker_descendants_area_threshold",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.913562",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.913] [PASS] [회귀] NEEDS_DESCENDANTS_AREA_THRESHOLD 상수 존재 필수",
+        "[08:51:17.914] [PASS] [회귀] _detect_in_hwnd 가 NEEDS_DESCENDANTS_AREA_THRESHOLD 가드 사용 필수 (반응성 - 작은 element 잡힌 후 descendants skip)"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_48_element_picker_cdp_enabled_default_false",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.914563",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.915] [PASS] [회귀] __init__ 에 _cdp_enabled 인스턴스 변수 초기화 필수",
+        "[08:51:17.915] [PASS] [회귀] update_settings 가 cdp_enabled 키 처리 필수",
+        "[08:51:17.915] [PASS] [회귀] _capture_dom_context 가 _cdp_enabled 가드 필수 (disabled 시 즉시 반환)",
+        "[08:51:17.915] [PASS] [회귀] _capture_dom_context 가 disabled 시 cdp_available=False 반환"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_49_workflow_engine_stop_after_step_id",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.915562",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:17.915] [PASS] [회귀] execute_session_blocks 가 stop_after_step_id 파라미터 필수",
+        "[08:51:17.915] [PASS] [회귀] stop_after_step_id default None (기본은 끝까지 실행)",
+        "[08:51:17.917] [PASS] [회귀] execute_session_blocks 본문에 stop_after_step_id 도달 시 break 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_50_block_card_run_single_button",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:17.917311",
+      "duration_ms": 150,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.065] [PASS] [회귀] BlockCard.run_single_requested signal 필수",
+        "[08:51:18.067] [PASS] [회귀] step_id>0 일 때만 단독 실행 버튼 생성 (라이브러리 블럭 제외) 필수",
+        "[08:51:18.067] [PASS] [회귀] BlockViewWidget.run_single_step_requested signal 필수",
+        "[08:51:18.067] [PASS] [회귀] _add_step_block 가 run_single_requested signal connect 필수",
+        "[08:51:18.067] [PASS] [회귀] CodeViewer.run_single_step_requested signal 필수",
+        "[08:51:18.067] [PASS] [회귀] MainWindow._on_run_single_step 핸들러 필수",
+        "[08:51:18.067] [PASS] [회귀] _on_run_single_step 가 start=stop=N 으로 호출 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_51_extract_code_delta_handles_minor_changes",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.067369",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.068] [PASS] [회귀] extract_code_delta 가 SequenceMatcher fallback 사용 필수",
+        "[08:51:18.068] [PASS] [회귀] SequenceMatcher ratio 검사 필수 (거의 다른 코드면 전체 반환)",
+        "[08:51:18.068] [PASS] [회귀] prefix 매칭 - 새 라인만 반환",
+        "[08:51:18.068] [PASS] [회귀] SequenceMatcher fallback - 누적된 새 코드 추출"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_52_extract_step_delta_code_uses_prev_step",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.068950",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.068] [PASS] [회귀] extract_step_delta_code 가 prev_step 인자 받기 필수",
+        "[08:51:18.068] [PASS] [회귀] extract_step_delta_code 가 extract_code_delta 사용 (재계산) 필수",
+        "[08:51:18.070] [PASS] [회귀] prev_step 기반 재계산 - step2 의 진짜 delta (driver.get) 만 반환 (실제: \"driver.get('https://example.com')\")"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_53_extract_code_delta_smart_dedent",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.070494",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.070] [PASS] [회귀] indent 4 제거 (실제: 'x = 1\\ny = 2')",
+        "[08:51:18.070] [PASS] [회귀] 주석 (indent 0) + 코드 (indent 4) 혼재 시 코드 라인만 dedent (실제: '# === Step 2 ===\\nx = 1\\ny = 2')",
+        "[08:51:18.071] [PASS] [회귀] extract_code_delta 결과가 module-level 컴파일 가능해야 함 (실제 delta: 'c = 3')"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_54_unwrap_main_function",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.071525",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.072] [PASS] [회귀] def main 제거 필수",
+        "[08:51:18.072] [PASS] [회귀] if __name__ 블록 제거 필수",
+        "[08:51:18.072] [PASS] [회귀] driver 가 module-level Assign 으로 unwrap 필수 (실제: ['driver'])",
+        "[08:51:18.072] [PASS] [회귀] main 함수 없으면 원본 그대로"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_55_block_run_lowers_main_window",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.072530",
+      "duration_ms": 1,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.073] [PASS] [회귀] _on_run_from_step 가 self.lower() 호출 필수 (z-order 최하단)",
+        "[08:51:18.073] [PASS] [회귀] _on_run_single_step 가 self.lower() 호출 필수",
+        "[08:51:18.073] [PASS] [회귀] _restore_main_window 헬퍼 필수",
+        "[08:51:18.073] [PASS] [회귀] _restore_main_window 가 raise_ + activateWindow 호출 필수",
+        "[08:51:18.073] [PASS] [회귀] _on_blocks_finished 가 _restore_main_window 호출 필수",
+        "[08:51:18.073] [PASS] [회귀] _on_stop_code 가 _restore_main_window 호출 필수 (stop 시 즉시 복원)"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_56_run_stop_interaction_between_tabs",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.074512",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.074] [PASS] [회귀] _on_run_code 가 set_running(True) 호출 필수 (UI 상태 일치)",
+        "[08:51:18.074] [PASS] [회귀] _execute_code_thread finally 에 set_running(False) 호출 필수",
+        "[08:51:18.074] [PASS] [회귀] _on_stop_code 가 ExecutionKernel.stop 도 호출 필수 (블럭 모드 step 진행 중 즉시 종료)",
+        "[08:51:18.074] [PASS] [회귀] _on_stop_code 가 set_running(False) 호출 필수 (UI 즉시 복원)"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_57_blocks_finished_uses_signal",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.074512",
+      "duration_ms": 2,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.074] [PASS] [회귀] AsyncSignals.blocks_finished signal 필수",
+        "[08:51:18.075] [PASS] [회귀] _run_blocks_thread 의 finally 가 blocks_finished.emit 호출 필수",
+        "[08:51:18.076] [PASS] [회귀] AsyncSignals.blocks_finished 가 _on_blocks_finished 에 connect 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_58_extract_step_delta_marker_priority",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.076622",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.076] [PASS] [회귀] step3 delta 가 module-level compile 가능해야 함 (SyntaxError: None, delta: 'try:\\n    pyautogui.click(100, 200)\\n    time.sleep(1)\\nexcept Exception as e:\\n    print(e)')",
+        "[08:51:18.076] [PASS] [회귀] step3 본문 (pyautogui.click) 포함 필수 (delta: 'try:\\n    pyautogui.click(100, 200)\\n    time.sleep(1)\\nexcept Exception as e:\\n    print(e)')",
+        "[08:51:18.076] [PASS] [회귀] step2 의 미세 변경된 라인이 step3 delta 에 섞이면 안 됨 (delta: 'try:\\n    pyautogui.click(100, 200)\\n    time.sleep(1)\\nexcept Exception as e:\\n    print(e)')"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_59_extract_step_delta_compile_validation",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.076622",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.076] [PASS] [회귀] 정상 코드는 _is_compilable True",
+        "[08:51:18.076] [PASS] [회귀] indent 만 있는 orphan 코드는 _is_compilable False",
+        "[08:51:18.076] [PASS] [회귀] 빈 문자열은 _is_compilable False",
+        "[08:51:18.076] [PASS] [회귀] _extract_by_step_marker 가 마커 사이만 추출 (실제: 'y = 2\\nz = 3')",
+        "[08:51:18.076] [PASS] [회귀] 마커 없으면 빈 문자열 (실제: '')"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_60_extract_initial_block",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.076622",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.076] [PASS] [회귀] 모듈 레벨 Assign 추출 (실제: \"URL = 'https://example.com'\\nCONFIG = {'k': 1}\")",
+        "[08:51:18.077] [PASS] [회귀] try 블록 안 setup Assign 추출 (실제: 'options = Options()\\ndriver = webdriver.Chrome(options=options)')",
+        "[08:51:18.077] [PASS] [회귀] def main() unwrap 후 Assign 추출 (실제: \"URL = 'https://test.com'\\ndriver = build()\")",
+        "[08:51:18.077] [PASS] [회귀] step 없으면 빈 문자열",
+        "[08:51:18.077] [PASS] [회귀] None 세션 빈 문자열"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_61_block_view_initial_card",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.077604",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.077] [PASS] [회귀] BlockViewWidget.refresh 가 initial_code 인자 받기 필수",
+        "[08:51:18.077] [PASS] [회귀] CodeViewer.refresh_block_view 가 initial_code 인자 받기 필수",
+        "[08:51:18.078] [PASS] [회귀] _refresh_block_view 가 extract_initial_block 호출 필수",
+        "[08:51:18.078] [PASS] [회귀] _refresh_block_view 가 initial_code 변수 사용 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_62_close_event_single_definition",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.078116",
+      "duration_ms": 28,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.106] [PASS] [회귀] closeEvent 단일 정의 필수 (실제 1회 정의)",
+        "[08:51:18.106] [PASS] [회귀] closeEvent 가 세션 저장 수행 필수",
+        "[08:51:18.106] [PASS] [회귀] closeEvent 가 커널 정리 수행 필수"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_63_step_wait_after_ms",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.106662",
+      "duration_ms": 5,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.106] [PASS] [회귀] Step.wait_after_ms 필드 + default None 필수",
+        "[08:51:18.106] [PASS] [회귀] Session.settings.step_delay_ms 키 필수",
+        "[08:51:18.106] [PASS] [회귀] Session.settings.step_delay_ms default None (글로벌 사용)",
+        "[08:51:18.108] [PASS] [회귀] execute_session_blocks 가 step + session 둘 다 검사 필수",
+        "[08:51:18.108] [PASS] [회귀] BlockCard.__init__ wait_after_ms 인자 필수",
+        "[08:51:18.108] [PASS] [회귀] BlockCard.wait_changed signal 필수",
+        "[08:51:18.109] [PASS] [회귀] BlockCard 가 인라인 SpinBox 사용 (헤더 dialog 가 아님) 필수",
+        "[08:51:18.110] [PASS] [회귀] BlockViewWidget toolbar 의 세션 default wait SpinBox 필수",
+        "[08:51:18.110] [PASS] [회귀] BlockViewWidget.set_session_wait 메서드 (외부 갱신용) 필수",
+        "[08:51:18.111] [PASS] [회귀] _on_wait_changed 가 current_session.settings.step_delay_ms 변경 필수 (글로벌 settings 분리)"
+      ],
+      "error": null,
+      "error_type": null
+    },
+    {
+      "test_name": "CoreTest.test_64_extract_code_delta_filters_stale_except_var",
+      "suite": "core",
+      "status": "pass",
+      "timestamp": "2026-05-03T08:51:18.111747",
+      "duration_ms": 0,
+      "steps": [],
+      "screenshots": [],
+      "logs": [
+        "[08:51:18.111] [PASS] [회귀] 진짜 새 액션 라인은 추출 (실제 delta: \"driver.get('https://x')\\nprint('navigated')\")",
+        "[08:51:18.111] [PASS] [회귀] e 캡처 변수 참조 stale 라인 제거 (except 헤더 없으면 NameError) (실제 delta: \"driver.get('https://x')\\nprint('navigated')\")",
+        "[08:51:18.111] [PASS] [회귀] 필터링 후 delta 가 module-level 컴파일 가능해야 함"
+      ],
+      "error": null,
+      "error_type": null
+    }
+  ],
+  "environment": {
+    "os": "Windows",
+    "os_version": "10.0.26200",
+    "python": "3.12.1",
+    "machine": "AMD64",
+    "timestamp": "2026-05-03T08:51:04.981063",
+    "screen_width": 1920,
+    "screen_height": 1080,
+    "pkg_pyautogui": "0.9.54",
+    "pkg_pywinauto": "0.6.9",
+    "pkg_PySide6": "6.11.0",
+    "pkg_selenium": "4.43.0",
+    "pkg_Pillow": "12.2.0"
+  }
+}

@@ -45,6 +45,7 @@ from core.ai_engine import AIEngineManager
 from core.session_manager import SessionManager, Session, Step
 from core.prompt_builder import PromptBuilder
 from core.workflow_engine import WorkflowEngine, CodeSandbox, extract_library_block, extract_step_delta_code
+from core.import_manager import extract_initial_block
 from core.execution_kernel import ExecutionKernel
 from core.win_inspector import WindowInspector
 
@@ -124,8 +125,12 @@ class MainWindow(QMainWindow):
 
         # ── UI 요소 피커 오버레이 ──
         self.element_picker = ElementPickerOverlay(settings=self.settings)
-        self.element_picker.element_picked.connect(self._on_element_picked)
-        self.element_picker.pick_cancelled.connect(self._on_element_pick_cancelled)
+
+        # ── UI 검사 핸들러 (element picker + window inspector 콜백 분리) ──
+        from ui.ui_inspection_handler import UIInspectionHandler
+        self.inspection_handler = UIInspectionHandler(self)
+        self.element_picker.element_picked.connect(self.inspection_handler.on_picked)
+        self.element_picker.pick_cancelled.connect(self.inspection_handler.on_pick_cancelled)
 
         # ── 비동기 시그널 ──
         self.signals = AsyncSignals()
@@ -200,7 +205,7 @@ class MainWindow(QMainWindow):
         self.chat_panel = ChatPanel()
         self.chat_panel.message_sent.connect(self._on_user_message)
         self.chat_panel.capture_requested.connect(self._on_capture_request)
-        self.chat_panel.element_pick_requested.connect(self._on_element_pick_request)
+        self.chat_panel.element_pick_requested.connect(self.inspection_handler.on_pick_request)
         self.chat_panel.cancel_requested.connect(self._on_cancel_ai)
         self.main_splitter.addWidget(self.chat_panel)
 
@@ -215,6 +220,7 @@ class MainWindow(QMainWindow):
         # 블럭 뷰 전용
         self.code_viewer.run_from_step_requested.connect(self._on_run_from_step)
         self.code_viewer.run_single_step_requested.connect(self._on_run_single_step)
+        self.code_viewer.wait_changed.connect(self._on_wait_changed)
         self.code_viewer.kernel_reset_requested.connect(self._on_kernel_reset)
         self.code_viewer.block_step_code_edited.connect(self._on_block_step_code_edited)
         self.code_viewer.block_step_delete_requested.connect(self._on_step_delete)
@@ -1021,7 +1027,7 @@ class MainWindow(QMainWindow):
 
     def _inspect_then_capture(self):
         """최소화 후: 포그라운드 윈도우 검사 → 캡처 시작"""
-        self._auto_inspect_before_capture()
+        self.inspection_handler.auto_inspect_before_capture()
         QTimer.singleShot(100, self._start_region_capture)
 
     def _start_region_capture(self):
@@ -1108,10 +1114,10 @@ class MainWindow(QMainWindow):
                 handle=hwnd,
                 max_depth=3, max_controls=50
             )
-            self._finish_inspect(window_info)
+            self.inspection_handler.finish_inspect(window_info)
         except Exception as e:
             self.console_panel.log(f"윈도우 검사 실패: {e}", "ERROR")
-            self._finish_inspect(None)
+            self.inspection_handler.finish_inspect(None)
 
     def _on_window_pick_cancelled(self):
         """윈도우 피커가 취소됨 (ESC)"""
@@ -1123,241 +1129,6 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────
     # UI 요소 선택 (Element Picker)
     # ──────────────────────────────────────────
-
-    def _on_element_pick_request(self):
-        """UI 요소 선택 요청 - 요소 피커 오버레이 표시"""
-        self.console_panel.log("UI 요소 피커 시작 — 선택할 요소에 마우스를 올린 후 클릭하세요", "INFO")
-        self.statusBar().showMessage("선택할 UI 요소를 클릭하세요... (ESC: 취소)")
-        self.showMinimized()
-        QTimer.singleShot(400, self.element_picker.start_picking)
-
-    def _on_element_picked(self, element_info: dict):
-        """UI 요소 선택 완료 콜백"""
-        # 요소 영역 스크린샷 캡처를 먼저 수행 (메인 윈도우 표시 전)
-        # 윈도우가 표시되면 요소 위에 덮여서 캡처됨
-        try:
-            import mss
-            from PIL import Image as PilImage
-
-            rect = element_info.get("rect", {})
-            w = rect.get("width", 0)
-            h = rect.get("height", 0)
-
-            if w > 0 and h > 0:
-                padding = 20
-                cap_left  = max(0, rect["left"] - padding)
-                cap_top   = max(0, rect["top"]  - padding)
-                cap_w     = w + padding * 2
-                cap_h     = h + padding * 2
-
-                with mss.mss() as sct:
-                    sct_img = sct.grab({
-                        "left": cap_left, "top": cap_top,
-                        "width": cap_w,   "height": cap_h
-                    })
-                    img = PilImage.frombytes(
-                        "RGB", sct_img.size, sct_img.bgra, "raw", "BGRX"
-                    )
-
-                if self.current_session:
-                    captures_dir = self.session_manager.get_captures_dir(
-                        self.current_session.session_id
-                    )
-                else:
-                    captures_dir = PROJECT_ROOT / "data" / "captures"
-                    captures_dir.mkdir(parents=True, exist_ok=True)
-
-                filename = f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                filepath = captures_dir / filename
-                img.save(str(filepath))
-                self.pending_images.append(str(filepath))
-                self.console_panel.log(
-                    f"UI 요소 이미지 저장: {filepath} ({w}×{h})", "INFO"
-                )
-
-        except Exception as e:
-            self.console_panel.log(f"요소 이미지 캡처 실패: {e}", "WARNING")
-
-        # 캡처 완료 후 메인 윈도우 표시
-        self.showNormal()
-        self.activateWindow()
-
-        # 요소를 대화창 칩으로 추가
-        self.chat_panel.add_element_chip(element_info)
-
-        ctrl_type = element_info.get("control_type", "")
-        name      = element_info.get("name", "")
-        display   = f"[{ctrl_type}] {name}" if name else f"[{ctrl_type}]"
-        parent    = element_info.get("parent_window_title", "")
-
-        self.statusBar().showMessage(
-            "UI 요소 선택 완료 — 다음 요청에 요소 정보가 자동 포함됩니다"
-        )
-        self.console_panel.log(
-            f"요소 선택 완료: {display}"
-            + (f" (창: {parent})" if parent else ""), "INFO"
-        )
-
-        # CDP 미연결 브라우저 element 감지 시 1회 안내 (suppressible)
-        # HTML 페이지 콘텐츠는 CDP+Selenium 이 안정적이고, picker 가 자동으로 그 경로로
-        # 라우팅하려면 Chrome 이 --remote-debugging-port 로 떠 있어야 한다.
-        browser_type = element_info.get("browser_type")
-        if browser_type:
-            dom_ctx = element_info.get("dom_context") or {}
-            if not dom_ctx.get("cdp_available"):
-                self._maybe_show_cdp_hint(browser_type)
-
-    def _maybe_show_cdp_hint(self, browser_name: str):
-        """브라우저 element 인데 CDP 미연결 시 사용자에게 1회 안내.
-
-        suppressible — '다시 보지 않기' 클릭 시 settings.hints.cdp_browser_hint_dismissed=True
-        저장. 이후엔 안 뜬다 (설정 다이얼로그 또는 settings.json 직접 수정으로 리셋).
-        """
-        hints = self.settings.setdefault("hints", {})
-        if hints.get("cdp_browser_hint_dismissed", False):
-            return
-
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setWindowTitle(f"{browser_name} 디버그 포트 권장")
-        msg.setText(
-            f"{browser_name} 이(가) 디버그 포트 없이 실행 중입니다.\n\n"
-            "HTML 페이지 요소 자동화는 Chrome DevTools Protocol (CDP) 가 연결돼야\n"
-            "안정적으로 동작합니다. 현재는 pyautogui 좌표 클릭으로 fallback 됩니다.\n"
-            "(페이지 변화 시 위치가 어긋날 수 있음)"
-        )
-        msg.setInformativeText(
-            f"더 안정적인 자동화를 원하시면 {browser_name} 을(를) 종료한 후\n"
-            "다음 명령으로 재시작하세요 (PowerShell):\n\n"
-            '& "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" '
-            "--remote-debugging-port=9222\n\n"
-            "이후 picker 가 자동으로 CDP 연결 → Selenium DOM 기반 안정 코드를 생성합니다."
-        )
-        btn_ok = msg.addButton("확인", QMessageBox.ButtonRole.AcceptRole)
-        btn_dismiss = msg.addButton("다시 보지 않기", QMessageBox.ButtonRole.RejectRole)
-        msg.setDefaultButton(btn_ok)
-        msg.exec()
-
-        if msg.clickedButton() is btn_dismiss:
-            hints["cdp_browser_hint_dismissed"] = True
-            self._save_settings()
-            self.console_panel.log(
-                "CDP 안내가 비활성화되었습니다. 설정에서 다시 켤 수 있습니다.",
-                "INFO",
-            )
-
-    def _on_element_pick_cancelled(self):
-        """UI 요소 선택 취소 (ESC 또는 우클릭)"""
-        self.showNormal()
-        self.activateWindow()
-        self.console_panel.log("UI 요소 선택이 취소되었습니다.", "INFO")
-        self.statusBar().showMessage("준비 완료")
-
-    def _finish_inspect(self, window_info: dict | None):
-        """검사 결과 처리 및 앱 복원"""
-        # 앱 복원
-        self.showNormal()
-        self.activateWindow()
-
-        if window_info is None:
-            self.statusBar().showMessage("윈도우 검사 실패")
-            return
-
-        if "error" in window_info:
-            self.console_panel.log(
-                f"윈도우 검사 실패: {window_info['error']}", "WARNING"
-            )
-            self.statusBar().showMessage("윈도우 검사 실패")
-            return
-
-        # 검사 결과를 텍스트로 변환
-        context_text = self.win_inspector.get_control_info_text(window_info)
-        self.pending_window_context = context_text
-
-        # 로그에 표시
-        title = window_info.get("window_title", "?")
-        count = window_info.get("control_count", 0)
-        self.console_panel.log(
-            f"윈도우 검사 완료: '{title}' ({count}개 컨트롤 발견)", "INFO"
-        )
-
-        # 컨트롤 목록을 콘솔에 표시
-        for ctrl in window_info.get("controls", [])[:20]:
-            indent = "  " * ctrl.get("depth", 0)
-            name = ctrl.get("name", "")
-            ctype = ctrl.get("control_type", "")
-            self.console_panel.log(
-                f"  {indent}[{ctype}] {name}", "DEBUG"
-            )
-
-        self.chat_panel.set_capture_status(
-            f"🔍 윈도우 검사 완료: {title} ({count}개 컨트롤)"
-        )
-        self.statusBar().showMessage(
-            f"윈도우 검사 완료 - 다음 요청에 컨트롤 정보가 자동 포함됩니다"
-        )
-
-    def _auto_inspect_before_capture(self):
-        """캡처 전에 포그라운드 윈도우 정보를 자동 수집합니다.
-        AI RPA Solution 자체는 건너뛰고 실제 타겟 앱을 검사합니다."""
-        if not self.win_inspector.is_available:
-            return
-
-        try:
-            if sys.platform != "win32":
-                return
-
-            import ctypes
-            hwnd = ctypes.windll.user32.GetForegroundWindow()  # type: ignore
-            if not hwnd:
-                return
-
-            # 먼저 포그라운드 윈도우 타이틀 확인
-            buf = ctypes.create_unicode_buffer(256)
-            ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)  # type: ignore
-            fg_title = buf.value
-
-            # 자기 자신이면 건너뛰기
-            if "AI RPA Solution" in fg_title:
-                self.console_panel.log(
-                    f"자동 검사 건너뜀: 포그라운드가 자기 자신 ('{fg_title}')",
-                    "DEBUG"
-                )
-                # 자기 자신 다음의 윈도우를 찾기 시도
-                windows = self.win_inspector.list_windows()
-                target_win = None
-                for w in windows:
-                    if "AI RPA Solution" not in w.get("title", ""):
-                        target_win = w
-                        break
-
-                if target_win:
-                    window_info = self.win_inspector.inspect_window(
-                        handle=target_win["handle"],
-                        max_depth=2, max_controls=30
-                    )
-                    if "error" not in window_info:
-                        self.pending_window_context = self.win_inspector.get_control_info_text(window_info)
-                        self.console_panel.log(
-                            f"대체 윈도우 검사 완료: '{target_win['title']}'",
-                            "INFO"
-                        )
-                return
-
-            # 자기 자신이 아닌 경우 정상 검사
-            window_info = self.win_inspector.inspect_window(
-                handle=hwnd, max_depth=2, max_controls=30
-            )
-            if "error" not in window_info:
-                self.pending_window_context = self.win_inspector.get_control_info_text(window_info)
-                title = window_info.get("window_title", "?")
-                self.console_panel.log(
-                    f"캡처 대상 윈도우 자동 검사: '{title}' "
-                    f"({window_info.get('control_count', 0)}개 컨트롤)",
-                    "INFO"
-                )
-        except Exception as e:
-            self.console_panel.log(f"자동 윈도우 검사 실패 (무시): {e}", "DEBUG")
 
     # ──────────────────────────────────────────
     # 스텝 관리 (삭제/삽입/이동)
@@ -1734,6 +1505,47 @@ class MainWindow(QMainWindow):
         )
         thread.start()
 
+    def _on_wait_changed(self, step_id: int, new_wait):
+        """Wait 변경 — 우선순위 (step > session > 글로벌 settings).
+
+        - step_id == 0 (sentinel): 세션의 default 변경.
+            new_wait None: Session.settings.step_delay_ms = None (글로벌 사용)
+            new_wait int: Session.settings.step_delay_ms = int
+            글로벌 settings 는 안 건드림 (settings_dialog 만 글로벌 변경).
+        - step_id > 0: 그 step 의 wait_after_ms 만 변경 (개별 override).
+        """
+        if not self.current_session:
+            return
+
+        if step_id == 0:
+            # 세션 default 변경 — 글로벌 settings 는 그대로
+            self.current_session.settings["step_delay_ms"] = new_wait
+            self.session_manager.save_session(self.current_session)
+            label = f"{new_wait}ms" if new_wait is not None else "글로벌 사용"
+            self.console_panel.log(
+                f"⏱ 세션 default 대기시간 -> {label}", "INFO"
+            )
+            # 세션 default 변경 시에는 모든 카드의 effective default 표시 갱신 필요.
+            # _refresh_block_view 대신 set_session_wait 만 호출 — 카드 재생성 회피.
+            global_default = self.settings.get("execution", {}).get("step_delay_ms", 500)
+            effective = new_wait if new_wait is not None else global_default
+            self.code_viewer.block_view._default_wait_ms = effective
+            self.code_viewer.block_view.set_session_wait(new_wait)
+        else:
+            # 개별 step 변경 — session 저장만 (UI 재생성 안 함, 포커스 유지).
+            for step in self.current_session.steps:
+                if isinstance(step, dict) and step.get("step_id") == step_id:
+                    step["wait_after_ms"] = new_wait
+                    break
+            self.session_manager.save_session(self.current_session)
+            label = (
+                f"{new_wait}ms (개별 override)" if new_wait is not None
+                else "기본값 사용"
+            )
+            self.console_panel.log(
+                f"⏱ Step {step_id} 대기시간 -> {label}", "INFO"
+            )
+
     def _on_kernel_reset(self):
         """커널 재시작 요청"""
         if not self.current_session:
@@ -1868,6 +1680,7 @@ class MainWindow(QMainWindow):
             return
 
         library_code = extract_library_block(self.current_session)
+        initial_code = extract_initial_block(self.current_session)
         steps_data = []
         prev_step_dict: dict | None = None
         for step in self.current_session.steps:
@@ -1890,10 +1703,25 @@ class MainWindow(QMainWindow):
                 "title": title,
                 "delta_code": delta_code,
                 "status": "",
+                "wait_after_ms": step_dict.get("wait_after_ms"),
             })
             prev_step_dict = step_dict
 
-        self.code_viewer.refresh_block_view(library_code, steps_data)
+        # Effective default: 세션 default 가 있으면 그 값, 없으면 글로벌 settings.
+        # 카드의 "default Nms" 표시 + workflow_engine 의 fallback 모두 사용.
+        global_default = self.settings.get("execution", {}).get("step_delay_ms", 500)
+        session_default = self.current_session.settings.get("step_delay_ms")
+        effective_default = (
+            session_default if session_default is not None else global_default
+        )
+        self.code_viewer.refresh_block_view(
+            library_code, steps_data, initial_code, effective_default
+        )
+        # 세션 wait SpinBox 도 갱신 (signal 무한루프 방지 위해 blockSignals)
+        if hasattr(self.code_viewer, "block_view") and hasattr(
+            self.code_viewer.block_view, "set_session_wait"
+        ):
+            self.code_viewer.block_view.set_session_wait(session_default)
         self._on_kernel_status_changed()
 
     def _stop_session_kernels(self):
@@ -1904,16 +1732,6 @@ class MainWindow(QMainWindow):
         if sid in self._kernels:
             self._kernels[sid].stop()
             del self._kernels[sid]
-
-    def closeEvent(self, event):
-        """앱 종료 시 모든 커널 정리"""
-        for kernel in list(self._kernels.values()):
-            try:
-                kernel.stop()
-            except Exception:
-                pass
-        self._kernels.clear()
-        super().closeEvent(event)
 
     def _get_valid_python_exe(self) -> str:
         """유효한 Python 실행 경로 반환 (실행 가능 여부 검증)"""
@@ -2034,9 +1852,26 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────
 
     def closeEvent(self, event):
-        """윈도우 닫기 시 세션 자동 저장"""
+        """윈도우 닫기 시: 세션 자동 저장 + 모든 커널 정리.
+
+        이전에 두 번 정의되어 첫 번째 (커널 정리) 가 두 번째 (세션 저장) 에
+        덮어쓰여 커널이 정리 안 되는 buggy 동작이었음. 통합하여 둘 다 수행.
+        """
+        # 1. 현재 세션 저장
         if self.current_session:
-            self.session_manager.save_session(self.current_session)
+            try:
+                self.session_manager.save_session(self.current_session)
+            except Exception as e:
+                logger.warning(f"세션 저장 실패: {e}")
+        # 2. 모든 ExecutionKernel 정리 (좀비 프로세스 방지)
+        for kernel in list(self._kernels.values()):
+            try:
+                kernel.stop()
+            except Exception:
+                pass
+        self._kernels.clear()
+        # 3. event accept (super().closeEvent 도 호출)
+        super().closeEvent(event)
         event.accept()
 
     def showEvent(self, event):
