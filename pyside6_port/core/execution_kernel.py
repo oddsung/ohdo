@@ -92,6 +92,12 @@ class ExecutionKernel:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+        # Win11 ForegroundLock 우회: step 코드가 pyautogui.click/write 같은
+        # SendInput 을 호출하면 Windows 의 SetForegroundWindow 권한이 이 subprocess
+        # 로 이전됨. 이후 ohdo (메인 윈도우) 가 raise/activate 시도하면 거부 →
+        # taskbar flash. kernel_worker 가 매 step 종료 시 AllowSetForegroundWindow
+        # 로 부모 PID 에 권한 양도하면 ohdo 의 다음 activateWindow 가 통과.
+        env["OHDO_PARENT_PID"] = str(os.getpid())
 
         self._proc = subprocess.Popen(
             [self.python_exe, "-u", str(worker_path)],

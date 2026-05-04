@@ -28,6 +28,25 @@
 
 <!-- 새 항목을 위에서부터 추가 -->
 
+### 2026-05-04 - Win11 ForegroundLock 우회 (foreground 복원 보류 해제)
+- **상황**: 단독 실행 (⏯) 시 step1 (Selenium-only) 끝나면 메인 윈도우 정상 복원, step2 이후 (pyautogui.click/write/press 사용) 끝나면 메인 윈도우 안 떠오르고 작업표시줄에서 알림 깜빡임만.
+- **분석**: subprocess (kernel_worker) 가 `pyautogui.click` 등으로 SendInput 호출 → Windows 의 `SetForegroundWindow` 권한이 ohdo → kernel_worker 로 이전됨 → ohdo 의 `mw.activateWindow()` 가 ForegroundLock 으로 거부 → flash 만. step1 은 Selenium 만 써서 SendInput 미발동 → 권한 ohdo 에 잔존 → 정상 복원.
+- **Fix**: kernel_worker 가 매 step 종료 시 부모 (ohdo) PID 로 `AllowSetForegroundWindow` 호출하여 명시적 권한 양도. ohdo 의 다음 1회 `activateWindow` 통과 보장.
+  1. [core/execution_kernel.py](../core/execution_kernel.py) — `start()` 의 subprocess `env` 에 `OHDO_PARENT_PID = str(os.getpid())` 전달
+  2. [core/kernel_worker.py](../core/kernel_worker.py) — exec() finally 에서 `OHDO_PARENT_PID` 읽고 `ctypes.windll.user32.AllowSetForegroundWindow(parent_pid)` 호출 (sys.platform == 'win32' 가드)
+- **회귀 보호**: test_65 신규 — `ExecutionKernel.start` 의 OHDO_PARENT_PID 전달 + kernel_worker 의 AllowSetForegroundWindow + win32 가드 패턴 검증.
+- **검증**: 사용자 GUI 테스트 — step2~7 단독 실행 후 메인 윈도우 모두 정상 복원 확인됨.
+- **handoff §6 #3 (foreground 복원 보류) 해제**.
+
+### 2026-05-04 - main_window 분해 Step 3: BlockExecutionHandler (~340줄 분리)
+- **목표**: main_window.py 1880줄 비대 — 코드/블럭 실행 path (16개 메서드) 를 별도 controller 로 분리.
+- **결과**:
+  - 신규 [ui/block_execution_handler.py](../ui/block_execution_handler.py) (478줄, 16개 메서드: on_run_code/execute_code_thread/get_or_create_kernel/on_run_from_step/on_run_single_step/on_wait_changed/on_kernel_reset/run_blocks_thread/on_blocks_finished/restore_main_window/on_block_step_started/on_block_step_done/on_kernel_status_changed/stop_session_kernels/get_valid_python_exe/on_stop_code).
+  - [ui/main_window.py](../ui/main_window.py) 1880 → 1538 (-342줄). 16개 메서드 1줄 위임 stub 으로 교체. `__init__` 에 `self.block_executor = BlockExecutionHandler(self)` 추가. unused imports (`os`, `subprocess`) 제거.
+  - 회귀 테스트 5건 갱신 (test_50, 55, 56, 57, 63) — `inspect.getsource(MainWindow._method)` → `inspect.getsource(BlockExecutionHandler.method)` 로 검사 대상 변경. self.xxx → mw.xxx 변환된 패턴 (`mw.lower()` 등) 으로 assertion 업데이트.
+  - [pyside6_port/](../pyside6_port/) sed 치환 (`PyQt6` → `PySide6`) 로 sync. AST syntax 검증 OK.
+- **자동 검증**: core 64/64 그린.
+
 ### 2026-05-04 - Wait UI 추가 fix (3건)
 - **체크박스 좌측 정렬**: BlockCard 카드 하단 + BlockViewWidget toolbar 양쪽. 이전 `[stretch]` 후 체크박스 → 우측 끝. 변경 후 SpinBox 옆에 바로.
 - **SpinBox 입력 중 포커스 손실**: `valueChanged` 가 매 키 입력마다 emit → 카드 재생성 → 포커스 잃음. **Fix**:

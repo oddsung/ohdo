@@ -1345,15 +1345,18 @@ class CoreTest(TestCase):
             "[회귀] CodeViewer.run_single_step_requested signal 필수",
         )
 
-        # main_window 핸들러
+        # main_window 핸들러 (위임 stub) + handler 본문 (실제 호출 검증)
+        # 2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler 로 이전.
+        from ui.block_execution_handler import BlockExecutionHandler
         self.assert_true(
             hasattr(MainWindow, "_on_run_single_step"),
-            "[회귀] MainWindow._on_run_single_step 핸들러 필수",
+            "[회귀] MainWindow._on_run_single_step 위임 stub 필수",
         )
-        mw_src = inspect.getsource(MainWindow._on_run_single_step)
+        handler_src = inspect.getsource(BlockExecutionHandler.on_run_single_step)
         self.assert_true(
-            "stop_after_step_id" in mw_src or "step_id, step_id" in mw_src,
-            "[회귀] _on_run_single_step 가 start=stop=N 으로 호출 필수",
+            "stop_after_step_id" in handler_src or "step_id, step_id" in handler_src,
+            "[회귀] BlockExecutionHandler.on_run_single_step 가 start=stop=N "
+            "으로 호출 필수",
         )
 
     def test_51_extract_code_delta_handles_minor_changes(self):
@@ -1398,12 +1401,16 @@ class CoreTest(TestCase):
         )
 
     def test_57_blocks_finished_uses_signal(self):
-        """[회귀] _run_blocks_thread 의 finally 가 signal-slot 으로 _on_blocks_finished
+        """[회귀] run_blocks_thread 의 finally 가 signal-slot 으로 _on_blocks_finished
         호출 (이전 QTimer.singleShot 은 어떤 케이스에 호출 안 되는 회귀 발견됨).
 
         signal 사용 시 Qt 가 main thread queued connection 으로 안전하게 전달.
+
+        2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler.run_blocks_thread
+        로 이전됨. main_window 의 _run_blocks_thread 는 위임 stub.
         """
         from ui.main_window import MainWindow, AsyncSignals
+        from ui.block_execution_handler import BlockExecutionHandler
         import inspect
 
         # AsyncSignals 에 blocks_finished signal
@@ -1412,11 +1419,12 @@ class CoreTest(TestCase):
             "[회귀] AsyncSignals.blocks_finished signal 필수",
         )
 
-        # _run_blocks_thread 가 finally 에서 emit
-        rt_src = inspect.getsource(MainWindow._run_blocks_thread)
+        # run_blocks_thread 가 finally 에서 emit (handler 본문 검사)
+        rt_src = inspect.getsource(BlockExecutionHandler.run_blocks_thread)
         self.assert_true(
             "blocks_finished.emit" in rt_src,
-            "[회귀] _run_blocks_thread 의 finally 가 blocks_finished.emit 호출 필수",
+            "[회귀] BlockExecutionHandler.run_blocks_thread 의 finally 가 "
+            "blocks_finished.emit 호출 필수",
         )
 
         # main_window __init__ 에서 connect
@@ -1490,11 +1498,15 @@ class CoreTest(TestCase):
         )
 
         # main_window 핸들러 — 세션 settings 변경 (글로벌 settings 안 건드림)
-        mw_src = inspect.getsource(MainWindow._on_wait_changed)
+        # 2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler 로 이전.
+        # main_window 의 _on_wait_changed 는 위임 stub. handler.on_wait_changed 본문 검사.
+        from ui.block_execution_handler import BlockExecutionHandler
+        handler_src = inspect.getsource(BlockExecutionHandler.on_wait_changed)
         self.assert_true(
-            "current_session.settings" in mw_src and "step_delay_ms" in mw_src,
-            "[회귀] _on_wait_changed 가 current_session.settings.step_delay_ms 변경 필수 "
-            "(글로벌 settings 분리)",
+            "current_session.settings" in handler_src
+            and "step_delay_ms" in handler_src,
+            "[회귀] BlockExecutionHandler.on_wait_changed 가 "
+            "current_session.settings.step_delay_ms 변경 필수 (글로벌 settings 분리)",
         )
 
     def test_62_close_event_single_definition(self):
@@ -1629,36 +1641,43 @@ class CoreTest(TestCase):
         """[회귀] 코드 뷰 탭 (CodeSandbox) <-> 블럭 뷰 탭 (ExecutionKernel) 의
         실행/중단 상호작용.
 
-        - _on_run_code: 시작 시 set_running(True), finally 에 set_running(False)
-        - _on_stop_code: kernel 도 stop (블럭 모드 step 진행 중 즉시 종료) +
-          set_running(False) + _restore_main_window
+        - on_run_code: 시작 시 set_running(True)
+        - execute_code_thread: finally 에 set_running(False)
+        - on_stop_code: kernel 도 stop (블럭 모드 step 진행 중 즉시 종료) +
+          set_running(False) + restore_main_window
+
+        2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler 로 이전됨.
+        main_window 의 _on_run_code/_execute_code_thread/_on_stop_code 는 위임 stub.
         """
-        from ui.main_window import MainWindow
+        from ui.block_execution_handler import BlockExecutionHandler
         import inspect
 
-        # _on_run_code 가 set_running(True) + finally 에 set_running(False)
-        rc_src = inspect.getsource(MainWindow._on_run_code)
+        # on_run_code 가 set_running(True)
+        rc_src = inspect.getsource(BlockExecutionHandler.on_run_code)
         self.assert_true(
             "set_running(True)" in rc_src,
-            "[회귀] _on_run_code 가 set_running(True) 호출 필수 (UI 상태 일치)",
+            "[회귀] BlockExecutionHandler.on_run_code 가 set_running(True) "
+            "호출 필수 (UI 상태 일치)",
         )
 
-        ec_src = inspect.getsource(MainWindow._execute_code_thread)
+        ec_src = inspect.getsource(BlockExecutionHandler.execute_code_thread)
         self.assert_true(
             "set_running(False)" in ec_src,
-            "[회귀] _execute_code_thread finally 에 set_running(False) 호출 필수",
+            "[회귀] BlockExecutionHandler.execute_code_thread finally 에 "
+            "set_running(False) 호출 필수",
         )
 
-        # _on_stop_code 가 kernel.stop 도 호출 + set_running(False)
-        sc_src = inspect.getsource(MainWindow._on_stop_code)
+        # on_stop_code 가 kernel.stop 도 호출 + set_running(False)
+        sc_src = inspect.getsource(BlockExecutionHandler.on_stop_code)
         self.assert_true(
             "kernel.stop" in sc_src or "kernel is not None" in sc_src,
-            "[회귀] _on_stop_code 가 ExecutionKernel.stop 도 호출 필수 "
-            "(블럭 모드 step 진행 중 즉시 종료)",
+            "[회귀] BlockExecutionHandler.on_stop_code 가 ExecutionKernel.stop 도 "
+            "호출 필수 (블럭 모드 step 진행 중 즉시 종료)",
         )
         self.assert_true(
             "set_running(False)" in sc_src,
-            "[회귀] _on_stop_code 가 set_running(False) 호출 필수 (UI 즉시 복원)",
+            "[회귀] BlockExecutionHandler.on_stop_code 가 set_running(False) "
+            "호출 필수 (UI 즉시 복원)",
         )
 
     def test_55_block_run_lowers_main_window(self):
@@ -1668,50 +1687,64 @@ class CoreTest(TestCase):
         hide/minimize 가 Win11 foreground 정책에 막히는 케이스 회피 위해 lower 사용.
         윈도우는 항상 visible + 작업표시줄 유지 → 사용자가 실행 상태 인지 가능.
 
-        - _on_run_from_step / _on_run_single_step: self.lower()
-        - _restore_main_window: raise_() + activateWindow() (+ isHidden 시 show)
-        - _on_blocks_finished + _on_stop_code: _restore_main_window 호출
+        - on_run_from_step / on_run_single_step: mw.lower()
+        - restore_main_window: raise_() + activateWindow() (+ isHidden 시 show)
+        - on_blocks_finished + on_stop_code: restore_main_window 호출
+
+        2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler 로 이전됨.
+        main_window 의 _on_run_from_step/_on_run_single_step/_restore_main_window/
+        _on_blocks_finished/_on_stop_code 는 위임 stub. main_window 가 self 가
+        아니라 mw (handler.mw) 라서 self.lower() → mw.lower() 로 변환됨.
         """
         from ui.main_window import MainWindow
+        from ui.block_execution_handler import BlockExecutionHandler
         import inspect
 
-        # _on_run_from_step
-        src1 = inspect.getsource(MainWindow._on_run_from_step)
+        # on_run_from_step
+        src1 = inspect.getsource(BlockExecutionHandler.on_run_from_step)
         self.assert_true(
-            "self.lower()" in src1,
-            "[회귀] _on_run_from_step 가 self.lower() 호출 필수 (z-order 최하단)",
+            "mw.lower()" in src1,
+            "[회귀] BlockExecutionHandler.on_run_from_step 가 mw.lower() "
+            "호출 필수 (z-order 최하단)",
         )
 
-        # _on_run_single_step
-        src2 = inspect.getsource(MainWindow._on_run_single_step)
+        # on_run_single_step
+        src2 = inspect.getsource(BlockExecutionHandler.on_run_single_step)
         self.assert_true(
-            "self.lower()" in src2,
-            "[회귀] _on_run_single_step 가 self.lower() 호출 필수",
+            "mw.lower()" in src2,
+            "[회귀] BlockExecutionHandler.on_run_single_step 가 mw.lower() 호출 필수",
         )
 
-        # _restore_main_window helper 존재
+        # restore_main_window helper 존재 (handler) + main_window 위임 stub
+        self.assert_true(
+            hasattr(BlockExecutionHandler, "restore_main_window"),
+            "[회귀] BlockExecutionHandler.restore_main_window 헬퍼 필수",
+        )
         self.assert_true(
             hasattr(MainWindow, "_restore_main_window"),
-            "[회귀] _restore_main_window 헬퍼 필수",
+            "[회귀] MainWindow._restore_main_window 위임 stub 필수 (외부 caller 호환)",
         )
-        rest_src = inspect.getsource(MainWindow._restore_main_window)
+        rest_src = inspect.getsource(BlockExecutionHandler.restore_main_window)
         self.assert_true(
             "raise_" in rest_src and "activateWindow" in rest_src,
-            "[회귀] _restore_main_window 가 raise_ + activateWindow 호출 필수",
+            "[회귀] BlockExecutionHandler.restore_main_window 가 raise_ + "
+            "activateWindow 호출 필수",
         )
 
-        # _on_blocks_finished 가 _restore_main_window 호출
-        src3 = inspect.getsource(MainWindow._on_blocks_finished)
+        # on_blocks_finished 가 restore_main_window 호출
+        src3 = inspect.getsource(BlockExecutionHandler.on_blocks_finished)
         self.assert_true(
-            "_restore_main_window" in src3,
-            "[회귀] _on_blocks_finished 가 _restore_main_window 호출 필수",
+            "restore_main_window" in src3,
+            "[회귀] BlockExecutionHandler.on_blocks_finished 가 restore_main_window "
+            "호출 필수",
         )
 
-        # _on_stop_code 도 _restore_main_window 호출 (즉시 복원)
-        src4 = inspect.getsource(MainWindow._on_stop_code)
+        # on_stop_code 도 restore_main_window 호출 (즉시 복원)
+        src4 = inspect.getsource(BlockExecutionHandler.on_stop_code)
         self.assert_true(
-            "_restore_main_window" in src4,
-            "[회귀] _on_stop_code 가 _restore_main_window 호출 필수 (stop 시 즉시 복원)",
+            "restore_main_window" in src4,
+            "[회귀] BlockExecutionHandler.on_stop_code 가 restore_main_window 호출 필수 "
+            "(stop 시 즉시 복원)",
         )
 
     def test_54_unwrap_main_function(self):
@@ -1809,6 +1842,50 @@ if __name__ == "__main__":
         self.assert_true(
             syntax_ok,
             f"[회귀] 필터링 후 delta 가 module-level 컴파일 가능해야 함",
+        )
+
+    def test_65_kernel_worker_yields_foreground_to_parent(self):
+        """[회귀] Win11 ForegroundLock 우회 — step 코드가 pyautogui 등으로
+        SendInput 을 호출하면 Windows 가 SetForegroundWindow 권한을 subprocess
+        에 부여 → 이후 ohdo 의 raise/activate 가 거부되어 taskbar flash 만 발생.
+
+        Fix: ExecutionKernel.start 가 OHDO_PARENT_PID 환경변수로 부모 PID 전달 +
+        kernel_worker 가 매 step 종료 시 AllowSetForegroundWindow(parent_pid)
+        호출 → ohdo 의 다음 activateWindow 1회 통과 (메인 윈도우 정상 복원).
+
+        2026-05-04 추가: foreground 복원 보류 이슈 (handoff §6 #3) 의 root cause
+        및 해결 검증.
+        """
+        from core.execution_kernel import ExecutionKernel
+        from pathlib import Path
+        import inspect
+
+        # ExecutionKernel.start 가 OHDO_PARENT_PID 환경변수에 os.getpid() 전달
+        start_src = inspect.getsource(ExecutionKernel.start)
+        self.assert_true(
+            "OHDO_PARENT_PID" in start_src and "getpid()" in start_src,
+            "[회귀] ExecutionKernel.start 가 env['OHDO_PARENT_PID'] = "
+            "str(os.getpid()) 로 부모 PID 전달 필수 (kernel_worker 가 권한 양도용)",
+        )
+
+        # kernel_worker.py 가 step 실행 후 AllowSetForegroundWindow 호출
+        worker_path = Path(__file__).parent.parent / "core" / "kernel_worker.py"
+        worker_src = worker_path.read_text(encoding="utf-8")
+        self.assert_true(
+            "AllowSetForegroundWindow" in worker_src,
+            "[회귀] kernel_worker.py 가 매 step 종료 시 "
+            "AllowSetForegroundWindow 호출 필수 (Win11 ForegroundLock 우회)",
+        )
+        self.assert_true(
+            "OHDO_PARENT_PID" in worker_src,
+            "[회귀] kernel_worker.py 가 OHDO_PARENT_PID 환경변수 읽기 필수",
+        )
+        # win32 가드 (다른 플랫폼에서 ctypes.windll 사용 안 하도록)
+        self.assert_true(
+            'sys.platform == "win32"' in worker_src
+            or "sys.platform=='win32'" in worker_src,
+            "[회귀] kernel_worker.py 가 Windows 전용 가드 필수 "
+            "(ctypes.windll 사용 분기)",
         )
 
     def test_53_extract_code_delta_smart_dedent(self):

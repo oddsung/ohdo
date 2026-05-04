@@ -6,12 +6,10 @@ PySide6 메인 윈도우
 """
 
 import sys
-import os
 import json
 import asyncio
 import logging
 import threading
-import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -131,6 +129,10 @@ class MainWindow(QMainWindow):
         self.inspection_handler = UIInspectionHandler(self)
         self.element_picker.element_picked.connect(self.inspection_handler.on_picked)
         self.element_picker.pick_cancelled.connect(self.inspection_handler.on_pick_cancelled)
+
+        # ── 블럭/코드 실행 controller (코드 뷰어 ▶ + 블럭 뷰 ▶/⏯ + F9 stop) ──
+        from ui.block_execution_handler import BlockExecutionHandler
+        self.block_executor = BlockExecutionHandler(self)
 
         # ── 비동기 시그널 ──
         self.signals = AsyncSignals()
@@ -1340,222 +1342,36 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────
 
     def _on_run_code(self, code: str):
-        """코드 실행 요청 (코드 뷰어 탭의 ▶ 실행 버튼)"""
-        if not code.strip():
-            QMessageBox.warning(self, "경고", "실행할 코드가 없습니다.")
-            return
-
-        self.console_panel.log("코드 실행 시작...", "INFO")
-        self.statusBar().showMessage("코드 실행 중...")
-
-        # UI 상태 - 실행 중 표시 (run_btn 비활성, stop_btn 활성)
-        self.code_viewer.set_running(True)
-
-        thread = threading.Thread(
-            target=self._execute_code_thread,
-            args=(code,),
-            daemon=True
-        )
-        thread.start()
+        """코드 실행 요청 (코드 뷰어 탭의 ▶ 실행 버튼) — handler 위임."""
+        self.block_executor.on_run_code(code)
 
     def _execute_code_thread(self, code: str):
-        """코드를 백그라운드에서 실행"""
-        try:
-            cwd = None
-            if self.current_session:
-                cwd = str(self.session_manager.get_scripts_dir(
-                    self.current_session.session_id
-                ))
-
-            # Python 실행 경로 결정 (유효성 검증 포함)
-            python_exe = self._get_valid_python_exe()
-            sandbox = CodeSandbox(
-                python_exe=python_exe,
-                timeout=60
-            )
-            self._current_sandbox = sandbox  # F9 강제 중지용 참조 보관
-
-            # UI 자동화 코드 실행 시 우리 창이 대상 창을 가리지 않도록 최소화
-            if sys.platform == "win32":
-                import ctypes as _ctypes
-                is_admin = bool(_ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
-                if not is_admin:
-                    logger.info("주의: 현재 프로세스가 일반 권한으로 실행 중입니다. "
-                                "대상 앱이 관리자 권한이면 WM 메시지 클릭이 차단됩니다.")
-
-            def _minimize_self():
-                """스크립트 실행 전 RPA 창 최소화 (대상 창이 가려지지 않도록)"""
-                try:
-                    import ctypes as ct
-                    hwnd = int(self.winId())
-                    ct.windll.user32.ShowWindow(hwnd, 2)  # SW_MINIMIZE  # type: ignore[attr-defined]
-                except Exception:
-                    pass
-
-            def _restore_self():
-                """스크립트 실행 후 RPA 창 복원"""
-                try:
-                    import ctypes as ct
-                    hwnd = int(self.winId())
-                    ct.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE  # type: ignore[attr-defined]
-                except Exception:
-                    pass
-
-            result = sandbox.execute(code, cwd,
-                                     pre_exec_callback=_minimize_self,
-                                     post_exec_callback=_restore_self)
-
-            self.signals.step_executed.emit({
-                "step_id": len(self.current_session.steps) if self.current_session else 0,
-                "success": result.success,
-                "output": result.output,
-                "error": result.error,
-                "duration_ms": result.duration_ms
-            })
-
-        except Exception as e:
-            self.signals.error_occurred.emit(f"코드 실행 오류: {str(e)}")
-        finally:
-            self._current_sandbox = None  # 실행 완료 후 참조 해제
-            # UI 복원 (메인 스레드로) — run_btn 다시 활성, stop_btn 비활성
-            QTimer.singleShot(0, lambda: self.code_viewer.set_running(False))
+        """코드를 백그라운드에서 실행 — handler 위임."""
+        self.block_executor.execute_code_thread(code)
 
     # ──────────────────────────────────────────
     # 블럭 기반 실행 (Colab-style)
     # ──────────────────────────────────────────
 
     def _get_or_create_kernel(self) -> Optional[ExecutionKernel]:
-        """현재 세션의 ExecutionKernel을 반환합니다 (없으면 생성)."""
-        if not self.current_session:
-            return None
-        sid = self.current_session.session_id
-        if sid not in self._kernels or not self._kernels[sid].is_alive:
-            kernel = ExecutionKernel(
-                python_exe=self._get_valid_python_exe(),
-                default_timeout=60
-            )
-            kernel.start()
-            self._kernels[sid] = kernel
-            logger.info("세션 %s 용 ExecutionKernel 생성", sid)
-        return self._kernels[sid]
+        """현재 세션의 ExecutionKernel을 반환합니다 (없으면 생성) — handler 위임."""
+        return self.block_executor.get_or_create_kernel()
 
     def _on_run_from_step(self, start_step_id: int):
-        """블럭 뷰: N번 스텝부터 실행 요청 (N부터 끝까지)"""
-        if not self.current_session:
-            QMessageBox.warning(self, "경고", "세션이 없습니다.")
-            return
-        if not self.current_session.steps:
-            QMessageBox.warning(self, "경고", "실행할 스텝이 없습니다.")
-            return
-
-        self.console_panel.log(f"블럭 실행 시작 (Step {start_step_id}부터)...", "INFO")
-        self.code_viewer.set_running(True)
-        self.statusBar().showMessage(f"블럭 실행 중 (Step {start_step_id}~)...")
-
-        kernel = self._get_or_create_kernel()
-        if kernel is None:
-            self.signals.error_occurred.emit("커널 생성 실패")
-            return
-
-        # 실행 중 메인 윈도우를 z-order 최하단으로 보냄 (lower).
-        # hide/minimize 와 달리 visible 유지 + 작업표시줄에 남음 → 사용자가
-        # 실행 상태 확인 가능. 자동화 코드가 자기 윈도우 띄우면 자연스럽게 위로.
-        # 복원 시 raise_/activateWindow 가 안정적 (Win11 정책 회피).
-        self.lower()
-
-        thread = threading.Thread(
-            target=self._run_blocks_thread,
-            args=(kernel, start_step_id, None),
-            daemon=True
-        )
-        thread.start()
+        """블럭 뷰: N번 스텝부터 실행 요청 — handler 위임."""
+        self.block_executor.on_run_from_step(start_step_id)
 
     def _on_run_single_step(self, step_id: int):
-        """블럭 뷰: N번 스텝 단독 실행 (다음 step 으로 진행 안 함).
-
-        이전 step (1..N-1) 들이 커널에 이미 실행됐으면 skip,
-        없으면 silent replay 후 step N 만 실행하고 종료.
-        """
-        if not self.current_session:
-            QMessageBox.warning(self, "경고", "세션이 없습니다.")
-            return
-        if not self.current_session.steps:
-            QMessageBox.warning(self, "경고", "실행할 스텝이 없습니다.")
-            return
-
-        self.console_panel.log(f"⏯ Step {step_id} 단독 실행...", "INFO")
-        self.code_viewer.set_running(True)
-        self.statusBar().showMessage(f"Step {step_id} 단독 실행 중...")
-
-        kernel = self._get_or_create_kernel()
-        if kernel is None:
-            self.signals.error_occurred.emit("커널 생성 실패")
-            return
-
-        # 실행 중 메인 윈도우를 z-order 최하단으로 보냄 (lower).
-        # hide/minimize 와 달리 visible 유지 + 작업표시줄에 남음 → 사용자가
-        # 실행 상태 확인 가능. 자동화 코드가 자기 윈도우 띄우면 자연스럽게 위로.
-        # 복원 시 raise_/activateWindow 가 안정적 (Win11 정책 회피).
-        self.lower()
-
-        thread = threading.Thread(
-            target=self._run_blocks_thread,
-            args=(kernel, step_id, step_id),  # start = stop = step_id
-            daemon=True
-        )
-        thread.start()
+        """블럭 뷰: N번 스텝 단독 실행 — handler 위임."""
+        self.block_executor.on_run_single_step(step_id)
 
     def _on_wait_changed(self, step_id: int, new_wait):
-        """Wait 변경 — 우선순위 (step > session > 글로벌 settings).
-
-        - step_id == 0 (sentinel): 세션의 default 변경.
-            new_wait None: Session.settings.step_delay_ms = None (글로벌 사용)
-            new_wait int: Session.settings.step_delay_ms = int
-            글로벌 settings 는 안 건드림 (settings_dialog 만 글로벌 변경).
-        - step_id > 0: 그 step 의 wait_after_ms 만 변경 (개별 override).
-        """
-        if not self.current_session:
-            return
-
-        if step_id == 0:
-            # 세션 default 변경 — 글로벌 settings 는 그대로
-            self.current_session.settings["step_delay_ms"] = new_wait
-            self.session_manager.save_session(self.current_session)
-            label = f"{new_wait}ms" if new_wait is not None else "글로벌 사용"
-            self.console_panel.log(
-                f"⏱ 세션 default 대기시간 -> {label}", "INFO"
-            )
-            # 세션 default 변경 시에는 모든 카드의 effective default 표시 갱신 필요.
-            # _refresh_block_view 대신 set_session_wait 만 호출 — 카드 재생성 회피.
-            global_default = self.settings.get("execution", {}).get("step_delay_ms", 500)
-            effective = new_wait if new_wait is not None else global_default
-            self.code_viewer.block_view._default_wait_ms = effective
-            self.code_viewer.block_view.set_session_wait(new_wait)
-        else:
-            # 개별 step 변경 — session 저장만 (UI 재생성 안 함, 포커스 유지).
-            for step in self.current_session.steps:
-                if isinstance(step, dict) and step.get("step_id") == step_id:
-                    step["wait_after_ms"] = new_wait
-                    break
-            self.session_manager.save_session(self.current_session)
-            label = (
-                f"{new_wait}ms (개별 override)" if new_wait is not None
-                else "기본값 사용"
-            )
-            self.console_panel.log(
-                f"⏱ Step {step_id} 대기시간 -> {label}", "INFO"
-            )
+        """Wait 변경 (step > session > 글로벌 우선순위) — handler 위임."""
+        self.block_executor.on_wait_changed(step_id, new_wait)
 
     def _on_kernel_reset(self):
-        """커널 재시작 요청"""
-        if not self.current_session:
-            return
-        sid = self.current_session.session_id
-        if sid in self._kernels:
-            self._kernels[sid].stop()
-            del self._kernels[sid]
-        self.console_panel.log("커널 재시작 완료 — 변수 상태가 초기화되었습니다.", "INFO")
-        self.signals.kernel_status_changed.emit()
+        """커널 재시작 요청 — handler 위임."""
+        self.block_executor.on_kernel_reset()
 
     def _run_blocks_thread(
         self,
@@ -1563,115 +1379,28 @@ class MainWindow(QMainWindow):
         start_step_id: int,
         stop_after_step_id: int | None = None,
     ):
-        """블럭 기반 실행을 백그라운드 스레드에서 실행.
-
-        stop_after_step_id 가 None 이 아니면 그 step 까지만 실행 (단독 실행 모드).
-        """
-        import asyncio
-
-        def on_step_start(step_id):
-            self.signals.block_step_started.emit(step_id)
-            self.signals.log_message.emit(f"▶ 블럭 스텝 #{step_id} 실행 중...")
-
-        def on_step_complete(step_id, result):
-            self.signals.block_step_done.emit({
-                "step_id": step_id,
-                "success": result.success,
-                "output": result.output,
-                "error": result.error,
-                "duration_ms": result.duration_ms,
-            })
-
-        def on_error(step_id, error_msg):
-            self.signals.log_message.emit(f"❌ 스텝 #{step_id} 실패: {error_msg}")
-
-        def on_log(msg):
-            self.signals.log_message.emit(msg)
-
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(
-                self.workflow_engine.execute_session_blocks(
-                    session=self.current_session,
-                    kernel=kernel,
-                    start_from_step_id=start_step_id,
-                    stop_after_step_id=stop_after_step_id,
-                    silent_replay=True,
-                    on_step_start=on_step_start,
-                    on_step_complete=on_step_complete,
-                    on_error=on_error,
-                    on_log=on_log,
-                )
-            )
-        except Exception as e:
-            self.signals.error_occurred.emit(f"블럭 실행 오류: {e}")
-        finally:
-            self.signals.log_message.emit("블럭 실행 완료")
-            # signal 로 UI 복원 (Qt 가 main thread queued connection 으로 전달).
-            # 이전엔 QTimer.singleShot 썼지만 어떤 케이스에서 호출 안 되는 회귀 발견됨.
-            self.signals.blocks_finished.emit()
+        """블럭 기반 실행 백그라운드 스레드 — handler 위임."""
+        self.block_executor.run_blocks_thread(kernel, start_step_id, stop_after_step_id)
 
     def _on_blocks_finished(self):
-        """블럭 실행 완료 후 UI 복원 (signals.blocks_finished slot)"""
-        self.console_panel.log("✅ 블럭 실행 완료 - UI 복원", "INFO")
-        self.code_viewer.set_running(False)
-        self.statusBar().showMessage("블럭 실행 완료")
-        self._on_kernel_status_changed()
-        self._restore_main_window()
+        """블럭 실행 완료 후 UI 복원 (signals.blocks_finished slot) — handler 위임."""
+        self.block_executor.on_blocks_finished()
 
     def _restore_main_window(self):
-        """lower() 로 z-order 최하단에 있던 메인 윈도우를 다시 위로 + active.
-
-        lower() 후 raise_/activateWindow 패턴 — 메인 윈도우는 항상 visible
-        상태였으므로 hide/show cycle 의 OS-side 이슈 (작업표시줄 사라짐 등) 없음.
-        멱등 — 이미 위에 있는 상태에서 호출해도 무해.
-        """
-        self.raise_()
-        self.activateWindow()
-        # 만약 hide 상태였다면 (이전 버전 호환) show 도 호출
-        if self.isHidden():
-            self.show()
+        """메인 윈도우 raise_/activateWindow 복원 — handler 위임."""
+        self.block_executor.restore_main_window()
 
     def _on_block_step_started(self, step_id: int):
-        """블럭 스텝 시작 — UI 상태 표시"""
-        self.code_viewer.update_block_step_status(step_id, "🔄")
+        """블럭 스텝 시작 UI 표시 — handler 위임."""
+        self.block_executor.on_block_step_started(step_id)
 
     def _on_block_step_done(self, data: dict):
-        """블럭 스텝 완료 — UI 상태 갱신 및 콘솔 출력"""
-        step_id = data.get("step_id", 0)
-        success = data.get("success", False)
-        output = data.get("output", "")
-        error = data.get("error", "")
-        duration = data.get("duration_ms", 0)
-
-        status = "✅" if success else "❌"
-        self.code_viewer.update_block_step_status(step_id, status)
-
-        if success:
-            self.console_panel.log(f"✅ 블럭 Step #{step_id} 완료 ({duration}ms)", "SUCCESS")
-            if output:
-                self.console_panel.log(f"  출력: {output[:300]}", "INFO")
-        else:
-            self.console_panel.log(f"❌ 블럭 Step #{step_id} 실패 ({duration}ms)", "ERROR")
-            if error:
-                for line in error.splitlines():
-                    if line.strip():
-                        self.console_panel.log(f"  {line}", "ERROR")
-
-        self._on_kernel_status_changed()
+        """블럭 스텝 완료 UI 갱신 — handler 위임."""
+        self.block_executor.on_block_step_done(data)
 
     def _on_kernel_status_changed(self):
-        """커널 상태를 블럭 뷰 UI에 반영"""
-        if not self.current_session:
-            self.code_viewer.update_kernel_status(False, [])
-            return
-        sid = self.current_session.session_id
-        kernel = self._kernels.get(sid)
-        if kernel and kernel.is_alive:
-            self.code_viewer.update_kernel_status(True, kernel.executed_steps)
-        else:
-            self.code_viewer.update_kernel_status(False, [])
+        """커널 상태 블럭 뷰 반영 — handler 위임."""
+        self.block_executor.on_kernel_status_changed()
 
     def _refresh_block_view(self):
         """현재 세션의 블럭 뷰를 갱신합니다."""
@@ -1725,87 +1454,16 @@ class MainWindow(QMainWindow):
         self._on_kernel_status_changed()
 
     def _stop_session_kernels(self):
-        """현재 세션의 커널을 정지합니다 (세션 전환 시 호출)."""
-        if not self.current_session:
-            return
-        sid = self.current_session.session_id
-        if sid in self._kernels:
-            self._kernels[sid].stop()
-            del self._kernels[sid]
+        """현재 세션의 커널을 정지합니다 (세션 전환 시 호출) — handler 위임."""
+        self.block_executor.stop_session_kernels()
 
     def _get_valid_python_exe(self) -> str:
-        """유효한 Python 실행 경로 반환 (실행 가능 여부 검증)"""
-        # 1. 프로젝트 venv 확인
-        venv_python = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
-        if venv_python.exists():
-            try:
-                # 실제로 실행 가능한지 테스트
-                result = subprocess.run(
-                    [str(venv_python), "--version"],
-                    capture_output=True,
-                    timeout=5
-                )
-                if result.returncode == 0:
-                    return str(venv_python)
-            except Exception:
-                pass  # 실행 불가 - 다음 옵션으로
-
-        # 2. 환경 스캐너에서 저장된 Python 경로 확인
-        try:
-            from core.environment_scanner import get_scanner
-            scanner = get_scanner()
-            saved_env = scanner.load_saved_environment()
-            if saved_env:
-                python_path = saved_env.get('python_path')
-                if python_path and os.path.exists(python_path):
-                    try:
-                        result = subprocess.run(
-                            [python_path, "--version"],
-                            capture_output=True,
-                            timeout=5
-                        )
-                        if result.returncode == 0:
-                            return python_path
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # 3. 기본 Python (현재 실행 중인 Python)
-        return sys.executable
+        """유효한 Python 실행 경로 반환 — handler 위임."""
+        return self.block_executor.get_valid_python_exe()
 
     def _on_stop_code(self):
-        """코드 실행 강제 중지 (F9 단축키 또는 중지 버튼).
-
-        세 가지 실행 path 모두 stop:
-        - 코드 뷰어 탭 ▶ 실행: CodeSandbox 서브프로세스 → stop()
-        - 블럭 뷰 탭 (▶ 처음부터 / ⏯ 단독): WorkflowEngine.stop() + Kernel.stop()
-        """
-        # 1. CodeSandbox 서브프로세스 즉시 kill (코드 뷰어 탭 path)
-        if self._current_sandbox is not None:
-            self._current_sandbox.stop()
-        # 2. 워크플로우 엔진 중지 플래그 설정 (블럭 뷰 path - 다음 step 시작 안 함)
-        self.workflow_engine.stop()
-        # 3. 현재 세션의 ExecutionKernel 도 stop (블럭 뷰 path - 진행 중 step 즉시 종료)
-        if self.current_session:
-            sid = self.current_session.session_id
-            kernel = self._kernels.get(sid)
-            if kernel is not None:
-                try:
-                    kernel.stop()
-                except Exception as e:
-                    logger.warning(f"kernel.stop() 실패: {e}")
-                # kernel 재시작 가능하도록 dict 에서 제거
-                self._kernels.pop(sid, None)
-        # 4. UI 상태 복원
-        self.is_processing = False
-        self.chat_panel.set_input_enabled(True)
-        self.code_viewer.set_running(False)  # run_btn 활성, stop_btn 비활성
-        self.statusBar().showMessage("⛔ 실행 강제 중지 (F9)")
-        self.console_panel.log("⛔ 실행 강제 중지 (F9)", "WARNING")
-        self._on_kernel_status_changed()
-        # 메인 윈도우 즉시 복원 (멱등 — thread finally 가 또 호출해도 무해)
-        self._restore_main_window()
+        """코드 실행 강제 중지 (F9 단축키 또는 중지 버튼) — handler 위임."""
+        self.block_executor.on_stop_code()
 
     def _run_all_steps(self):
         """전체 스텝 실행"""

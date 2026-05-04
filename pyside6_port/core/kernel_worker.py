@@ -16,6 +16,7 @@ IPC 프로토콜:
 """
 
 import sys
+import os
 import io
 import traceback
 import contextlib
@@ -112,6 +113,19 @@ def _run_loop():
                 sys.stdout.write(combined_out + "\n")
             sys.stdout.write(err_trace.rstrip() + "\n")
             sys.stdout.write(RESULT_DONE + "\n")
+
+        # Win11 ForegroundLock 우회: step 코드가 pyautogui 등으로 SendInput 을
+        # 호출했으면 Windows 가 SetForegroundWindow 권한을 이 subprocess 에 부여.
+        # 이후 ohdo (parent) 의 raise/activate 시도가 거부되어 taskbar flash 만
+        # 발생. AllowSetForegroundWindow 로 명시적 양도 — ohdo 의 다음 1회 통과.
+        # 환경변수 OHDO_PARENT_PID 가 없거나 Windows 가 아니면 no-op (안전).
+        _parent_pid = os.environ.get("OHDO_PARENT_PID")
+        if _parent_pid and sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.AllowSetForegroundWindow(int(_parent_pid))
+            except Exception:
+                pass
 
         sys.stdout.flush()
 
