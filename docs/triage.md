@@ -28,6 +28,46 @@
 
 <!-- 새 항목을 위에서부터 추가 -->
 
+### 2026-05-04 - Wait UI 추가 fix (3건)
+- **체크박스 좌측 정렬**: BlockCard 카드 하단 + BlockViewWidget toolbar 양쪽. 이전 `[stretch]` 후 체크박스 → 우측 끝. 변경 후 SpinBox 옆에 바로.
+- **SpinBox 입력 중 포커스 손실**: `valueChanged` 가 매 키 입력마다 emit → 카드 재생성 → 포커스 잃음. **Fix**:
+  1. `valueChanged` → `editingFinished` (사용자 enter/focusOut 시점만)
+  2. 개별 step wait 변경 시 `_refresh_block_view` 호출 안 함 (session 저장만)
+  3. 세션 default 변경 시 `set_session_wait` 만 호출 (카드 재생성 없이)
+- **SpinBox 클릭 시 "ms" suffix 영역 선택 회귀**: `_WaitSpinBox` subclass — focusInEvent/mousePressEvent 시 `lineEdit().selectAll()` (QTimer.singleShot(0)). 클릭 시 항상 숫자 부분 선택되어 사용자가 바로 덮어쓰기 가능.
+- 자동 검증: core 64/64 그린.
+
+### 2026-05-04 - NameError 'e' is not defined fix (delta 추출 회귀)
+- **상황**: 사용자 RPA_20260502_1753 세션에서 step 2 단독 실행 시 `NameError: name 'e' is not defined`. step 2 의 generated_code 가 `try/except Exception as e:` 구조인데 SequenceMatcher 가 except 헤더는 'equal' 로 매칭하고 안의 print 만 새 라인으로 추출 → `print(f"동작 중 오류 발생: {e}")` 가 except 없이 module-level 에 등장.
+- **분류**: **fix-now (적용 완료)** — [core/import_manager.py:extract_code_delta](../core/import_manager.py):
+  1. prev 의 `except ... as e:` 패턴에서 캡처 변수명 추출
+  2. delta 에 `except` 가 없는데 그 변수명 참조 라인 있으면 제거
+  3. `.strip()` 사용 안 함 — 첫 라인 indent 보존하여 `_smart_dedent` 가 정확히 처리
+- **회귀 보호**: test_64 신규 — except 캡처 변수 stale 라인 제거 + 컴파일 가능 검증.
+
+### 2026-05-04 - Step wait 시스템 (3단계 우선순위)
+- **요구**: 사용자가 매번 "1초 대기" 요청 안 해도 자동 wait + 세션별 default + 개별 step 변경 가능.
+- **구현**:
+  - `Step.wait_after_ms: Optional[int]` (None=fallback, int=개별 override)
+  - `Session.settings.step_delay_ms` 활용 (None=글로벌 사용)
+  - 우선순위: step > session > settings.execution
+  - workflow_engine 가 자동 적용
+- **UI**:
+  - 블록 뷰 toolbar: "⏱ 세션 기본: [____ ms] ☑ 글로벌 사용"
+  - step 카드 하단: "⏱ 대기시간 [____ ms] ☑ 기본값 사용"
+  - SpinBox 화살표 제거 (ms 라 1씩 증감 불필요)
+  - `_WaitSpinBox` subclass — focus 시 자동 selectAll
+  - `editingFinished` 사용 — 입력 중 포커스 유지
+- **회귀 보호**: test_63.
+
+### 2026-05-03 - Phase 2 (Initial 블럭 추출) + main_window 분해 Step 1+2
+- **Initial 블럭**: 첫 step 의 generated_code 에서 모듈 레벨 ast.Assign + 모듈 레벨 try 블록 안 ast.Assign 만 추출 (driver, options 등 setup 변수). [core/import_manager.py:extract_initial_block](../core/import_manager.py).
+- **BlockCard step_id=-1**: "🎬 Initial 블럭 (변수/초기값)" 노란색 카드.
+- **main_window 분해**:
+  - Step 1: closeEvent 중복 정의 (1910 + 2038) 통합 — 이전엔 두 번째가 첫 번째 덮어 커널 정리 안 되던 buggy 동작.
+  - Step 2: [ui/ui_inspection_handler.py](../ui/ui_inspection_handler.py) 신규 — 6개 메서드 (235줄) UIInspectionHandler 클래스로 추출. main_window: 2058 → 1823 줄.
+- **회귀 보호**: test_60, test_61, test_62.
+
 ### 2026-05-02 - PySide6 migration (라이선스 유연성) — pyside6_port/ 별도 디렉토리
 - **상황**: PyQt6 라이선스 (GPL/상용) 가 SaaS 또는 폐쇄 소스 운영 시 부담. PySide6 (LGPL) 가 더 유연.
 - **요청**: 사용자 결정 — "기존 보존 + PySide6 포트 추가". 동기화 정책은 추후 결정.
