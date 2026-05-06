@@ -89,31 +89,123 @@ class SettingsDialog(QDialog):
         widget = QWidget()
         form = QFormLayout(widget)
 
-        # AI 엔진 선택
-        self.ai_combo = QComboBox()
         engines = self.settings.get("ai", {}).get("available_engines", {})
         current = self.settings.get("ai", {}).get("selected", "gemini_cli")
+
+        # AI 엔진 선택
+        self.ai_combo = QComboBox()
         for name in engines:
             self.ai_combo.addItem(name)
         self.ai_combo.setCurrentText(current)
         form.addRow("AI 엔진:", self.ai_combo)
 
-        # 타임아웃 (AI 응답 대기 시간)
+        # 타임아웃 (Gemini CLI 전용)
         self.timeout_spin = QSpinBox()
-        self.timeout_spin.setRange(30, 600)  # 30초 ~ 10분
+        self.timeout_spin.setRange(30, 600)
         self.timeout_spin.setSuffix(" 초")
         self.timeout_spin.setToolTip("AI 응답 대기 최대 시간 (권장: 180초)")
         gemini_config = engines.get("gemini_cli", {})
         self.timeout_spin.setValue(gemini_config.get("timeout_seconds", 180))
-        form.addRow("응답 타임아웃:", self.timeout_spin)
+        form.addRow("Gemini 응답 타임아웃:", self.timeout_spin)
 
-        # 재시도 횟수
         self.retry_spin = QSpinBox()
         self.retry_spin.setRange(0, 10)
         self.retry_spin.setValue(gemini_config.get("max_retries", 3))
-        form.addRow("최대 재시도:", self.retry_spin)
+        form.addRow("Gemini 최대 재시도:", self.retry_spin)
+
+        # ── OpenAI 호환 API 설정 ────────────────────────────────────
+        # base_url + api_key 만 등록하면 OpenAI / DeepSeek / Groq /
+        # OpenRouter / Ollama / LM Studio 등 모두 지원.
+        from core.adapters.openai_compat_adapter import PRESETS as _OPENAI_PRESETS
+        oc_config = engines.get("openai_compat", {})
+
+        oc_group = QGroupBox("OpenAI 호환 API")
+        oc_group.setToolTip(
+            "OpenAI Chat Completions API 형식을 지원하는 모든 LLM 서비스용. "
+            "base_url + api_key 만 등록하면 됨."
+        )
+        oc_form = QFormLayout(oc_group)
+
+        # 프리셋 드롭다운 (선택 시 base_url + model 자동 채움)
+        self.openai_preset_combo = QComboBox()
+        self.openai_preset_combo.addItem("(프리셋 선택...)", "")
+        for preset_name in _OPENAI_PRESETS.keys():
+            self.openai_preset_combo.addItem(preset_name, preset_name)
+        current_preset = oc_config.get("preset", "")
+        if current_preset:
+            idx = self.openai_preset_combo.findData(current_preset)
+            if idx >= 0:
+                self.openai_preset_combo.setCurrentIndex(idx)
+        self.openai_preset_combo.setToolTip(
+            "프리셋 선택 시 base_url 과 model 이 자동으로 채워집니다. "
+            "그 후 api_key 만 입력하면 사용 가능."
+        )
+        self.openai_preset_combo.currentIndexChanged.connect(
+            lambda _: self._on_openai_preset_changed(_OPENAI_PRESETS)
+        )
+        oc_form.addRow("프리셋:", self.openai_preset_combo)
+
+        self.openai_base_url_edit = QLineEdit()
+        self.openai_base_url_edit.setPlaceholderText("https://api.openai.com/v1")
+        self.openai_base_url_edit.setText(oc_config.get("base_url", ""))
+        self.openai_base_url_edit.setToolTip(
+            "API 엔드포인트 — '/chat/completions' 앞까지의 경로. "
+            "끝의 슬래시는 자동 제거됨."
+        )
+        oc_form.addRow("base_url:", self.openai_base_url_edit)
+
+        self.openai_api_key_edit = QLineEdit()
+        self.openai_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.openai_api_key_edit.setText(oc_config.get("api_key", ""))
+        self.openai_api_key_edit.setToolTip(
+            "API 키. 비워두면 환경변수 OPENAI_API_KEY 사용. "
+            "로컬 Ollama/LM Studio 는 비워둬도 됨.\n"
+            "⚠ 현재 settings.json 평문 저장 — keyring 통합은 추후."
+        )
+        oc_form.addRow("api_key:", self.openai_api_key_edit)
+
+        self.openai_model_edit = QLineEdit()
+        self.openai_model_edit.setPlaceholderText("gpt-4o-mini")
+        self.openai_model_edit.setText(oc_config.get("model", ""))
+        self.openai_model_edit.setToolTip(
+            "모델 이름 (서비스마다 다름). 예: gpt-4o-mini, deepseek-chat, "
+            "llama-3.3-70b-versatile, llama3.2 (Ollama)."
+        )
+        oc_form.addRow("model:", self.openai_model_edit)
+
+        self.openai_timeout_spin = QSpinBox()
+        self.openai_timeout_spin.setRange(30, 600)
+        self.openai_timeout_spin.setSuffix(" 초")
+        self.openai_timeout_spin.setValue(oc_config.get("timeout_seconds", 180))
+        oc_form.addRow("timeout:", self.openai_timeout_spin)
+
+        self.openai_max_tokens_spin = QSpinBox()
+        self.openai_max_tokens_spin.setRange(256, 32768)
+        self.openai_max_tokens_spin.setValue(oc_config.get("max_tokens", 4096))
+        oc_form.addRow("max_tokens:", self.openai_max_tokens_spin)
+
+        # temperature 는 0.0~2.0 float — QSpinBox 대신 LineEdit 으로 단순화
+        self.openai_temperature_edit = QLineEdit()
+        self.openai_temperature_edit.setText(str(oc_config.get("temperature", 0.3)))
+        self.openai_temperature_edit.setToolTip(
+            "0.0 (결정적) ~ 2.0 (매우 random). 코드 생성은 0.3 권장."
+        )
+        oc_form.addRow("temperature:", self.openai_temperature_edit)
+
+        form.addRow(oc_group)
 
         return widget
+
+    def _on_openai_preset_changed(self, presets: dict) -> None:
+        """프리셋 선택 시 base_url + model 자동 채움."""
+        preset_name = self.openai_preset_combo.currentData()
+        if not preset_name:
+            return
+        preset = presets.get(preset_name, {})
+        if preset.get("base_url"):
+            self.openai_base_url_edit.setText(preset["base_url"])
+        if preset.get("model"):
+            self.openai_model_edit.setText(preset["model"])
 
     def _create_image_tab(self) -> QWidget:
         widget = QWidget()
@@ -464,6 +556,24 @@ class SettingsDialog(QDialog):
         gemini = self.settings["ai"]["available_engines"].get("gemini_cli", {})
         gemini["timeout_seconds"] = self.timeout_spin.value()
         gemini["max_retries"] = self.retry_spin.value()
+
+        # OpenAI 호환 API
+        engines_dict = self.settings["ai"].setdefault("available_engines", {})
+        oc = engines_dict.setdefault("openai_compat", {})
+        preset_data = self.openai_preset_combo.currentData() or ""
+        oc["preset"] = preset_data
+        oc["base_url"] = self.openai_base_url_edit.text().strip()
+        oc["api_key"] = self.openai_api_key_edit.text()
+        oc["model"] = self.openai_model_edit.text().strip()
+        oc["timeout_seconds"] = self.openai_timeout_spin.value()
+        oc["max_tokens"] = self.openai_max_tokens_spin.value()
+        try:
+            oc["temperature"] = float(self.openai_temperature_edit.text() or "0.3")
+        except ValueError:
+            oc["temperature"] = 0.3
+        # 환경변수 fallback 유지 (기존 default)
+        oc.setdefault("api_key_env", "OPENAI_API_KEY")
+        oc.setdefault("max_retries", 3)
 
         # 이미지
         self.settings["image"]["capture_quality"] = self.quality_slider.value()

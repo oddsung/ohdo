@@ -77,6 +77,11 @@ class Step:
     # Step 후 대기시간 (ms). None 이면 settings.execution.step_delay_ms 사용 (default).
     # 양수면 이 step 만 override.
     wait_after_ms: Optional[int] = None
+    # D3 (UI redesign): 사용자 요청과 AI 설명을 코드와 분리 저장.
+    # 새 UI v2 의 step 카드가 "👤 사용자 요청 / 🤖 AI 설명 / 💻 코드" 통합 표시에 사용.
+    # 기존 v1 은 conversation 리스트에서 같은 정보 추출 — 양쪽 호환.
+    user_request: str = ""
+    ai_description: str = ""
 
 
 @dataclass

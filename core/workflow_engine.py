@@ -641,20 +641,45 @@ class WorkflowEngine:
         )
         start_time = time.time()
 
-        # ── 라이브러리 블럭 실행 (커널에 없을 때만) ──
-        if LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps:
-            lib_block = extract_library_block(session)
-            if lib_block.strip():
-                if on_log:
-                    on_log("📦 라이브러리 블럭 초기화 중...")
-                lib_result = kernel.execute_block(
-                    lib_block,
-                    step_id=LIBRARY_BLOCK_STEP_ID,
-                    timeout=30
+        # ── 라이브러리 블럭 실행 (커널 미초기화 OR 라이브러리 코드 변경 시) ──
+        # 사용자 보고 (5/5): step 1 시점 cached library 가 step 2 의 helper 함수
+        # (find_and_click) 누락 → NameError. library_hash 로 변경 감지 → 재실행.
+        import hashlib as _hashlib
+        lib_block = extract_library_block(session)
+        new_lib_hash = (
+            _hashlib.md5(lib_block.encode("utf-8")).hexdigest()
+            if lib_block.strip() else None
+        )
+        prev_lib_hash = getattr(kernel, "library_hash", None)
+        lib_needs_run = (
+            LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps
+            or prev_lib_hash != new_lib_hash
+        )
+        if lib_needs_run and lib_block.strip():
+            if on_log:
+                changed = (
+                    "변경 감지" if (prev_lib_hash is not None
+                                  and prev_lib_hash != new_lib_hash)
+                    else "초기화"
                 )
-                if not lib_result.success:
-                    if on_log:
-                        on_log(f"⚠️ 라이브러리 블럭 실행 오류: {lib_result.error}")
+                on_log(f"📦 라이브러리 블럭 {changed} 중...")
+            # AI 환각 import (예: FindBestMatchException) 자동 교정 후 idempotent 가드.
+            # 환각 import 가 라이브러리 블럭에서 ImportError 로 죽으면 후속 import 도 skip
+            # → 모든 step cascade fail (사용자 보고 5/5 wooyang 세션).
+            lib_result = kernel.execute_block(
+                make_browser_init_idempotent(fix_hallucinated_imports(lib_block)),
+                step_id=LIBRARY_BLOCK_STEP_ID,
+                timeout=30
+            )
+            if not lib_result.success:
+                if on_log:
+                    on_log(f"⚠️ 라이브러리 블럭 실행 오류: {lib_result.error}")
+            else:
+                # hash 갱신 (다음 호출에서 같으면 skip)
+                try:
+                    kernel.library_hash = new_lib_hash
+                except Exception:
+                    pass
 
         # ── 스텝 실행 루프 ──
         prev_step_dict: dict | None = None
@@ -673,12 +698,25 @@ class WorkflowEngine:
             step_id = step.get("step_id", 0)
             # prev_step 전달 — 저장된 step_code 가 누적이라도 generated_code diff 로 재계산
             delta_code = extract_step_delta_code(step, prev_step_dict)
-            prev_step_dict = step
+            # AI 환각 심볼 (예: FindBestMatchException) 자동 교정 — except 절에서 NameError
+            # cascade 회귀 방지. 라이브러리 블럭과 동일한 매핑 적용.
+            delta_code = fix_hallucinated_imports(delta_code)
+            # 같은 step 또는 silent replay 가 여러 번 일어나도 새 브라우저가 추가로 뜨지
+            # 않도록 driver 초기화 코드를 idempotent 가드로 감쌈 (5/5 회귀 fix).
+            delta_code = make_browser_init_idempotent(delta_code)
+            # SW_RESTORE 가 maximized 창을 normal 로 축소시켜 직전 element 좌표가
+            # 무효화되는 회귀 (5/5 사용자 보고: ID 입력 안 됨, "전체창이 축소됨") 방지.
+            delta_code = make_show_window_safe(delta_code)
 
             if not delta_code.strip():
+                # empty step 은 prev_step_dict 갱신 없이 skip — 다음 step 의 diff 가 깨지지 않게
+                # (5/5 회귀: AI 가 응답 실패로 generated_code="" 인 step 이 끼어 있으면
+                # 다음 step 의 marker 누락 시 prev_body="" 로 delta 계산 → 전체 cumulative
+                # 실행 → driver.get/maximize 중복 → 새로고침 반복).
                 if on_log:
                     on_log(f"스텝 #{step_id}: 실행할 코드 없음, 건너뜀")
                 continue
+            prev_step_dict = step
 
             is_silent = (step_id < start_from_step_id) and silent_replay
             already_done = step_id in kernel.executed_steps
@@ -824,6 +862,206 @@ def _extract_by_step_marker(code: str, step_id: int) -> str:
     return _smart_dedent(_unwrap_main_function(body))
 
 
+def _find_paren_end(code: str, open_pos: int) -> int:
+    """Given position of '(', return position AFTER matching ')'.
+
+    Handles nested parens, single/double/triple-quoted strings, and #-comments.
+    Returns ``open_pos`` (or `len(code)`) if balancing fails.
+    """
+    if open_pos >= len(code) or code[open_pos] != '(':
+        return open_pos
+    depth = 1
+    i = open_pos + 1
+    n = len(code)
+    while i < n and depth > 0:
+        ch = code[i]
+        if ch == '#':
+            nl = code.find('\n', i)
+            i = nl if nl >= 0 else n
+            continue
+        if ch in ('"', "'"):
+            triple = code[i:i + 3]
+            if triple == ch * 3:
+                end = code.find(ch * 3, i + 3)
+                i = end + 3 if end >= 0 else n
+            else:
+                j = i + 1
+                while j < n and code[j] != ch:
+                    j += 2 if code[j] == '\\' else 1
+                i = j + 1
+            continue
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return i
+
+
+_BROWSER_INIT_RE = re.compile(
+    r'^(?P<indent>[ \t]*)driver\s*=\s*webdriver\.'
+    r'(?:Chrome|Firefox|Edge|Safari|ChromiumEdge|Remote)\b',
+    re.MULTILINE,
+)
+
+
+def make_browser_init_idempotent(code: str) -> str:
+    """``driver = webdriver.Chrome(...)`` 를 idempotent 가드로 감쌉니다.
+
+    "전체 실행" 을 두 번 누르거나 step 1 을 silent replay 할 때마다 새 브라우저가
+    추가로 뜨는 회귀 (5/5 사용자 보고: "웹브라우저가 3개가 띄워지고") 방지. 살아있는
+    driver 가 있으면 재사용하고, 없거나 죽었을 때만 새로 생성.
+
+    이미 try/except 안에 있거나 이전에 본 메서드가 한 번 감싼 코드는 다시 건드리지
+    않도록 직전 구간에서 우리 마커 또는 ``driver.window_handles`` 시그니처를 검사.
+    """
+    if 'webdriver' not in code:
+        return code
+    matches = list(_BROWSER_INIT_RE.finditer(code))
+    if not matches:
+        return code
+
+    out: list[str] = []
+    pos = 0
+    for m in matches:
+        indent = m.group('indent')
+        start = m.start()
+        open_paren = code.find('(', m.end())
+        # webdriver.X 와 '(' 사이에는 공백만 허용 — 멀리 떨어졌으면 패턴 아님
+        if open_paren < 0 or open_paren - m.end() > 4:
+            continue
+        end = _find_paren_end(code, open_paren)
+        if end <= open_paren:
+            continue
+
+        # 이미 idempotent 가드 안에 있으면 건너뜀
+        prefix_window = code[max(0, start - 250):start]
+        if '_idem_browser_init' in prefix_window or 'driver.window_handles' in prefix_window:
+            continue
+        prev_lines = prefix_window.rstrip().splitlines()[-3:] if prefix_window else []
+        if any(
+            'try:' in pl
+            or "'driver' not in" in pl
+            or "'driver' in globals" in pl
+            for pl in prev_lines
+        ):
+            continue
+
+        original_call = code[start:end]
+        wrapped = (
+            f"{indent}# _idem_browser_init: 살아있는 driver 재사용 (다중 실행 방지)\n"
+            f"{indent}try:\n"
+            f"{indent}    _ = driver.window_handles\n"
+            f"{indent}except Exception:\n"
+            f"{indent}    {original_call}"
+        )
+        out.append(code[pos:start])
+        out.append(wrapped)
+        pos = end
+    out.append(code[pos:])
+    return ''.join(out)
+
+
+_SHOW_WINDOW_RESTORE_RE = re.compile(
+    r'^(?P<indent>[ \t]*)(?P<call>(?:\w+\.)*ShowWindow)\s*\(\s*'
+    r'(?P<hwnd>[\w_.]+)\s*,\s*9\s*\)\s*(?:#[^\n]*)?$',
+    re.MULTILINE,
+)
+
+
+def make_show_window_safe(code: str) -> str:
+    """``ShowWindow(hwnd, 9)`` (SW_RESTORE) 를 IsIconic 분기로 감쌉니다.
+
+    SW_RESTORE 는 maximized 창을 normal 사이즈로 축소시킴 → 직전에 계산한 element
+    좌표 무효화 → 클릭이 빈 곳으로 가는 회귀 (5/5 사용자 보고: ID 입력 안 됨,
+    "전체창이 축소됨"). minimized 일 때만 SW_RESTORE, 그 외는 SW_SHOW (5) 로
+    현재 사이즈 (maximized 포함) 보존.
+
+    이미 IsIconic 분기 안에 있는 호출은 재변환하지 않음 (자기 멱등).
+    """
+    if 'ShowWindow' not in code:
+        return code
+    matches = list(_SHOW_WINDOW_RESTORE_RE.finditer(code))
+    if not matches:
+        return code
+
+    out: list[str] = []
+    pos = 0
+    for m in matches:
+        indent = m.group('indent')
+        call = m.group('call')
+        hwnd_var = m.group('hwnd')
+        start = m.start()
+        end = m.end()
+
+        # 이미 IsIconic guard 안이면 skip
+        prefix = code[max(0, start - 250):start]
+        if 'IsIconic' in prefix:
+            iso_pos = prefix.rfind('IsIconic')
+            if (len(prefix) - iso_pos) < 200:
+                continue
+
+        # ShowWindow 호출의 module prefix (예: user32.) 를 그대로 IsIconic 에 적용
+        if '.' in call:
+            module_prefix = call.rsplit('.', 1)[0]
+            isiconic = f"{module_prefix}.IsIconic"
+            show_call = call
+        else:
+            isiconic = "user32.IsIconic"
+            show_call = "user32.ShowWindow"
+
+        wrapped = (
+            f"{indent}# _safe_show: SW_RESTORE 는 maximized 창을 축소시키므로 minimized 만 복원\n"
+            f"{indent}if {isiconic}({hwnd_var}):\n"
+            f"{indent}    {show_call}({hwnd_var}, 9)   # SW_RESTORE\n"
+            f"{indent}else:\n"
+            f"{indent}    {show_call}({hwnd_var}, 5)   # SW_SHOW (maximized 보존)"
+        )
+        out.append(code[pos:start])
+        out.append(wrapped)
+        pos = end
+    out.append(code[pos:])
+    return ''.join(out)
+
+
+# 사용자 보고 (5/5, 5/6): AI 가 pywinauto 의 존재하지 않는 exception 클래스명/모듈명을 환각.
+# - 5/5: 'FindBestMatchException' (실제는 'MatchError') → import 가 ImportError 로 죽음
+# - 5/6: 'FindBestMatch' (단독) / 'FindBestMatch.MatchError' (점 표기) → 같은 ImportError
+# import 실패 시 라이브러리 블럭 전체가 partial 실행되어 Options/Application 등 후속 import 도 skip
+# → 모든 step 이 NameError cascade. 알려진 환각 → 실제 이름 매핑.
+_HALLUCINATED_PYWINAUTO_NAMES = {
+    "FindBestMatchException": "MatchError",
+    "FindBestMatch": "MatchError",   # 5/6 환각 — 단독 / 점 표기 모두 처리 (점 표기는 아래에서 먼저)
+    # 추후 다른 환각 발견 시 여기 추가
+}
+
+
+def fix_hallucinated_imports(code: str) -> str:
+    """AI 가 만들어낸 존재하지 않는 pywinauto/selenium 심볼명을 실제 이름으로 치환.
+
+    교정 사례:
+    - `from pywinauto.findbestmatch import FindBestMatchException` → `MatchError`
+    - `except FindBestMatchException as e:` → `except MatchError as e:`
+    - `from pywinauto.findbestmatch import FindBestMatch` → `MatchError` (5/6)
+    - `except FindBestMatch.MatchError as e:` → `except MatchError as e:` (5/6)
+
+    self-멱등 (이미 교정된 코드는 재교정 X — 원래 이름이 사라졌으므로 매칭 안 됨).
+    """
+    if not code:
+        return code
+    out = code
+    # 1단계: 점 표기 환각 우선 처리 — `FindBestMatch.MatchError` → `MatchError`
+    # (`FindBestMatch` 단독 치환 전에 먼저. 안 그러면 `MatchError.MatchError` 같은 잘못된 형태 됨.)
+    out = re.sub(r'\bFindBestMatch\.MatchError\b', 'MatchError', out)
+    # 2단계: 단독 환각 이름 → 실제 이름 (단어 경계 매칭으로 부분 일치 회피)
+    for fake, real in _HALLUCINATED_PYWINAUTO_NAMES.items():
+        if fake in out:
+            out = re.sub(rf'\b{re.escape(fake)}\b', real, out)
+    return out
+
+
 def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
     """
     스텝의 델타 코드를 반환합니다.
@@ -899,8 +1137,13 @@ def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
                 return normalized
             candidates.append(normalized)
 
-    # ── 4) generated_code 전체 ──
-    if generated_code:
+    # ── 4) generated_code 전체 — prev_step is None (첫 step) 만 valid ──
+    # 사용자 보고 (5/6): AI 가 새 step 본문 안 만들고 응답에 누적 코드만 반환 시
+    # 마커 추출 / diff / step_code 모두 fail → 4번 fallback 으로 누적 코드 통째가 step_code
+    # 로 저장됨 → 단독 실행 시 import + 메모장 실행까지 전부 실행되는 silent 회귀.
+    # prev_step 이 있으면 (이미 step 1 이상 진행됨) 이 fallback 차단해서 빈 string 반환 →
+    # 호출자 (AppService.generate_step) 에서 fail-fast 처리 가능.
+    if generated_code and prev_step is None:
         if _is_compilable(generated_code):
             return generated_code
         candidates.append(generated_code)

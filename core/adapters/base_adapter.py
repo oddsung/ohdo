@@ -23,6 +23,8 @@ class AIResponse:
     success: bool = False                   # 성공 여부
     error: Optional[str] = None             # 에러 메시지
     cancelled: bool = False                 # 사용자 취소 여부
+    # 응답이 도중에 잘렸는지 (닫히지 않은 ```python 블럭 감지) — 사용자에게 재생성 권유용
+    partial: bool = False
 
 
 class BaseAIAdapter(ABC):
@@ -80,6 +82,23 @@ class BaseAIAdapter(ABC):
         return {"status": "unknown"}
 
     @staticmethod
+    def detect_partial_response(raw_response: str) -> bool:
+        """``` ```python 블럭이 닫히지 않은 partial response 감지.
+
+        AI 응답이 도중에 잘릴 때 (Gemini CLI 의 MCP issue 또는 timeout 등) 마지막
+        ```python 시작 후 닫는 ``` 가 없으면 partial.
+        """
+        if not raw_response:
+            return False
+        import re
+        opens = list(re.finditer(r"```(?:python|py)", raw_response))
+        if not opens:
+            return False
+        last_open_end = opens[-1].end()
+        # 마지막 ```python 이후에 ``` 닫는 것이 있는지
+        return "```" not in raw_response[last_open_end:]
+
+    @staticmethod
     def extract_code_from_response(response_text: str) -> str:
         """
         AI 응답에서 Python 코드 블록을 추출합니다.
@@ -89,16 +108,43 @@ class BaseAIAdapter(ABC):
         2. ```py ... ```
         3. ``` ... ``` (코드 내용에 import/def/class가 있으면)
         4. 코드 블록 없이 직접 코드가 있는 경우 (fallback)
+
+        사용자 보고 (5/5 RPA_20260502_1454 → v2 새 세션 step 2): Gemini CLI 의
+        ``MCP issues detected. Run /mcp list for status.`` 같은 stdout noise prefix
+        + 응답 도중 truncation (닫히지 않은 ```python 블럭) 처리.
         """
         import re
 
-        # 1차: ```python 또는 ```py 블록
+        # 0차: Gemini CLI / Anthropic 등 CLI 의 stdout noise prefix 제거.
+        # 이 라인들이 ```python 블럭 매칭을 방해 또는 응답 정리에 잡음.
+        _NOISE_LINE_PATTERNS = [
+            r"^MCP issues detected\..*$",
+            r"^Run /mcp list.*$",
+            r"^Loaded cached credentials.*$",
+            r"^Data collection is disabled.*$",
+        ]
+        for pat in _NOISE_LINE_PATTERNS:
+            response_text = re.sub(pat, "", response_text, flags=re.MULTILINE)
+        response_text = response_text.lstrip()
+
+        # 1차: ```python 또는 ```py 블록 (정상 닫힘)
         code_blocks = re.findall(
             r'```(?:python|py)\s*\n?(.*?)\s*```',
             response_text, re.DOTALL
         )
         if code_blocks:
             return code_blocks[-1].strip()
+
+        # 1.5차: 응답이 잘려서 닫는 ``` 가 없는 partial response 처리.
+        # ```python\n... 시작 후 끝까지 — partial 코드라도 추출해 사용자가 식별 가능.
+        m = re.search(
+            r'```(?:python|py)\s*\n([\s\S]+)$',
+            response_text,
+        )
+        if m:
+            partial = m.group(1).rstrip()
+            # 분명히 partial — 사용자가 카드에서 인지 후 재생성 또는 직접 수정 가능.
+            return partial
 
         # 2차: ``` 블록 중 Python 코드가 포함된 것
         generic_blocks = re.findall(
@@ -195,12 +241,14 @@ class BaseAIAdapter(ABC):
         """
         import re
 
-        if not code or not full_prompt:
+        if not code:
             return code
 
-        # ── 1단계: 프롬프트에서 사용자 원본 따옴표 값 추출 ─────────────────────
-        # 프롬프트 첫 4줄(사용자 요청 섹션)만 사용
-        user_section = '\n'.join(full_prompt.splitlines()[:4])
+        # full_prompt 가 비어있어도 2~7 단계 (코드 자체 패턴 교정) 는 실행. 1 단계만
+        # 프롬프트 의존이라 full_prompt 비어있으면 skip.
+        user_section = (
+            '\n'.join(full_prompt.splitlines()[:4]) if full_prompt else ""
+        )
 
         # 작은따옴표 또는 큰따옴표로 감싼 값 중 특수문자 포함 3자 이상만 추출
         candidates: list[str] = re.findall(r"'([^'\n]{3,})'", user_section)
@@ -355,6 +403,40 @@ class BaseAIAdapter(ABC):
             r'([ \t]+)else:\n\1    try: el\.click\(\)\n\1    except Exception: driver\.execute_script\(\'arguments\[0\]\.click\(\)\', el\)\n',
             _fix_el_click_to_actionchains,
             code
+        )
+
+        # ── 7단계: pywinauto 잘못된 키워드 자동 교정 ──────────────────────
+        # 사용자 보고 (5/5): AI 가 child_window/find_elements 호출 시
+        # `automation_id=` 키워드 사용 — pywinauto 의 정확한 키워드는 `auto_id=`.
+        # selenium/UiPath 등 다른 라이브러리와 혼동.
+        # 교정: child_window(...), descendants(...), find_elements(...) 등의
+        # 호출 안의 automation_id= 를 auto_id= 로 변경.
+        code = re.sub(
+            r'(\b(?:child_window|descendants|children|find_elements|find_element)'
+            r'\s*\([^)]*?)automation_id\s*=',
+            r'\1auto_id=',
+            code,
+        )
+
+        # ── 8단계: pywinauto Application().connect / app.window 의 ambiguous 방지 ──
+        # 사용자 보고 (5/5): 같은 title 의 Chrome 창 2개 → ambiguous error.
+        # found_index=0 인자 없으면 자동 추가 (첫 매칭 사용).
+        def _add_found_index(m: re.Match) -> str:
+            full = m.group(0)
+            if "found_index" in full:
+                return full  # 이미 있음
+            # 닫는 괄호 직전에 ", found_index=0" 삽입
+            return full[:-1] + ", found_index=0)"
+
+        # Application(...).connect(title=...)
+        code = re.sub(
+            r'\.connect\([^)]*\btitle\s*=[^)]*\)',
+            _add_found_index, code,
+        )
+        # app.window(title=...)
+        code = re.sub(
+            r'\bapp\.window\([^)]*\btitle\s*=[^)]*\)',
+            _add_found_index, code,
         )
 
         return code

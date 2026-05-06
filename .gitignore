@@ -52,6 +52,8 @@ logs/
 *.tmp
 *.temp
 .cache/
+# 디버깅·대화 로그 (ohdo 가 generate_step 마다 prompt+code 를 tmp/conversations/ 에 저장)
+tmp/
 
 # M2.8: Agent 가 동반 배포할 Python 임베디드 (빌드 시 scripts/fetch-embedded-python.ps1 로 재생성)
 agent/vendor/

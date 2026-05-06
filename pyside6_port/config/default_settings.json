@@ -4,21 +4,21 @@
     "available_engines": {
       "gemini_cli": {
         "command": "gemini",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-3.1-pro-preview",
         "flags": "-p",
         "timeout_seconds": 120,
         "max_retries": 3
       },
-      "openai": {
+      "openai_compat": {
+        "preset": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "",
         "api_key_env": "OPENAI_API_KEY",
-        "model": "gpt-4o",
+        "model": "gpt-4o-mini",
+        "timeout_seconds": 180,
+        "max_retries": 3,
         "max_tokens": 4096,
         "temperature": 0.3
-      },
-      "claude": {
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 4096
       }
     }
   },

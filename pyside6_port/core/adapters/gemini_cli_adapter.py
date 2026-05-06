@@ -193,6 +193,8 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     code = self.restore_user_strings(code, full_prompt)
                 description = self.extract_description_from_response(raw_output)
                 packages = self.extract_packages_from_code(code) if code else []
+                # partial 감지 (사용자 보고 5/5: AI 응답 도중 잘림)
+                is_partial = self.detect_partial_response(raw_output)
 
                 return AIResponse(
                     text=raw_output,
@@ -201,7 +203,8 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     packages=packages,
                     raw_response=raw_output,
                     response_time_ms=elapsed_ms,
-                    success=True
+                    success=True,
+                    partial=is_partial,
                 )
             else:
                 error_msg = stderr_output or raw_output or "응답 없음"

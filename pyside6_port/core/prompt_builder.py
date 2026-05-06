@@ -9,13 +9,38 @@
 - "코드를 반드시 생성하라"는 지시를 반복 강조
 """
 
+import functools
 import json
 import logging
 import platform
+import re
+import sys
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+@functools.cache
+def _build_env_info_lines() -> list[str]:
+    """런타임 환경 (OS/Python/주요 라이브러리 버전) detect — 한 번만 실행 후 cache.
+
+    AI 가 사용자의 정확한 환경을 알면 import 가능한 라이브러리만 사용하고
+    버전 별 API 차이도 (학습 데이터 한도 내에서) 정확히 반영 가능.
+    """
+    lines = [
+        "## 현재 실행 환경 (이 환경에서 import 가능한 라이브러리만 사용. 표준 라이브러리는 항상 사용 가능):",
+        f"- OS: {platform.system()} {platform.release()}",
+        f"- Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+    ]
+    for lib in ("pywinauto", "selenium", "pyautogui", "pyperclip"):
+        try:
+            mod = __import__(lib)
+            ver = getattr(mod, "__version__", None) or "?"
+            lines.append(f"- {lib}: {ver}")
+        except ImportError:
+            pass
+    return lines
 
 
 class PromptBuilder:
@@ -77,9 +102,24 @@ class PromptBuilder:
         current_code, is_manually_edited = self._get_current_code(session)
         completed_summary = self._build_steps_summary(session, max_history_steps)
 
+        # 5/6 사용자 결정: 누적 코드 압축 — 이전 step body 마커화. 마지막 1 step body 만 keep.
+        # prompt size 폭증 (35K+) 시 Gemini corrupt 응답 (`<ctrl46>`) trigger 회피.
+        # manually_edited 케이스 (사용자 직접 편집) 는 압축 안 함 — 사용자 의도 보존.
+        compressed_code = current_code
+        summarized_count = 0
+        if current_code and not is_manually_edited:
+            compressed_code, summarized_count = self._compress_accumulated_code(
+                current_code, keep_last_n=1
+            )
+
         if current_code:
-            parts.append("## 현재까지 작성된 누적 코드 (이전 모든 스텝의 동작이 담겨 있음):")
-            parts.append(f"```python\n{current_code}\n```")
+            if summarized_count > 0:
+                parts.append(
+                    "## 현재까지 작성된 누적 코드 (이전 step 본문 일부 생략 — 마커만):"
+                )
+            else:
+                parts.append("## 현재까지 작성된 누적 코드 (이전 모든 스텝의 동작이 담겨 있음):")
+            parts.append(f"```python\n{compressed_code}\n```")
             parts.append("")
             if is_manually_edited:
                 edit_diff = self._get_last_edit_diff(session)
@@ -95,7 +135,38 @@ class PromptBuilder:
                 parts.append("⚠ 핵심 규칙: 위 코드는 이전 모든 스텝의 동작을 순서대로 포함한 누적 코드입니다.")
                 parts.append("반드시 위 코드의 모든 동작을 그대로 유지하면서, 새 요청의 동작을 기존 흐름의 마지막에 추가하세요.")
                 parts.append("절대로 이전 단계의 코드를 삭제하거나 주석으로 대체하거나 요약하지 마세요.")
+            if summarized_count > 0:
+                parts.append("")
+                parts.append(
+                    f"⚠ **압축 안내 — `# === Step N: <task> (본문 생략 ...) ===` 마커 ({summarized_count}개)**: "
+                    "이전 step 본문은 prompt size 절약을 위해 생략됨. 그러나 그 step 들은 **이미 실행 완료** 되었고, "
+                    "정의한 변수 (`app`, `win`, `text` 등) 와 import 들은 **누적 효과로 보존** 되어 새 step 에서 그대로 참조 가능. "
+                    "마지막 1개 step body 는 그대로 보여줌 (가장 가까운 context 유지)."
+                )
+                parts.append(
+                    "✗ 금지: 생략된 step body 를 추측해서 다시 작성 / 마커 라인 변경 / "
+                    "이미 정의된 변수의 재정의."
+                )
+                parts.append(
+                    "✓ 응답 형식: import 영역과 마커들은 그대로 두고, 새 사용자 요청에 해당하는 "
+                    "**새 step 마커 + 본문** 만 마지막에 추가 (다음 step 번호로)."
+                )
             parts.append("새 기능은 기존 코드가 완전히 실행된 후 이어서 실행되도록 추가해야 합니다.")
+            # 사용자 보고 (5/6): AI 가 같은 요청 반복 시 (예: ctrl+shift+s 두 번째) 새 step
+            # 마커 안 만들고 응답에 누적 코드만 반환 → extract_step_delta_code 가 fallback
+            # 으로 generated_code 전체를 step_code 로 저장 → 단독 실행 시 import + 메모장
+            # 실행 코드까지 통째 실행되는 회귀.
+            parts.append(
+                "⚠ **새 step 추가 강제 (절대 위반 금지)**: 새 요청이 이전 step 의 코드와 동일해 보여도 "
+                "**반드시 별도 step 마커 + 본문으로 추가**. 다음 3가지 모두 응답에 포함:"
+            )
+            parts.append("  1. `# === Step <N>: <설명> (시작) ===` 마커 (N = 다음 step 번호)")
+            parts.append("  2. 새 요청에 해당하는 본문 코드 (단 한 줄이라도, 같은 코드 반복이라도)")
+            parts.append("  3. `# === Step <N>: <설명> (끝) ===` 마커")
+            parts.append(
+                "✗ 금지: 응답에 새 step 마커 없이 누적 코드만 반환 / 빈 step 반환 / "
+                "\"이미 같은 코드 있음\" 같은 사유로 step 생략."
+            )
             parts.append("")
 
         is_macos = platform.system() == "Darwin"
@@ -121,7 +192,8 @@ class PromptBuilder:
             parts.append("")
 
         # UI 자동화 가이드 (OS별 분기)
-        parts.append(f"## 현재 실행 환경: {platform.system()} {platform.release()}")
+        # 환경 정보 (OS + Python + 주요 라이브러리 버전) — AI 가 정확한 라이브러리 시그니처 사용하도록
+        parts.extend(_build_env_info_lines())
         parts.append("")
         parts.extend(self._build_automation_guide(is_macos))
         parts.append("")
@@ -146,6 +218,9 @@ class PromptBuilder:
                 parts.append("     (off-canvas 요소는 visibility 조건을 영원히 만족하지 못해 TimeoutException 발생)")
             else:
                 parts.append("위 선택된 UI 요소 정보를 활용하여 해당 요소를 조작하는 pywinauto 코드를 작성하세요.")
+                parts.append("⚠️ pywinauto API 정확한 키워드: `auto_id=` (NOT `automation_id=`), `class_name=`, `control_type=`.")
+                parts.append("   - `app.window(title=...).child_window(auto_id=\"...\", control_type=\"...\")` 패턴 사용.")
+                parts.append("   - selenium 의 `find_element(By.ID, ...)` 와 혼동 금지 — pywinauto 는 `child_window(auto_id=...)` 만.")
             parts.append("제공된 예시 코드를 참고하되, 요청 내용에 맞게 수정하세요.")
             parts.append("")
 
@@ -203,10 +278,22 @@ class PromptBuilder:
             parts.append("   - subprocess.Popen(['open', 'https://url'])으로 기본 브라우저에서 URL 열기")
         else:
             # ── Windows 가이드 ──
+            # ⚠ system_context 의 가이드 #14(b)/#14(c)/#11 과 모순되지 않도록 align.
+            # 5/6 사용자 보고: Desktop().window() 사용 시 변수 type 혼동으로 후속 step 에서
+            # 0 windows found 회귀 발생 → idempotent Application.connect() 권장으로 통일.
             parts.append("1. **pywinauto** (최우선): 윈도우 컨트롤 제어 (버튼 클릭, 메뉴 선택, 텍스트 입력)")
-            parts.append("   - 일반적인 앱: app = Application(backend='uia').connect(title='...')")
-            parts.append("   - 🌟중요(UWP 앱 주의) Windows 11 메모장 등 UWP 앱은 Application.start() 사용을 지양하세요.")
-            parts.append("     대신 subprocess.Popen()으로 먼저 실행 후 약간 대기하고, Desktop(backend='uia').window(title_re='...', found_index=0, visible_only=True)를 사용하여 바탕화면 전체에서 가시적인 윈도우를 찾아 연결하세요. (반드시 found_index=0 과 visible_only=True 포함)")
+            parts.append("   - 🌟중요(앱 실행/연결): **`Application().connect()` 사용** (Win11 메모장/UWP 포함). idempotent try/except 패턴 (system_context 의 가이드 #14(b) 참조):")
+            parts.append("     ```python")
+            parts.append("     try:")
+            parts.append("         app = Application(backend='uia').connect(title_re=r'.*메모장', timeout=3, found_index=0)")
+            parts.append("     except Exception:")
+            parts.append("         subprocess.Popen(['notepad.exe'])")
+            parts.append("         time.sleep(1.5)")
+            parts.append("         app = Application(backend='uia').connect(title_re=r'.*메모장', timeout=10, found_index=0)")
+            parts.append("     win = app.window(title_re=r'.*메모장', found_index=0)")
+            parts.append("     ```")
+            parts.append("   - 🌟중요(변수 명명 — type 혼동 방지): `app` = `Application` 객체 (`Application().connect()` 결과). `win` = `WindowSpecification` (`app.window()` 결과 — 본 윈도우 spec). **❌ `app = Desktop().window(...)` 절대 금지** — 이건 변수명만 `app` 이지 실제는 `WindowSpecification` 이라 후속 step 의 `app.window(...)` 호출이 자식 검색이 되어 0 windows found 에러 발생. `Desktop().window(...)` 가 반환하는 객체는 `win` (또는 다른 이름) 으로 명명할 것.")
+            parts.append("   - 🌟중요(UWP wait): Win11 메모장/계산기 등은 `app.wait('ready', timeout=N)` 가 timeout 되는 경우 잦음. `win.wait('visible', timeout=N)` 또는 polling 사용 (system_context 의 가이드 #14(c)).")
             parts.append("   - 🌟중요: UWP 앱(메모장 등) 내부의 메뉴나 버튼을 찾을 때 child_window()에 여러 요소가 매칭되는 오류가 잦습니다. 항상 child_window(title='...', control_type='...', found_index=0).invoke() 또는 click_input() 형태로 found_index=0을 필수로 넣으세요.")
             parts.append("2. **Selenium** (웹 자동화): Chrome 브라우저 제어")
             self._append_selenium_guide(parts)
@@ -598,6 +685,46 @@ class PromptBuilder:
             return last_gc, manually_edited
 
         return "", False
+
+    def _compress_accumulated_code(
+        self, code: str, keep_last_n: int = 1
+    ) -> tuple[str, int]:
+        """누적 코드의 이전 step body 를 마커만 남기고 압축. 마지막 N step body 만 keep.
+
+        5/6 사용자 결정: prompt size 폭증 (35K+) 시 Gemini corrupt 응답 (`<ctrl46>`) trigger.
+        이전 step body 는 사용자 요청별로 독립적이므로 (try/except 본문) AI 새 step 생성 시
+        대부분 불필요. import + 마지막 1 step body 는 keep — 변수 시그니처 + 가장 가까운 context.
+
+        Args:
+            code: 누적 코드 (assemble_script 결과 — `# === Step N: ... (시작/끝) ===` 마커 포함)
+            keep_last_n: 마지막 N step body 는 그대로 keep (default 1)
+
+        Returns:
+            (compressed_code, num_summarized_steps): 압축된 코드 + 생략된 step 수
+        """
+        if not code:
+            return code, 0
+        # `# === Step N: <task> (시작) === ... # === Step N: <task> (끝) ===` 매칭
+        pattern = re.compile(
+            r'(# === Step (\d+): (.*?) \(시작\) ===)(.*?)(# === Step \2: .*? \(끝\) ===)',
+            re.DOTALL,
+        )
+        matches = list(pattern.finditer(code))
+        if len(matches) <= keep_last_n:
+            return code, 0
+        summarize_until = len(matches) - keep_last_n
+        # 뒤에서 앞으로 replace — offset 깨짐 방지
+        out = code
+        for i in range(summarize_until - 1, -1, -1):
+            m = matches[i]
+            step_id = m.group(2)
+            task_name = m.group(3).strip()
+            replacement = (
+                f"# === Step {step_id}: {task_name} "
+                f"(본문 생략 — 이미 실행됨, 정의된 변수/import 는 그대로 사용 가능) ==="
+            )
+            out = out[:m.start()] + replacement + out[m.end():]
+        return out, summarize_until
 
     def _get_last_edit_diff(self, session) -> str:
         """

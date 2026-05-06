@@ -13,6 +13,8 @@ import sys
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from core.win_inspector import format_element_label
+
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
@@ -98,9 +100,7 @@ class UIInspectionHandler:
         # 요소를 대화창 칩으로 추가
         mw.chat_panel.add_element_chip(element_info)
 
-        ctrl_type = element_info.get("control_type", "")
-        name = element_info.get("name", "")
-        display = f"[{ctrl_type}] {name}" if name else f"[{ctrl_type}]"
+        display = format_element_label(element_info)
         parent = element_info.get("parent_window_title", "")
 
         mw.statusBar().showMessage(
@@ -108,7 +108,7 @@ class UIInspectionHandler:
         )
         mw.console_panel.log(
             f"요소 선택 완료: {display}"
-            + (f" (창: {parent})" if parent else ""), "INFO"
+            + (f" (창: {parent})" if parent and parent not in display else ""), "INFO"
         )
 
         # CDP 미연결 브라우저 element 감지 시 1회 안내 (suppressible)

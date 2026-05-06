@@ -34,6 +34,36 @@ except ImportError:
     logger.warning("pywinauto가 설치되어 있지 않습니다. UI 인스펙터 기능이 비활성화됩니다.")
 
 
+def format_element_label(info: dict) -> str:
+    """element_info dict 를 사람이 읽기 쉬운 한 줄 라벨로 포맷.
+
+    UI 표시 (chat panel, AI 호출 메시지, picker 결과 표시 등) 일관 사용.
+
+    표시 우선순위:
+    - name 있음: `[<ctrl_type>] "<name>"` (Dialog 부모면 ` (Dialog: "<parent_title>")` suffix)
+    - name 없고 parent_title 있음: `[<ctrl_type>] "<parent_title>"` (parent_title 빌림)
+    - 둘 다 없으면 auto_id 사용 또는 control_type 만 표시
+    """
+    ctrl_type = info.get("control_type", "?") or "?"
+    name = info.get("name", "") or ""
+    auto_id = info.get("automation_id", "") or ""
+    parent_title = info.get("parent_window_title", "") or ""
+    parent_ctrl = info.get("parent_window_control_type", "") or ""
+
+    if name:
+        label = f'[{ctrl_type}] "{name}"'
+        # 부모가 Dialog 면 어느 dialog 의 element 인지 명시 (정보 중복 회피 — name 과 다를 때만)
+        if parent_ctrl == "Dialog" and parent_title and parent_title != name:
+            label += f' (Dialog: "{parent_title}")'
+        return label
+    if parent_title:
+        # name 없는 element (예: TitleBar) — 부모 윈도우 title 을 빌려옴
+        return f'[{ctrl_type}] "{parent_title}"'
+    if auto_id:
+        return f'[{ctrl_type}] (ID: {auto_id})'
+    return f'[{ctrl_type}]'
+
+
 class WindowInspector:
     """
     Windows UI 인스펙터.
@@ -457,22 +487,35 @@ class WindowInspector:
             lines.append("# 방법 2 (권장): 이미 열린 Chrome 에 attach")
             lines.append("options = Options()")
             lines.append("options.add_experimental_option('debuggerAddress', 'localhost:9222')")
-            lines.append("driver = webdriver.Chrome(options=options)")
+            lines.append("# idempotent: 살아있는 driver 재사용, 없으면 새로 생성")
+            lines.append("try:")
+            lines.append("    _ = driver.window_handles")
+            lines.append("except Exception:")
+            lines.append("    driver = webdriver.Chrome(options=options)")
             lines.append("")
             lines.append("# 방법 1 (대안): 새 브라우저 열기 (필요 시)")
             lines.append("# options = Options()")
             lines.append("# options.add_experimental_option('detach', True)")
-            lines.append("# driver = webdriver.Chrome(options=options)")
+            lines.append("# try:")
+            lines.append("#     _ = driver.window_handles")
+            lines.append("# except Exception:")
+            lines.append("#     driver = webdriver.Chrome(options=options)")
         else:
             # 방법 1 이 default → 활성, 방법 2 가 주석
-            lines.append("# 방법 1: 새 브라우저 열기")
+            lines.append("# 방법 1: 새 브라우저 열기 — idempotent 가드로 재실행 시 새 창 안 뜸")
             lines.append("options = Options()")
             lines.append("options.add_experimental_option('detach', True)")
-            lines.append("driver = webdriver.Chrome(options=options)")
+            lines.append("try:")
+            lines.append("    _ = driver.window_handles  # 살아있는 driver 재사용")
+            lines.append("except Exception:")
+            lines.append("    driver = webdriver.Chrome(options=options)")
             lines.append("")
             lines.append("# 방법 2: 이미 열린 브라우저에 연결 (Chrome 이 --remote-debugging-port=9222 로 떠 있어야 함)")
             lines.append("# options.add_experimental_option('debuggerAddress', 'localhost:9222')")
-            lines.append("# driver = webdriver.Chrome(options=options)")
+            lines.append("# try:")
+            lines.append("#     _ = driver.window_handles")
+            lines.append("# except Exception:")
+            lines.append("#     driver = webdriver.Chrome(options=options)")
         lines.append("")
         lines.append("")
         lines.append("def find_and_click(driver, locators, timeout=10, visible_only=False):")
@@ -569,6 +612,7 @@ class WindowInspector:
         rect = element_info.get("rect", {})
         parent_title = element_info.get("parent_window_title", "")
         parent_class = element_info.get("parent_window_class", "")
+        parent_control_type = element_info.get("parent_window_control_type", "")
         screen_x = element_info.get("screen_x", 0)
         screen_y = element_info.get("screen_y", 0)
 
@@ -616,8 +660,20 @@ class WindowInspector:
         if parent_title:
             lines.append("")
             lines.append(f"### 부모 윈도우: {parent_title}")
+            if parent_control_type:
+                lines.append(f"control_type: {parent_control_type}")
             if parent_class:
                 lines.append(f"클래스: {parent_class}")
+            # 모달 다이얼로그 감지 — AI 가 가이드 #18 (조건부 다이얼로그 처리) 자동 적용.
+            # picker 시점에 다이얼로그가 떠 있어 잡혔지만 실행 시점엔 안 떠 있을 수 있음 (조건부).
+            if parent_control_type == "Dialog":
+                lines.append("")
+                lines.append(
+                    f"⚠️ 이 element 의 부모는 **모달 다이얼로그** (control_type=Dialog) 입니다. "
+                    f"실행 시점에 다이얼로그가 떠 있지 않을 수 있으므로 (예: 첫 저장 vs 재저장 환경), "
+                    f"가이드 #18 의 `_find_dialog` 패턴 사용 — `keywords=[\"{parent_title}\"]` 로 검색 후 "
+                    f"발견 시에만 클릭/키 입력, 미발견 시 silent skip (조건부 흐름)."
+                )
 
         lines.append("")
         lines.append("### 코드 생성 컨텍스트:")
@@ -671,12 +727,34 @@ class WindowInspector:
             else:
                 element_selector = f'win.child_window(control_type="{ctrl_type}", found_index=0)'
 
-        # 연결 코드 조각
+        # 연결 코드 조각 — 사용자 보고 (5/5): 메모장 처럼 문서 내용이 title 에 들어가는
+        # 앱은 picker 시점의 full title (예: "*hello world - 메모장") 을 hardcode 하면
+        # 새 빈 메모장 열렸을 때 매칭 실패. 해결:
+        #   - 브라우저 (페이지별 식별 중요) → full title 유지 + found_index=0
+        #   - 비브라우저 (메모장/IDE/계산기 등) → title_re=".*<program 명>" 으로 stable 매칭
+        # program 명 = parent_title 의 ` - ` 마지막 세그먼트 (없으면 전체).
+        is_browser_process = element_info.get("is_browser", False)
         if parent_title:
-            connect_line = f'Application(backend="{recommended_backend}").connect(title="{parent_title}", timeout=10)'
-            window_line = f'app.window(title="{parent_title}")'
+            if is_browser_process:
+                # 브라우저: 특정 페이지 의 Chrome 창 식별. found_index=0 으로 ambiguous 회피.
+                connect_line = (
+                    f'Application(backend="{recommended_backend}").connect('
+                    f'title="{parent_title}", timeout=10, found_index=0)'
+                )
+                window_line = f'app.window(title="{parent_title}", found_index=0)'
+            else:
+                # 비브라우저: 문서 내용 변동 회피 위해 program 명만 정규식 매칭.
+                # 예: "*hello world - 메모장" → ".*메모장" → "제목 없음 - 메모장" 도 매칭.
+                program_name = parent_title.split(" - ")[-1].strip() or parent_title
+                escaped = re.escape(program_name)
+                title_re_literal = repr(".*" + escaped)
+                connect_line = (
+                    f'Application(backend="{recommended_backend}").connect('
+                    f'title_re={title_re_literal}, timeout=10, found_index=0)'
+                )
+                window_line = f'app.window(title_re={title_re_literal}, found_index=0)'
         else:
-            connect_line = f'Application(backend="{recommended_backend}").connect(title="...", timeout=10)'
+            connect_line = f'Application(backend="{recommended_backend}").connect(title="...", timeout=10, found_index=0)'
             window_line = 'app.top_window()'
 
         lines.append("```python")
@@ -700,24 +778,78 @@ class WindowInspector:
         lines.append("")
         lines.append(f"app = {connect_line}")
         lines.append(f"win = {window_line}")
-        lines.append(f"element = {element_selector}")
-        lines.append("")
-        lines.append("# 실행 시점의 요소 위치를 동적으로 계산")
-        lines.append("rect = element.rectangle()")
-        lines.append("center_x = (rect.left + rect.right) // 2")
-        lines.append("center_y = (rect.top + rect.bottom) // 2")
-        lines.append("print(f'요소 위치: ({center_x}, {center_y})  크기: {rect.width()}x{rect.height()}')")
+        # Element resolution + relaxed fallback — picker 가 control_type 을 잘못 분류
+        # (예: 메뉴 MenuItem 의 leaf TextBlock 을 'Text' 로 잡았는데 pywinauto 의 'Text'
+        # control_type 매칭에서 그 leaf 못 찾음) 한 경우 control_type 빼고 title 만으로,
+        # 그래도 안 되면 title_re 정규식으로 fallback. 사용자 보고 (5/5) 회귀 방지.
+        lines.append("def _resolve_element():")
+        lines.append(f"    _selectors = [lambda: {element_selector}]")
+        if name:
+            # 1차 fallback: control_type 빼고 title 만
+            safe_name_repr = repr(name)
+            lines.append(f"    _selectors.append(lambda: win.child_window(title={safe_name_repr}, found_index=0))")
+            # 2차 fallback: title_re 로 정규식 매칭 (관대)
+            esc_name = re.escape(name)
+            lines.append(f"    _selectors.append(lambda: win.child_window(title_re={repr('.*' + esc_name)}, found_index=0))")
+        # 3차 fallback (generic): title 무시, control_type + found_index=0 만
+        # 사용자 보고 (5/6): picker 가 잡은 메모장 Document name = "<한글 텍스트 가득>" → 다중 메모장 환경
+        # 또는 다른 메모장 인스턴스에 connect 잡힌 경우 specific name 매칭 fail. 단일 인스턴스 element
+        # (Document/TitleBar/MenuBar/StatusBar 등 앱당 1개 보장) 는 control_type 만으로 매칭 가능.
+        if ctrl_type:
+            lines.append(f"    _selectors.append(lambda: win.child_window(control_type={repr(ctrl_type)}, found_index=0))")
+        lines.append("    for _build in _selectors:")
+        lines.append("        try:")
+        lines.append("            _cand = _build()")
+        lines.append("            _ = _cand.element_info.control_type  # 강제 resolution")
+        lines.append("            return _cand")
+        lines.append("        except Exception:")
+        lines.append("            continue")
+        lines.append(f"    return {element_selector}  # 모두 실패 시 원본 (런타임에 명확한 오류)")
+        lines.append("element = _resolve_element()")
         lines.append("")
         lines.append("# 대상 창을 최상위로 가져오기 (관리자 창이면 일부 실패할 수 있음)")
+        lines.append("# ★ SW_RESTORE 는 maximized 창을 normal 사이즈로 축소시키므로 minimized 일 때만 사용")
         lines.append("user32 = ctypes.windll.user32")
         lines.append("hwnd = win.handle")
-        lines.append("user32.ShowWindow(hwnd, 9)     # SW_RESTORE")
+        lines.append("if user32.IsIconic(hwnd):")
+        lines.append("    user32.ShowWindow(hwnd, 9)   # SW_RESTORE: minimized → 복원")
+        lines.append("else:")
+        lines.append("    user32.ShowWindow(hwnd, 5)   # SW_SHOW: 현재 상태 유지하며 활성화 (maximized 보존)")
         lines.append("user32.BringWindowToTop(hwnd)")
         lines.append("try:")
         lines.append("    user32.SetForegroundWindow(hwnd)")
         lines.append("except Exception:")
         lines.append("    pass")
         lines.append("time.sleep(0.5)  # 창 전환 대기")
+        lines.append("")
+        lines.append("# Picker 가 leaf Text/Image/Pane 같은 비클릭 요소를 잡았을 수 있으므로,")
+        lines.append("# 클릭 가능한 부모 (Button/MenuItem/MenuBarItem/TabItem/ListItem/CheckBox/RadioButton/")
+        lines.append("# Hyperlink/Edit/ComboBox) 까지 walk up 해서 해당 부모의 rectangle 사용.")
+        lines.append("# 사용자 보고 (5/5): Win11 메모장 메뉴바 'TextBlock 파일' center 클릭 → 부모")
+        lines.append("# MenuBarItem 의 hit area 와 좌표가 맞지 않거나 routed event 가 propagate 안 돼서 메뉴 안 열림.")
+        lines.append("_clickable_types = {'Button', 'MenuItem', 'MenuBarItem', 'TabItem', 'ListItem',")
+        lines.append("                    'CheckBox', 'RadioButton', 'Hyperlink', 'Edit', 'ComboBox',")
+        lines.append("                    'SplitButton', 'TreeItem'}")
+        lines.append("click_target = element")
+        lines.append("try:")
+        lines.append("    if element.element_info.control_type not in _clickable_types:")
+        lines.append("        _cur = element")
+        lines.append("        for _ in range(6):  # 최대 6 단계 walk up")
+        lines.append("            _cur = _cur.parent()")
+        lines.append("            if _cur is None or _cur.handle == win.handle:")
+        lines.append("                break")
+        lines.append("            if _cur.element_info.control_type in _clickable_types:")
+        lines.append("                click_target = _cur")
+        lines.append("                print(f'클릭 가능한 부모로 promote: {_cur.element_info.control_type} \"{_cur.element_info.name}\"')")
+        lines.append("                break")
+        lines.append("except Exception as _e_walkup:")
+        lines.append("    print(f'부모 walk up 실패 (원래 element 사용): {_e_walkup}')")
+        lines.append("")
+        lines.append("# 활성화 후 요소 위치를 동적으로 계산 (창 상태 변경 후 최신 좌표 보장)")
+        lines.append("rect = click_target.rectangle()")
+        lines.append("center_x = (rect.left + rect.right) // 2")
+        lines.append("center_y = (rect.top + rect.bottom) // 2")
+        lines.append("print(f'요소 위치: ({center_x}, {center_y})  크기: {rect.width()}x{rect.height()}')")
         lines.append("")
         lines.append("# 클릭 좌표에 실제로 있는 창 확인")
         lines.append("pt = ctypes.wintypes.POINT(center_x, center_y)")
@@ -731,39 +863,66 @@ class WindowInspector:
         lines.append("    if root != hwnd:")
         lines.append("        print('경고: 클릭 좌표에 다른 창이 있습니다. 대상 창이 가려져 있을 수 있습니다.')")
         lines.append("")
-        # 클릭 전략: 브라우저 process 면 pyautogui PRIMARY (GPU compositor 영역까지 확실히 전달).
-        # 일반 데스크톱 앱은 pywinauto element.click() PRIMARY (WM 메시지가 빠르고 정확).
+        # 클릭 전략: pyautogui PRIMARY (브라우저/데스크톱 공통). element.click() 은 fallback.
+        # ─ pyautogui (OS 레벨 SendInput) 의 장점 ─
+        #   - 좌표 hit-test 라 Text 라벨을 클릭하면 부모 MenuItem/Button 까지 자동 도달.
+        #     (Win11 메모장 UWP/XAML 의 menu Text 처럼 element.click() 이 silent 실패하는 경우 회피.)
+        #   - GPU compositor 가 렌더한 HTML/XAML 도 동일 동작.
+        #   - 관리자 권한 앱 UIPI 회피 (kernel 이 ohdo 와 같은 권한이면 OK).
+        # ─ element.click() 의 위험 ─
+        #   - WM_LBUTTONDOWN/UP 또는 UIA InvokePattern 이 silent 실패해도 예외 안 남
+        #     → fallback 이 트리거 안 됨 (사용자 보고 5/5: 메모장 "보기" 클릭 안 됨).
         is_browser_process = element_info.get("is_browser", False)
-        if is_browser_process:
-            lines.append("# 클릭 시도 — 브라우저 process 라 pyautogui PRIMARY")
-            lines.append("# (HTML 콘텐츠는 GPU compositor 가 렌더하므로 element.click()/click_input()")
-            lines.append("#  이 silent 실패할 수 있음. pyautogui 의 OS 레벨 SendInput 은 탭/콘텐츠")
-            lines.append("#  모두에 일관 동작.)")
-            lines.append("try:")
-            lines.append("    pyautogui.click(center_x, center_y)")
-            lines.append("    print(f'pyautogui 클릭 완료 ({center_x}, {center_y})')")
-            lines.append("except Exception as e:")
-            lines.append("    print(f'pyautogui 클릭 실패: {e} — element.click() 폴백')")
-            lines.append("    try:")
-            lines.append("        element.click()")
-            lines.append("        print('element.click() 폴백 성공')")
-            lines.append("    except Exception as e2:")
-            lines.append("        print(f'element.click() 폴백도 실패: {e2}')")
-            lines.append("        raise")
-        else:
-            lines.append("# 클릭 시도")
-            lines.append("try:")
-            lines.append("    element.click()  # WM 메시지 방식 (관리자 앱이면 실패)")
-            lines.append("    print('클릭 성공 (WM 메시지)')")
-            lines.append("except Exception as e:")
-            lines.append('    if "rights" in str(e).lower() or "privilege" in str(e).lower():')
-            lines.append("        print(f'WM 클릭 불가 (관리자 권한 앱): {e}')")
-            lines.append("        print('pyautogui SendInput 방식으로 재시도...')")
-            lines.append("        pyautogui.click(center_x, center_y)")
-            lines.append("        print('pyautogui 클릭 완료')")
-            lines.append("    else:")
-            lines.append("        raise")
+        click_context = (
+            "브라우저 process — HTML 콘텐츠는 GPU compositor 가 렌더하므로 pyautogui 가 안전"
+            if is_browser_process
+            else "데스크톱 앱 — UWP/XAML/Win32 모두 pyautogui 좌표 hit-test 가 가장 안정"
+        )
+        lines.append(f"# 클릭 시도 — pyautogui PRIMARY ({click_context})")
+        lines.append("try:")
+        lines.append("    pyautogui.click(center_x, center_y)")
+        lines.append("    print(f'pyautogui 클릭 완료 ({center_x}, {center_y})')")
+        lines.append("except Exception as e:")
+        lines.append("    print(f'pyautogui 클릭 실패: {e} — click_target.click() 폴백')")
+        lines.append("    try:")
+        lines.append("        click_target.click()  # 클릭 가능한 부모로 promote 된 element")
+        lines.append("        print('click_target.click() 폴백 성공')")
+        lines.append("    except Exception as e2:")
+        lines.append("        print(f'click_target.click() 폴백도 실패: {e2}')")
+        lines.append("        raise")
         lines.append("```")
+        lines.append("")
+        # 텍스트 입력 표준 패턴 — ⚠️ 사용자 보고 (5/6): AI 가 아래 placeholder 코드를
+        # 사용자 요청과 무관하게 그대로 복사 (text='your_text_here', press('tab') 등) →
+        # 사용자 요청 (클릭/키 입력 등) 완전 누락. 명확한 경고 + placeholder 표시로 수정.
+        lines.append("### 텍스트 입력 참고 패턴 (⚠️ 가이드일 뿐 — 그대로 복사 금지)")
+        lines.append("")
+        lines.append(
+            "**중요**: 아래는 *사용자가 텍스트 입력을 요청한 경우에만* 응용할 패턴입니다. "
+            "사용자 요청에 텍스트 입력이 없으면 (예: 클릭만, 키 입력만) **이 코드를 코드에 포함하지 마세요**. "
+            "사용자 요청에 텍스트 입력이 있으면 `<<USER_TEXT>>` 자리에 사용자가 지정한 실제 문자열을 넣고, "
+            "`pyautogui.press('tab')` / `press('enter')` 는 사용자가 명시 요청한 경우에만 추가하세요."
+        )
+        lines.append("")
+        lines.append("```python")
+        lines.append("# pyautogui.write 는 US 키보드 매핑 → 한글 silent skip. ASCII / CJK 자동 분기:")
+        lines.append("time.sleep(0.3)  # 클릭 후 포커스 안정화")
+        lines.append("text = '<<USER_TEXT>>'   # ← 사용자가 요청한 실제 텍스트로 반드시 교체 (이 자리표시자 그대로 두지 말 것)")
+        lines.append("if all(ord(c) < 128 for c in text):")
+        lines.append("    pyautogui.write(text)               # ASCII 안전")
+        lines.append("else:")
+        lines.append("    import pyperclip")
+        lines.append("    pyperclip.copy(text)")
+        lines.append("    time.sleep(0.05)")
+        lines.append("    pyautogui.hotkey('ctrl', 'v')       # 한글/CJK 클립보드 paste")
+        lines.append("```")
+        lines.append("")
+        lines.append(
+            "**키 입력만 필요한 경우** (예: 사용자가 'ctrl+a 후 del' 요청): 위 텍스트 패턴 사용하지 말고 "
+            "`pyautogui.hotkey('ctrl', 'a')` / `pyautogui.press('delete')` 같은 키 호출만 사용. "
+            "**ID/PW 시퀀스는 사용자가 ID+PW 둘 다 명시한 경우만**: write('id') → press('tab') → write('pw') → press('enter')."
+        )
+        lines.append("")
 
         return "\n".join(lines)
 
@@ -843,7 +1002,11 @@ class WindowInspector:
         lines.append("        break")
         lines.append("")
         lines.append("if target_hwnd:")
-        lines.append("    user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE")
+        lines.append("    # SW_RESTORE 는 maximized 창을 normal 사이즈로 축소시키므로 minimized 일 때만 사용")
+        lines.append("    if user32.IsIconic(target_hwnd):")
+        lines.append("        user32.ShowWindow(target_hwnd, 9)   # SW_RESTORE")
+        lines.append("    else:")
+        lines.append("        user32.ShowWindow(target_hwnd, 5)   # SW_SHOW (maximized 보존)")
         lines.append("    user32.BringWindowToTop(target_hwnd)")
         lines.append("    try:")
         lines.append("        user32.SetForegroundWindow(target_hwnd)")

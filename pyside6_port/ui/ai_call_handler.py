@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QMessageBox
 
 from core.session_manager import Step
+from core.win_inspector import format_element_label
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -99,17 +100,7 @@ class AICallHandler:
                 parts = [mw.win_inspector.get_element_info_text(e) for e in pending_elems]
                 element_ctx: str | None = "\n\n---\n\n".join(parts)
                 # 세션 기록용 요소 요약 생성
-                summaries = []
-                for e in pending_elems:
-                    ctrl_type = e.get("control_type", "")
-                    name = e.get("name", "")
-                    auto_id = e.get("automation_id", "")
-                    if name:
-                        summaries.append(f"[{ctrl_type}] \"{name}\"")
-                    elif auto_id:
-                        summaries.append(f"[{ctrl_type}] (ID: {auto_id})")
-                    else:
-                        summaries.append(f"[{ctrl_type}]")
+                summaries = [format_element_label(e) for e in pending_elems]
                 element_summary = "📌 선택된 요소: " + ", ".join(summaries) + "\n"
                 mw.chat_panel.clear_pending_elements()
             else:

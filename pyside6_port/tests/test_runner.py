@@ -147,7 +147,7 @@ def collect_environment() -> dict:
     for pkg_name, import_name in [
         ("pyautogui", "pyautogui"),
         ("pywinauto", "pywinauto"),
-        ("PySide6", "PySide6"),
+        ("PyQt6", "PyQt6"),
         ("selenium", "selenium"),
         ("Pillow", "PIL"),
     ]:
@@ -502,7 +502,7 @@ def main():
     parser = argparse.ArgumentParser(description="AI RPA Solution 테스트 하네스")
     parser.add_argument(
         "--suite", "-s",
-        choices=["notepad", "calculator", "browser", "core",
+        choices=["notepad", "calculator", "browser", "core", "scenarios",
                  "prompt_quality", "ai_integration", "macos", "all"],
         default="all",
         help="실행할 테스트 스위트"
@@ -543,6 +543,13 @@ def main():
             suites_to_run.append(("core", [CoreTest]))
         except ImportError as e:
             print(f"⚠ test_core 로드 실패: {e}")
+
+    if args.suite in ("scenarios", "all"):
+        try:
+            from tests.test_scenarios import ScenariosTest
+            suites_to_run.append(("scenarios", [ScenariosTest]))
+        except ImportError as e:
+            print(f"⚠ test_scenarios 로드 실패: {e}")
 
     if args.suite in ("prompt_quality", "all"):
         try:

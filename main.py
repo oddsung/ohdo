@@ -126,11 +126,26 @@ def request_admin_and_restart():
 
 
 def main():
-    """메인 진입점 - PyQt6 GUI를 실행합니다."""
+    """메인 진입점 - PyQt6 GUI를 실행합니다.
+
+    `--ui v2` 인수로 redesign PoC 윈도우 (ui_v2) 를 실행할 수 있습니다.
+    기본은 v1 (ui.main_window.MainWindow).
+    """
+    # --ui v2 분기 (UI redesign 결정 D1~D26 반영, ADR 0001 wrap-first 정책)
+    use_v2 = False
+    if "--ui" in sys.argv:
+        idx = sys.argv.index("--ui")
+        if idx + 1 < len(sys.argv) and sys.argv[idx + 1] == "v2":
+            use_v2 = True
+
     try:
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtCore import Qt
-        from ui.main_window import MainWindow
+        if use_v2:
+            from ui_v2 import MainWindowV2 as MainWindow
+            print("[INFO] UI v2 (redesign PoC) 실행")
+        else:
+            from ui.main_window import MainWindow
     except ImportError as e:
         print(f"[ERROR] 필수 패키지가 설치되지 않았습니다: {e}")
         print(f"다음 명령으로 설치해주세요:")

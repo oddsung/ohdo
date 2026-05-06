@@ -2289,9 +2289,12 @@ if __name__ == "__main__":
             .read_text(encoding="utf-8")
         )
         gemini_cfg = cfg.get("ai", {}).get("available_engines", {}).get("gemini_cli", {})
+        # 가드 의도 (5/4): CLI 의 default preview 자동 매핑 회피 — model 이 명시적으로 지정돼야 함.
+        # 5/6 사용자 결정: gemini-3.x preview 도 사용자 명시 선택 시 허용 (자동 매핑이 아님).
+        # 따라서 "gemini-" prefix 만 검증 (빈 값 / 공백 / 다른 provider 만 차단).
         self.assert_true(
-            gemini_cfg.get("model", "").startswith("gemini-2"),
-            f"[회귀] settings.json gemini_cli.model 안정 모델 default 필수. "
+            gemini_cfg.get("model", "").startswith("gemini-"),
+            f"[회귀] settings.json gemini_cli.model 명시 필수 (gemini-* prefix). "
             f"실제: {gemini_cfg.get('model')!r}",
         )
 
@@ -2488,6 +2491,109 @@ if __name__ == "__main__":
             "blocks_finished.emit()" in thread_src,
             "[회귀] _run_initial_block_thread finally 절에서 "
             "blocks_finished.emit() 호출 필수 (run/stop 버튼 자동 리셋 - test_73 와 일관)",
+        )
+
+    def test_75_openai_compat_adapter(self):
+        """[회귀] OpenAI 호환 API 어댑터 (D2 redesign 결정).
+
+        BYO API 또는 추후 SaaS 크레딧 모델의 단일 어댑터. base_url + api_key
+        만으로 OpenAI / DeepSeek / Groq / OpenRouter / Ollama / LM Studio 등
+        모두 지원.
+        """
+        from core.adapters.openai_compat_adapter import OpenAICompatAdapter, PRESETS
+        from core.adapters.base_adapter import BaseAIAdapter, AIResponse
+        from core.ai_engine import AIEngineManager
+        import json
+        from pathlib import Path
+
+        # 1. PRESETS 가 주요 서비스 포함 + base_url + model 쌍
+        for required in ["openai", "deepseek", "groq", "openrouter", "ollama"]:
+            self.assert_true(
+                required in PRESETS,
+                f"[회귀] PRESETS 에 '{required}' 프리셋 필수",
+            )
+            self.assert_true(
+                "base_url" in PRESETS[required] and "model" in PRESETS[required],
+                f"[회귀] PRESETS['{required}'] 에 base_url + model 필수",
+            )
+
+        # 2. BaseAIAdapter 상속 + 추상 메서드 모두 구현 (인스턴스화 가능)
+        self.assert_true(
+            issubclass(OpenAICompatAdapter, BaseAIAdapter),
+            "[회귀] OpenAICompatAdapter 가 BaseAIAdapter 상속 필수",
+        )
+        adapter = OpenAICompatAdapter({})
+        self.assert_true(
+            adapter.is_available(),
+            "[회귀] base_url default 가 있으면 is_available() True",
+        )
+
+        # 3. config 우선순위: 직접 입력 > api_key_env
+        adapter_direct = OpenAICompatAdapter({"api_key": "sk-direct"})
+        self.assert_true(
+            adapter_direct.api_key == "sk-direct",
+            f"[회귀] api_key 직접 입력 시 그대로 사용. 실제: {adapter_direct.api_key!r}",
+        )
+
+        # 4. base_url 끝 슬래시 자동 제거 (chat/completions 경로 합칠 때 // 회피)
+        adapter_slash = OpenAICompatAdapter({"base_url": "https://api.x.com/v1/"})
+        self.assert_true(
+            adapter_slash.base_url == "https://api.x.com/v1",
+            f"[회귀] base_url 끝 슬래시 제거 필수. 실제: {adapter_slash.base_url!r}",
+        )
+
+        # 5. _detect_preset 가 base_url 일치 프리셋 식별
+        adapter_ds = OpenAICompatAdapter({"base_url": "https://api.deepseek.com/v1"})
+        self.assert_true(
+            adapter_ds._detect_preset() == "deepseek",
+            f"[회귀] DeepSeek base_url 인식. 실제: {adapter_ds._detect_preset()!r}",
+        )
+
+        # 6. get_name 이 프리셋 라벨 포함
+        self.assert_true(
+            "DeepSeek" in adapter_ds.get_name(),
+            f"[회귀] get_name 에 프리셋 라벨 노출. 실제: {adapter_ds.get_name()!r}",
+        )
+
+        # 7. AIEngineManager.ADAPTER_REGISTRY 에 'openai_compat' 등록
+        self.assert_true(
+            "openai_compat" in AIEngineManager.ADAPTER_REGISTRY,
+            "[회귀] AIEngineManager.ADAPTER_REGISTRY 에 'openai_compat' 등록 필수",
+        )
+        self.assert_true(
+            AIEngineManager.ADAPTER_REGISTRY["openai_compat"] is OpenAICompatAdapter,
+            "[회귀] ADAPTER_REGISTRY['openai_compat'] = OpenAICompatAdapter 매핑 필수",
+        )
+
+        # 8. settings.json default 에 openai_compat 항목 존재 + 필수 키
+        cfg = json.loads(
+            (Path(__file__).parent.parent / "config" / "settings.json")
+            .read_text(encoding="utf-8")
+        )
+        oc_cfg = cfg.get("ai", {}).get("available_engines", {}).get("openai_compat", {})
+        self.assert_true(
+            bool(oc_cfg),
+            "[회귀] settings.json 에 openai_compat 엔진 default 필수",
+        )
+        for required_key in ("base_url", "api_key", "api_key_env", "model"):
+            self.assert_true(
+                required_key in oc_cfg,
+                f"[회귀] openai_compat default 에 '{required_key}' 키 필수",
+            )
+
+        # 9. 메서드 시그니처 — generate 는 async, cancel 은 sync
+        import inspect
+        self.assert_true(
+            inspect.iscoroutinefunction(OpenAICompatAdapter.generate),
+            "[회귀] OpenAICompatAdapter.generate 는 async 함수 필수 (BaseAIAdapter 호환)",
+        )
+
+        # 10. AIResponse 반환 타입 일관성 (호출 안 하고 메서드 메타만 검사)
+        sig = inspect.signature(OpenAICompatAdapter.generate)
+        return_anno = sig.return_annotation
+        self.assert_true(
+            return_anno is AIResponse or str(return_anno) == "AIResponse",
+            f"[회귀] generate 반환 타입 AIResponse 명시 필수. 실제: {return_anno}",
         )
 
     def test_72_codeviewer_clear_resets_block_view(self):

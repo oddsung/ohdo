@@ -110,6 +110,22 @@ class ElementPickerOverlay(QWidget):
     # descendants() (800-1000ms) 호출 회피해서 picker 반응성 향상.
     NEEDS_DESCENDANTS_AREA_THRESHOLD = 5000
 
+    # 사용자 보고 (5/5): Win11 메모장 메뉴바 [MenuItem '파일'] 안의 leaf TextBlock 으로
+    # picker descent 했더니 control_type='Text' 로 저장 → pywinauto child_window 가 못 찾음.
+    # EFP/walker 가 이 set 의 control_type 을 잡았으면 더 깊은 비클릭 leaf 로 descend 안 함.
+    _CLICKABLE_CONTROL_TYPES = frozenset({
+        'Button', 'MenuItem', 'MenuBarItem', 'TabItem', 'ListItem',
+        'CheckBox', 'RadioButton', 'Hyperlink', 'SplitButton', 'TreeItem',
+        'Edit', 'ComboBox', 'Slider', 'Spinner',
+    })
+
+    def _is_clickable_element(self, element) -> bool:
+        """element 의 control_type 이 클릭 가능한 타입인지 확인. 예외는 False."""
+        try:
+            return element.element_info.control_type in self._CLICKABLE_CONTROL_TYPES
+        except Exception:
+            return False
+
     def __init__(self, parent=None, settings: dict | None = None):
         super().__init__(parent)
 
@@ -859,10 +875,19 @@ class ElementPickerOverlay(QWidget):
                             print(f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → "
                                   f"area={d_area}",
                                   flush=True)
-                        if d_area < current_area and d_rect.width() > 0 and d_rect.height() > 0:
+                        # 현재 element 가 clickable 이고 raw 결과가 비클릭이면 descent 거부
+                        # (메뉴 MenuItem → 내부 TextBlock 처럼 hit-test 가 안 되는 leaf 회피)
+                        if (d_area < current_area and d_rect.width() > 0 and d_rect.height() > 0
+                                and not (self._is_clickable_element(element)
+                                         and not self._is_clickable_element(deeper))):
                             element = deeper
                             rect = d_rect
                             current_area = d_area
+                        elif diag and self._is_clickable_element(element) \
+                                and not self._is_clickable_element(deeper):
+                            print(f"[ElementPicker DIAG] {label_prefix}raw descent 거부 "
+                                  f"— current clickable, deeper non-clickable",
+                                  flush=True)
                     except Exception:
                         pass
                 elif diag:
@@ -888,7 +913,10 @@ class ElementPickerOverlay(QWidget):
                             print(f"[ElementPicker DIAG] {label_prefix}descendants {desc_ms}ms "
                                   f"→ area={ds_area}",
                                   flush=True)
-                        if ds_area < current_area and ds_rect.width() > 0 and ds_rect.height() > 0:
+                        # raw 와 동일 가드: clickable element 를 비클릭 leaf 로 안 바꿈
+                        if (ds_area < current_area and ds_rect.width() > 0 and ds_rect.height() > 0
+                                and not (self._is_clickable_element(element)
+                                         and not self._is_clickable_element(desc_result))):
                             element = desc_result
                             rect = ds_rect
                             current_area = ds_area
@@ -989,6 +1017,20 @@ class ElementPickerOverlay(QWidget):
             elem, rect, area = self._detect_in_hwnd(hwnd, x_phys, y_phys, label)
             if elem is not None and area is not None:
                 if best_area is None or area < best_area:
+                    # 사용자 보고 (5/5): Win11 메모장 메뉴 [Text] 라벨 클릭 안 됨 — picker 가
+                    # EFP MenuItem '파일' (clickable) 을 받았는데 더 작은 leaf 로 descend 해서
+                    # control_type='Text' 로 저장 → pywinauto child_window(control_type='Text')
+                    # 가 그 leaf 못 찾음 (picker uiautomation vs pywinauto IUIAutomation 차이).
+                    # 현재 best_element 가 클릭 가능한 타입이고 새 candidate 는 비클릭이면
+                    # 면적이 작아도 채택 안 함 (clickable 부모 보존).
+                    if best_element is not None and self._is_clickable_element(best_element) \
+                            and not self._is_clickable_element(elem):
+                        if diag:
+                            print(f"[ElementPicker DIAG] [{label}] descent 거부 — "
+                                  f"기존 candidate 가 clickable, 새 candidate 는 비클릭 "
+                                  f"(area={area} < {best_area} 무시)",
+                                  flush=True)
+                        continue
                     best_element = elem
                     best_rect = rect
                     best_area = area
@@ -1179,14 +1221,22 @@ class ElementPickerOverlay(QWidget):
                     except Exception:
                         pass
 
-                    # 부모 윈도우 정보
+                    # 부모 윈도우 정보 (top-level)
+                    # 다이얼로그/팝업/메인 윈도우 구분을 위해 control_type 도 capture.
+                    # AI 가 element_context 에서 모달 다이얼로그 / 메인 윈도우를 분간 가능
+                    # → 가이드 #18 의 dialog 처리 패턴 자동 트리거.
                     parent_title = ""
                     parent_class = ""
+                    parent_control_type = ""
                     try:
                         top = element.top_level_parent()
                         if top:
                             parent_title = top.window_text() or ""
                             parent_class = top.class_name() or ""
+                            try:
+                                parent_control_type = top.element_info.control_type or ""
+                            except Exception:
+                                pass
                     except Exception:
                         pass
 
@@ -1240,6 +1290,7 @@ class ElementPickerOverlay(QWidget):
                         },
                         "parent_window_title": parent_title,
                         "parent_window_class": parent_class,
+                        "parent_window_control_type": parent_control_type,
                         "screen_x": x_phys,
                         "screen_y": y_phys,
                         # 백엔드 정보 (AI 코드 생성 시 활용)

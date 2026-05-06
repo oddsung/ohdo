@@ -12,6 +12,7 @@ from typing import Optional
 
 from .adapters.base_adapter import BaseAIAdapter, AIResponse
 from .adapters.gemini_cli_adapter import GeminiCLIAdapter
+from .adapters.openai_compat_adapter import OpenAICompatAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,8 @@ class AIEngineManager:
     # 등록된 어댑터 클래스 매핑
     ADAPTER_REGISTRY = {
         "gemini_cli": GeminiCLIAdapter,
-        # "openai": OpenAIAdapter,     # Phase 10
-        # "claude": ClaudeAdapter,     # Phase 10
+        "openai_compat": OpenAICompatAdapter,
+        # "claude": ClaudeAdapter,     # Anthropic Messages API (별도 어댑터, 미구현)
     }
 
     def __init__(self, settings: dict):

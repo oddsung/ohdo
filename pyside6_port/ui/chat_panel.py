@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 
+from core.win_inspector import format_element_label
+
 
 class ElementChip(QFrame):
     """선택된 UI 요소를 나타내는 칩 위젯 — Del/Backspace 또는 ✕ 버튼으로 삭제"""
@@ -284,17 +286,7 @@ class ChatPanel(QWidget):
         # 선택된 요소 정보가 있으면 메시지 앞에 추가해서 표시
         display_text = text
         if self._pending_elements:
-            summaries = []
-            for e in self._pending_elements:
-                ctrl_type = e.get("control_type", "")
-                name = e.get("name", "")
-                auto_id = e.get("automation_id", "")
-                if name:
-                    summaries.append(f"[{ctrl_type}] \"{name}\"")
-                elif auto_id:
-                    summaries.append(f"[{ctrl_type}] (ID: {auto_id})")
-                else:
-                    summaries.append(f"[{ctrl_type}]")
+            summaries = [format_element_label(e) for e in self._pending_elements]
             element_summary = "📌 선택된 요소: " + ", ".join(summaries) + "\n"
             display_text = element_summary + text
 

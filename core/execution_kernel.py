@@ -73,6 +73,10 @@ class ExecutionKernel:
         self._reader_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._executed_steps: list[int] = []
+        # 마지막으로 실행된 라이브러리 블럭 코드의 hash — workflow_engine 이
+        # 라이브러리 변경 (예: 새 step 으로 helper 함수 추가) 감지해 재실행 결정.
+        # 사용자 보고 (5/5): step 1 시점에 cached 된 후 step 2 의 helper 누락.
+        self.library_hash: Optional[str] = None
 
     # ──────────────────────────────────────
     # 생명주기
@@ -114,6 +118,7 @@ class ExecutionKernel:
             bufsize=1,                  # 라인 버퍼 (실시간 출력)
         )
         self._executed_steps = []
+        self.library_hash = None
         self._output_queue = queue.Queue()
 
         # 비동기 reader 스레드 시작 (Windows에서 readline 블로킹 우회)
@@ -141,6 +146,7 @@ class ExecutionKernel:
         self._proc = None
         self._reader_thread = None
         self._executed_steps = []
+        self.library_hash = None
 
         if proc is not None:
             terminated = self._terminate_proc_gracefully(proc)
