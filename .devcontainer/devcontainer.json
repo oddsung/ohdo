@@ -1,0 +1,54 @@
+{
+    // Phase 0 sub-phase 5 (5/8) — VS Code Dev Container / GitHub Codespaces 표준.
+    //
+    // 목적 (ROADMAP §7.2 권장 스택):
+    //   - 새 머신 / 신규 기여자가 클릭 한 번으로 동일 환경에서 core + backend + web 개발.
+    //   - 환경 재현 마찰 제거 — Python 3.12 + uv + Qt deps 모두 사전 설치.
+    //
+    // 제약 (ROADMAP §7.2 의 "2분할 전략"):
+    //   - Windows 자동화 (pywinauto, pyautogui, uiautomation, ctypes.windll) 는 Linux
+    //     컨테이너에서 실행 불가 → core 모듈/backend/웹 개발 + core+scenarios 테스트만 가능.
+    //   - Windows GUI 테스트 (test_notepad/test_calculator/test_browser/test_ai_integration)
+    //     는 사용자 로컬 Windows 또는 GitHub Actions windows-latest runner 에서 별도 실행.
+    //   - 즉, 컨테이너 = "Phase 2+ backend/web 개발 환경", 로컬 Windows = "데스크톱 자동화 검증".
+    "name": "ohdo (Python 3.12 + uv)",
+    "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+
+    "features": {
+        // uv 사전 설치 — uv sync 하나로 의존성 + .venv 자동 셋업.
+        "ghcr.io/astral-sh/uv:0": {}
+    },
+
+    // Qt system 의존성 + 의존성 동기화 (CI 의 ubuntu 작업과 동일 패턴).
+    // PyQt6 wheel 은 Qt binaries 포함하지만 X11 / EGL / 폰트 라이브러리는 컨테이너에 따로 설치.
+    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libxcb-cursor0 && uv sync --extra dev && uv run pre-commit install || true",
+
+    "remoteEnv": {
+        // headless 환경에서 Qt 모듈 import 시 platform plugin 오류 회피.
+        "QT_QPA_PLATFORM": "offscreen"
+    },
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "charliermarsh.ruff",
+                "eamodio.gitlens",
+                "tamasfe.even-better-toml"
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "/workspaces/${localWorkspaceFolderBasename}/.venv/bin/python",
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "editor.formatOnSave": true,
+                    "editor.codeActionsOnSave": {
+                        "source.fixAll.ruff": "explicit",
+                        "source.organizeImports.ruff": "explicit"
+                    }
+                },
+                "files.eol": "\n"
+            }
+        }
+    }
+}

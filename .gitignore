@@ -48,6 +48,24 @@ data/
 *.log
 logs/
 
+# 테스트 실행 결과 (자동 생성, 노이즈)
+tests/results/
+pyside6_port/tests/results/
+
+# 5/5 백업 폴더 — 5/2 PySide6 마이그레이션 안전 사본
+ohdo_20260505_backup/
+
+# 임시 디버깅 스크립트 (커밋 X)
+test_click_diagnosis.py
+uia_test.py
+uia_desktop_test.py
+encoding_test.py
+sandbox_test.py
+preview_*.png
+preview_*.py
+step?_*.py
+step?_*.txt
+
 # 임시 파일
 *.tmp
 *.temp
