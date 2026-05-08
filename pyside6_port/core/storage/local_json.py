@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """기존 ``SessionManager`` 를 감싸는 로컬 JSON 저장소 어댑터.
 
 현재 동작을 100% 유지하기 위해 ``SessionRepository`` 의 각 메서드를
@@ -92,3 +93,31 @@ class LocalJsonRepository(SessionRepository):
 
     def move_step(self, session: Session, step_id: int, direction: str) -> bool:
         return self._manager.move_step(session, step_id, direction)
+
+    # ── Export / Import (D22) ──────────────────────────
+
+    def export_session_as_project(
+        self,
+        session: Session,
+        output_dir: Path,
+        *,
+        settings: Optional[dict] = None,
+        ai_generated_readme: Optional[str] = None,
+    ) -> Path:
+        return self._manager.export_as_project(
+            session=session,
+            output_dir=output_dir,
+            settings=settings,
+            ai_generated_readme=ai_generated_readme,
+        )
+
+    def import_session_folder(
+        self,
+        source_dir: Path,
+        *,
+        new_title: Optional[str] = None,
+    ) -> Session:
+        return self._manager.import_session_folder(
+            source_dir=source_dir,
+            new_title=new_title,
+        )

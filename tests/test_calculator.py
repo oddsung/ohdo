@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 계산기(Calculator) RPA 테스트 케이스
 
@@ -13,9 +14,8 @@ Windows 계산기를 대상으로 테스트합니다:
 """
 
 import subprocess
-import time
 
-from tests.test_runner import TestCase, SkipTest
+from tests.test_runner import TestCase
 
 
 class CalculatorTest(TestCase):
@@ -34,7 +34,8 @@ class CalculatorTest(TestCase):
         """계산기 종료"""
         try:
             import pywinauto
-            app = pywinauto.Application(backend='uia').connect(
+
+            app = pywinauto.Application(backend="uia").connect(
                 title_re=r".*계산기.*|.*Calculator.*", timeout=2
             )
             app.kill()
@@ -45,10 +46,9 @@ class CalculatorTest(TestCase):
     def _get_calc_window(self):
         """계산기 윈도우 연결"""
         from pywinauto import Desktop
-        window = Desktop(backend='uia').window(
-            title_re=r".*계산기.*|.*Calculator.*",
-            found_index=0,
-            visible_only=True
+
+        window = Desktop(backend="uia").window(
+            title_re=r".*계산기.*|.*Calculator.*", found_index=0, visible_only=True
         )
         return window
 
@@ -131,9 +131,9 @@ class CalculatorTest(TestCase):
         self.wait(0.5)
 
         self.step("키보드로 5*6= 입력")
-        pyautogui.press('escape')  # Clear
+        pyautogui.press("escape")  # Clear
         self.wait(0.2)
-        pyautogui.typewrite('5*6=', interval=0.15)
+        pyautogui.typewrite("5*6=", interval=0.15)
         self.wait(0.5)
 
         self.step("결과 확인")
@@ -155,6 +155,7 @@ class CalculatorTest(TestCase):
         self.step("WindowInspector로 검사")
         import sys
         from pathlib import Path
+
         sys.path.insert(0, str(Path(__file__).parent.parent))
         from core.win_inspector import WindowInspector
 
@@ -175,6 +176,7 @@ class CalculatorTest(TestCase):
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
+
     runner = TestRunner(suite_name="calculator")
     runner.add_test_class(CalculatorTest)
     result = runner.run()

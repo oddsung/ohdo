@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 UI 요소 피커 (Element Picker)
 
@@ -5,21 +6,18 @@ UI 요소 피커 (Element Picker)
 사용자가 클릭하면 해당 요소의 정보를 수집하여 시그널로 전달합니다.
 """
 
+import ctypes
 import logging
 import sys
 import time
-import ctypes
+
 if sys.platform == "win32":
     import ctypes.wintypes
 from typing import Any
-from PyQt6.QtWidgets import QWidget, QApplication, QLabel
-from PyQt6.QtCore import (
-    Qt, pyqtSignal, QTimer, QPoint, QRect
-)
-from PyQt6.QtGui import (
-    QPainter, QPen, QColor, QFont, QCursor,
-    QScreen, QGuiApplication
-)
+
+from PyQt6.QtCore import QPoint, QRect, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter, QPen, QScreen
+from PyQt6.QtWidgets import QLabel, QWidget
 
 logger = logging.getLogger(__name__)
 
@@ -52,32 +50,33 @@ _user32_argtypes_set = False
 # pywinauto lazy import
 _pywinauto_available = False
 try:
-    from pywinauto import Desktop
     import pywinauto
+    from pywinauto import Desktop
+
     _pywinauto_available = True
 except ImportError:
     pass
 
 # 브라우저 프로세스명 → 브라우저 이름 매핑
 BROWSER_PROCESSES: dict[str, str] = {
-    "chrome.exe":          "Chrome",
-    "msedge.exe":          "Edge",
-    "firefox.exe":         "Firefox",
-    "iexplore.exe":        "IE",
-    "opera.exe":           "Opera",
-    "brave.exe":           "Brave",
-    "whale.exe":           "Whale",    # 네이버 웨일
-    "vivaldi.exe":         "Vivaldi",
-    "arc.exe":             "Arc",
+    "chrome.exe": "Chrome",
+    "msedge.exe": "Edge",
+    "firefox.exe": "Firefox",
+    "iexplore.exe": "IE",
+    "opera.exe": "Opera",
+    "brave.exe": "Brave",
+    "whale.exe": "Whale",  # 네이버 웨일
+    "vivaldi.exe": "Vivaldi",
+    "arc.exe": "Arc",
 }
 
 # 브라우저 최상위 창 클래스명 → 브라우저 이름 (프로세스명 미확인 시 보조 판단)
 BROWSER_WINDOW_CLASSES: dict[str, str] = {
-    "Chrome_WidgetWin_1":           "Chrome/Edge",
-    "MozillaWindowClass":           "Firefox",
-    "IEFrame":                      "IE",
-    "OperaWindowClass":             "Opera",
-    "ApplicationFrameWindow":       "",  # UWP 앱 (브라우저 아님)
+    "Chrome_WidgetWin_1": "Chrome/Edge",
+    "MozillaWindowClass": "Firefox",
+    "IEFrame": "IE",
+    "OperaWindowClass": "Opera",
+    "ApplicationFrameWindow": "",  # UWP 앱 (브라우저 아님)
 }
 
 
@@ -113,11 +112,24 @@ class ElementPickerOverlay(QWidget):
     # 사용자 보고 (5/5): Win11 메모장 메뉴바 [MenuItem '파일'] 안의 leaf TextBlock 으로
     # picker descent 했더니 control_type='Text' 로 저장 → pywinauto child_window 가 못 찾음.
     # EFP/walker 가 이 set 의 control_type 을 잡았으면 더 깊은 비클릭 leaf 로 descend 안 함.
-    _CLICKABLE_CONTROL_TYPES = frozenset({
-        'Button', 'MenuItem', 'MenuBarItem', 'TabItem', 'ListItem',
-        'CheckBox', 'RadioButton', 'Hyperlink', 'SplitButton', 'TreeItem',
-        'Edit', 'ComboBox', 'Slider', 'Spinner',
-    })
+    _CLICKABLE_CONTROL_TYPES = frozenset(
+        {
+            "Button",
+            "MenuItem",
+            "MenuBarItem",
+            "TabItem",
+            "ListItem",
+            "CheckBox",
+            "RadioButton",
+            "Hyperlink",
+            "SplitButton",
+            "TreeItem",
+            "Edit",
+            "ComboBox",
+            "Slider",
+            "Spinner",
+        }
+    )
 
     def _is_clickable_element(self, element) -> bool:
         """element 의 control_type 이 클릭 가능한 타입인지 확인. 예외는 False."""
@@ -144,9 +156,9 @@ class ElementPickerOverlay(QWidget):
 
         # 윈도우 설정: 전체 화면 투명 레이어
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
@@ -168,7 +180,7 @@ class ElementPickerOverlay(QWidget):
         self._pause_countdown = 0
         self._post_pause_mode = False  # F3 복귀 후 요소 감지 전용 모드
 
-            # 디버그용: 현재 모니터 정보
+        # 디버그용: 현재 모니터 정보
         self._current_screen_info = ""
         self._cursor_local_pos = QPoint()  # 커서의 오버레이 로컬 좌표 (디버그용)
 
@@ -190,9 +202,9 @@ class ElementPickerOverlay(QWidget):
         # 일시정지 카운트다운 라벨 (화면 중앙)
         self._pause_label = QLabel()
         self._pause_label.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
         self._pause_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._pause_label.setStyleSheet("""
@@ -229,9 +241,12 @@ class ElementPickerOverlay(QWidget):
         self._uia_time_budget_sec = max(0.03, min(2.0, tb_ms / 1000.0))  # 30ms~2s 클램프
 
         try:
-            pp_ms = int(ep.get(
-                "post_pause_transition_ms", self.POST_PAUSE_TRANSITION_MS,
-            ))
+            pp_ms = int(
+                ep.get(
+                    "post_pause_transition_ms",
+                    self.POST_PAUSE_TRANSITION_MS,
+                )
+            )
         except (TypeError, ValueError):
             pp_ms = self.POST_PAUSE_TRANSITION_MS
         # 0 이면 transition 비활성 (방향 B 직접). 양수면 그 ms 후 자동 전환.
@@ -297,14 +312,16 @@ class ElementPickerOverlay(QWidget):
         # 방법 3: Win32 물리 좌표를 그대로 사용 (Qt가 DPI 처리)
         # PyQt6는 기본적으로 DPI-aware이므로 물리 좌표를 직접 사용하면
         # Qt가 내부적으로 변환함
-        logger.info(
-            f"Win32 물리 좌표 직접 사용: ({vx},{vy}) 크기:{vw}x{vh}"
-        )
+        logger.info(f"Win32 물리 좌표 직접 사용: ({vx},{vy}) 크기:{vw}x{vh}")
 
         # 가장 큰 영역 선택 (세 방법 중 가장 큰 것)
         candidates = [
-            (virtual_geo.x(), virtual_geo.y(),
-             virtual_geo.x() + virtual_geo.width(), virtual_geo.y() + virtual_geo.height()),
+            (
+                virtual_geo.x(),
+                virtual_geo.y(),
+                virtual_geo.x() + virtual_geo.width(),
+                virtual_geo.y() + virtual_geo.height(),
+            ),
             (min_x, min_y, max_x, max_y),
             (vx, vy, vx + vw, vy + vh),  # Win32 물리 좌표
         ]
@@ -363,7 +380,7 @@ class ElementPickerOverlay(QWidget):
             phys_w = int(geo.width() * dpr)
             phys_h = int(geo.height() * dpr)
             logger.info(
-                f"  모니터 {i}: 논리({geo.x()},{geo.y()})~({geo.x()+geo.width()},{geo.y()+geo.height()}) | "
+                f"  모니터 {i}: 논리({geo.x()},{geo.y()})~({geo.x() + geo.width()},{geo.y() + geo.height()}) | "
                 f"논리크기:{geo.width()}x{geo.height()} | 물리크기:{phys_w}x{phys_h} | 배율:{dpr}"
             )
 
@@ -421,8 +438,10 @@ class ElementPickerOverlay(QWidget):
             logical_y = phys_y / dpr
 
             # 논리 좌표가 이 스크린의 geometry 내에 있는지 확인
-            if (geo.x() <= logical_x < geo.x() + geo.width() and
-                geo.y() <= logical_y < geo.y() + geo.height()):
+            if (
+                geo.x() <= logical_x < geo.x() + geo.width()
+                and geo.y() <= logical_y < geo.y() + geo.height()
+            ):
                 return screen, dpr
 
         # 찾지 못한 경우: 커서 위치 기반으로 스크린 찾기 (fallback)
@@ -466,7 +485,10 @@ class ElementPickerOverlay(QWidget):
         user32.SetWindowPos.argtypes = [
             ctypes.wintypes.HWND,
             ctypes.c_ssize_t,
-            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
             ctypes.c_uint,
         ]
         user32.SetWindowPos.restype = ctypes.wintypes.BOOL
@@ -486,8 +508,12 @@ class ElementPickerOverlay(QWidget):
         try:
             hwnd = int(self.winId())
             ok = user32.SetWindowPos(
-                hwnd, HWND_TOPMOST,
-                0, 0, 0, 0,
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             )
             logger.info(f"SetWindowPos(HWND_TOPMOST) → {bool(ok)}")
@@ -543,8 +569,7 @@ class ElementPickerOverlay(QWidget):
                         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
                             skipped_norect += 1
                         else:
-                            inside = (rect.left <= x < rect.right
-                                      and rect.top <= y < rect.bottom)
+                            inside = rect.left <= x < rect.right and rect.top <= y < rect.bottom
                             if diag and len(sample_lines) < 8:
                                 sample_lines.append(
                                     f"  HWND=0x{hwnd:x} rect=({rect.left},{rect.top})"
@@ -553,9 +578,11 @@ class ElementPickerOverlay(QWidget):
                                 )
                             if inside:
                                 if diag:
-                                    print(f"[ElementPicker DIAG] z-order 매칭: HWND=0x{hwnd:x} "
-                                          f"scanned={scanned}",
-                                          flush=True)
+                                    print(
+                                        f"[ElementPicker DIAG] z-order 매칭: HWND=0x{hwnd:x} "
+                                        f"scanned={scanned}",
+                                        flush=True,
+                                    )
                                 return hwnd
                             else:
                                 skipped_outside += 1
@@ -566,16 +593,17 @@ class ElementPickerOverlay(QWidget):
             hwnd = user32.GetWindow(hwnd, GW_HWNDNEXT)
 
         if diag:
-            print(f"[ElementPicker DIAG] _find_topmost_window: 매칭 없음 "
-                  f"(scanned={scanned}, self={skipped_self}, invisible={skipped_invisible}, "
-                  f"iconic={skipped_iconic}, norect={skipped_norect}, outside={skipped_outside})",
-                  flush=True)
+            print(
+                f"[ElementPicker DIAG] _find_topmost_window: 매칭 없음 "
+                f"(scanned={scanned}, self={skipped_self}, invisible={skipped_invisible}, "
+                f"iconic={skipped_iconic}, norect={skipped_norect}, outside={skipped_outside})",
+                flush=True,
+            )
             for line in sample_lines:
                 print(f"[ElementPicker DIAG]{line}", flush=True)
         return None
 
-    def _find_deepest_descendant(self, root_wrapper, x: int, y: int,
-                                  time_budget_sec: float = 0.1):
+    def _find_deepest_descendant(self, root_wrapper, x: int, y: int, time_budget_sec: float = 0.1):
         """root_wrapper 의 모든 descendants 를 훑어 (x,y) 를 포함하는 가장 작은 것 반환.
 
         ⚠ pywinauto.descendants() 는 모든 element 를 eager 하게 wrap 해서 Chrome 같이
@@ -607,9 +635,14 @@ class ElementPickerOverlay(QWidget):
 
         return best
 
-    def _raw_walk_at_point(self, target_hwnd: int, x: int, y: int,
-                           time_budget_sec: float | None = None,
-                           max_depth: int | None = None):
+    def _raw_walk_at_point(
+        self,
+        target_hwnd: int,
+        x: int,
+        y: int,
+        time_budget_sec: float | None = None,
+        max_depth: int | None = None,
+    ):
         """IUIA RawViewWalker 로 (x,y) 를 포함하는 가장 깊은 element 를 lazily 탐색.
 
         ControlView (pywinauto 의 .children()/.descendants() 기본값) 는 Chrome/Win11
@@ -628,9 +661,9 @@ class ElementPickerOverlay(QWidget):
             time_budget_sec = self._uia_time_budget_sec
 
         try:
+            from pywinauto.controls.uiawrapper import UIAWrapper
             from pywinauto.uia_defines import IUIA
             from pywinauto.uia_element_info import UIAElementInfo
-            from pywinauto.controls.uiawrapper import UIAWrapper
         except Exception as e:
             logger.debug(f"raw walker import 실패: {e}")
             return None
@@ -711,9 +744,14 @@ class ElementPickerOverlay(QWidget):
             logger.debug(f"raw walker 결과 wrap 실패: {e}")
             return None
 
-    def _walk_uia_to_deepest(self, root_wrapper, x: int, y: int,
-                             max_depth: int | None = None,
-                             time_budget_sec: float | None = None):
+    def _walk_uia_to_deepest(
+        self,
+        root_wrapper,
+        x: int,
+        y: int,
+        max_depth: int | None = None,
+        time_budget_sec: float | None = None,
+    ):
         """root_wrapper 의 UIA 트리를 walk 하여 (x,y) 를 포함하는 가장 깊은 자식을 찾는다.
 
         - 각 레벨에서 (x,y) 를 포함하는 children 중 **가장 작은** 것을 선택해 깊이 들어감
@@ -776,9 +814,9 @@ class ElementPickerOverlay(QWidget):
         """
         diag = getattr(self, "_diag_tick_count", 99) <= 10
         try:
+            from pywinauto.controls.uiawrapper import UIAWrapper
             from pywinauto.uia_defines import IUIA
             from pywinauto.uia_element_info import UIAElementInfo
-            from pywinauto.controls.uiawrapper import UIAWrapper
 
             iuia = IUIA().iuia
             pt = ctypes.wintypes.POINT(x_phys, y_phys)
@@ -797,10 +835,12 @@ class ElementPickerOverlay(QWidget):
                 return None, None, None
             area = max(1, rect.width() * rect.height())
             if diag:
-                print(f"[ElementPicker DIAG] EFP → {wrapper!r} "
-                      f"area={area} rect=({rect.left},{rect.top})~"
-                      f"({rect.right},{rect.bottom})",
-                      flush=True)
+                print(
+                    f"[ElementPicker DIAG] EFP → {wrapper!r} "
+                    f"area={area} rect=({rect.left},{rect.top})~"
+                    f"({rect.right},{rect.bottom})",
+                    flush=True,
+                )
             return wrapper, rect, area
         except Exception as e:
             if diag:
@@ -834,15 +874,16 @@ class ElementPickerOverlay(QWidget):
             pass
 
         try:
-            from pywinauto.uia_element_info import UIAElementInfo
             from pywinauto.controls.uiawrapper import UIAWrapper
+            from pywinauto.uia_element_info import UIAElementInfo
 
             elem_info = UIAElementInfo(hwnd)
             window_wrapper = UIAWrapper(elem_info)
             if diag:
-                print(f"[ElementPicker DIAG] {label_prefix}UIA wrap(0x{hwnd:x}) → "
-                      f"{window_wrapper!r}",
-                      flush=True)
+                print(
+                    f"[ElementPicker DIAG] {label_prefix}UIA wrap(0x{hwnd:x}) → {window_wrapper!r}",
+                    flush=True,
+                )
         except Exception as e:
             if diag:
                 print(f"[ElementPicker DIAG] {label_prefix}UIA wrap 실패: {e}", flush=True)
@@ -856,10 +897,12 @@ class ElementPickerOverlay(QWidget):
             rect = element.rectangle()
             current_area = max(1, rect.width() * rect.height())
             if diag:
-                print(f"[ElementPicker DIAG] {label_prefix}walk {walk_ms}ms → "
-                      f"area={current_area} rect=({rect.left},{rect.top})~"
-                      f"({rect.right},{rect.bottom})",
-                      flush=True)
+                print(
+                    f"[ElementPicker DIAG] {label_prefix}walk {walk_ms}ms → "
+                    f"area={current_area} rect=({rect.left},{rect.top})~"
+                    f"({rect.right},{rect.bottom})",
+                    flush=True,
+                )
 
             # 2) raw walker — RawView, lazy
             budget_remaining = self._uia_time_budget_sec - (time.time() - t0)
@@ -872,37 +915,53 @@ class ElementPickerOverlay(QWidget):
                         d_rect = deeper.rectangle()
                         d_area = max(1, d_rect.width() * d_rect.height())
                         if diag:
-                            print(f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → "
-                                  f"area={d_area}",
-                                  flush=True)
+                            print(
+                                f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → "
+                                f"area={d_area}",
+                                flush=True,
+                            )
                         # 현재 element 가 clickable 이고 raw 결과가 비클릭이면 descent 거부
                         # (메뉴 MenuItem → 내부 TextBlock 처럼 hit-test 가 안 되는 leaf 회피)
-                        if (d_area < current_area and d_rect.width() > 0 and d_rect.height() > 0
-                                and not (self._is_clickable_element(element)
-                                         and not self._is_clickable_element(deeper))):
+                        if (
+                            d_area < current_area
+                            and d_rect.width() > 0
+                            and d_rect.height() > 0
+                            and not (
+                                self._is_clickable_element(element)
+                                and not self._is_clickable_element(deeper)
+                            )
+                        ):
                             element = deeper
                             rect = d_rect
                             current_area = d_area
-                        elif diag and self._is_clickable_element(element) \
-                                and not self._is_clickable_element(deeper):
-                            print(f"[ElementPicker DIAG] {label_prefix}raw descent 거부 "
-                                  f"— current clickable, deeper non-clickable",
-                                  flush=True)
+                        elif (
+                            diag
+                            and self._is_clickable_element(element)
+                            and not self._is_clickable_element(deeper)
+                        ):
+                            print(
+                                f"[ElementPicker DIAG] {label_prefix}raw descent 거부 "
+                                f"— current clickable, deeper non-clickable",
+                                flush=True,
+                            )
                     except Exception:
                         pass
                 elif diag:
-                    print(f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → 매칭 없음",
-                          flush=True)
+                    print(
+                        f"[ElementPicker DIAG] {label_prefix}raw {raw_ms}ms → 매칭 없음", flush=True
+                    )
 
             # 3) descendants() 폴백 — Chrome 같은 sparse children 케이스.
             #    walker 가 이미 작은 element (Excel cell, 메뉴 항목 등) 잡았으면
             #    skip 해서 매 tick 800-1000ms 절약 (반응성 향상).
             budget_remaining = self._uia_time_budget_sec - (time.time() - t0)
-            if (budget_remaining > 0.03
-                    and current_area > self.NEEDS_DESCENDANTS_AREA_THRESHOLD):
+            if budget_remaining > 0.03 and current_area > self.NEEDS_DESCENDANTS_AREA_THRESHOLD:
                 t2 = time.time()
                 desc_result = self._find_deepest_descendant(
-                    window_wrapper, x_phys, y_phys, budget_remaining,
+                    window_wrapper,
+                    x_phys,
+                    y_phys,
+                    budget_remaining,
                 )
                 desc_ms = int((time.time() - t2) * 1000)
                 if desc_result is not None:
@@ -910,22 +969,31 @@ class ElementPickerOverlay(QWidget):
                         ds_rect = desc_result.rectangle()
                         ds_area = max(1, ds_rect.width() * ds_rect.height())
                         if diag:
-                            print(f"[ElementPicker DIAG] {label_prefix}descendants {desc_ms}ms "
-                                  f"→ area={ds_area}",
-                                  flush=True)
+                            print(
+                                f"[ElementPicker DIAG] {label_prefix}descendants {desc_ms}ms "
+                                f"→ area={ds_area}",
+                                flush=True,
+                            )
                         # raw 와 동일 가드: clickable element 를 비클릭 leaf 로 안 바꿈
-                        if (ds_area < current_area and ds_rect.width() > 0 and ds_rect.height() > 0
-                                and not (self._is_clickable_element(element)
-                                         and not self._is_clickable_element(desc_result))):
+                        if (
+                            ds_area < current_area
+                            and ds_rect.width() > 0
+                            and ds_rect.height() > 0
+                            and not (
+                                self._is_clickable_element(element)
+                                and not self._is_clickable_element(desc_result)
+                            )
+                        ):
                             element = desc_result
                             rect = ds_rect
                             current_area = ds_area
                     except Exception:
                         pass
                 elif diag:
-                    print(f"[ElementPicker DIAG] {label_prefix}descendants {desc_ms}ms → "
-                          f"매칭 없음",
-                          flush=True)
+                    print(
+                        f"[ElementPicker DIAG] {label_prefix}descendants {desc_ms}ms → 매칭 없음",
+                        flush=True,
+                    )
 
             if rect.width() > 0 and rect.height() > 0:
                 return element, rect, current_area
@@ -965,11 +1033,14 @@ class ElementPickerOverlay(QWidget):
         #    Excel 셀, MFC+WebView 같은 lazy/virtual element 까지 OS 가 reach.
         ex_style = user32.GetWindowLongW(overlay_hwnd, GWL_EXSTYLE)
         user32.SetWindowLongW(
-            overlay_hwnd, GWL_EXSTYLE, ex_style | WS_EX_TRANSPARENT,
+            overlay_hwnd,
+            GWL_EXSTYLE,
+            ex_style | WS_EX_TRANSPARENT,
         )
         try:
             best_element, best_rect, best_area = self._detect_via_efp(
-                x_phys, y_phys,
+                x_phys,
+                y_phys,
             )
         finally:
             user32.SetWindowLongW(overlay_hwnd, GWL_EXSTYLE, ex_style)
@@ -977,16 +1048,17 @@ class ElementPickerOverlay(QWidget):
         # 1) z-order 순회로 main HWND 찾기 (e.g., Chrome_WidgetWin_1)
         main_hwnd = self._find_topmost_window_at_point(x_phys, y_phys, overlay_hwnd)
         if diag:
-            print(f"[ElementPicker DIAG] _find_topmost_window_at_point → "
-                  f"{'0x%x' % main_hwnd if main_hwnd else 'None'}",
-                  flush=True)
+            print(
+                f"[ElementPicker DIAG] _find_topmost_window_at_point → "
+                f"{'0x%x' % main_hwnd if main_hwnd else 'None'}",
+                flush=True,
+            )
         if not main_hwnd:
             # main HWND 못 찾았어도 EFP 가 잡았으면 그걸 반환
             if best_element is not None and best_rect is not None:
                 if best_rect.width() > 0 and best_rect.height() > 0:
                     if diag:
-                        print("[ElementPicker DIAG] main HWND 없음 → EFP 결과 반환",
-                              flush=True)
+                        print("[ElementPicker DIAG] main HWND 없음 → EFP 결과 반환", flush=True)
                     return best_element, "uia"
             return None, None
 
@@ -997,9 +1069,11 @@ class ElementPickerOverlay(QWidget):
             user32.ScreenToClient(main_hwnd, ctypes.byref(client_pt))
             ch = user32.ChildWindowFromPointEx(main_hwnd, client_pt, 3)
             if diag:
-                print(f"[ElementPicker DIAG] ChildWindowFromPointEx → "
-                      f"child={'0x%x' % ch if ch else 'None'}",
-                      flush=True)
+                print(
+                    f"[ElementPicker DIAG] ChildWindowFromPointEx → "
+                    f"child={'0x%x' % ch if ch else 'None'}",
+                    flush=True,
+                )
             if ch and ch != main_hwnd:
                 child_hwnd = ch
         except Exception as e:
@@ -1023,21 +1097,28 @@ class ElementPickerOverlay(QWidget):
                     # 가 그 leaf 못 찾음 (picker uiautomation vs pywinauto IUIAutomation 차이).
                     # 현재 best_element 가 클릭 가능한 타입이고 새 candidate 는 비클릭이면
                     # 면적이 작아도 채택 안 함 (clickable 부모 보존).
-                    if best_element is not None and self._is_clickable_element(best_element) \
-                            and not self._is_clickable_element(elem):
+                    if (
+                        best_element is not None
+                        and self._is_clickable_element(best_element)
+                        and not self._is_clickable_element(elem)
+                    ):
                         if diag:
-                            print(f"[ElementPicker DIAG] [{label}] descent 거부 — "
-                                  f"기존 candidate 가 clickable, 새 candidate 는 비클릭 "
-                                  f"(area={area} < {best_area} 무시)",
-                                  flush=True)
+                            print(
+                                f"[ElementPicker DIAG] [{label}] descent 거부 — "
+                                f"기존 candidate 가 clickable, 새 candidate 는 비클릭 "
+                                f"(area={area} < {best_area} 무시)",
+                                flush=True,
+                            )
                         continue
                     best_element = elem
                     best_rect = rect
                     best_area = area
                     if diag:
-                        print(f"[ElementPicker DIAG] [{label}] 채택 "
-                              f"(area={area} {'<' if best_area == area else '<='} prev)",
-                              flush=True)
+                        print(
+                            f"[ElementPicker DIAG] [{label}] 채택 "
+                            f"(area={area} {'<' if best_area == area else '<='} prev)",
+                            flush=True,
+                        )
 
         if best_element is not None and best_rect is not None:
             if best_rect.width() > 0 and best_rect.height() > 0:
@@ -1049,8 +1130,7 @@ class ElementPickerOverlay(QWidget):
 
             element = HwndWrapper(main_hwnd)
             if diag:
-                print(f"[ElementPicker DIAG] Win32 wrap(0x{main_hwnd:x}) → {element!r}",
-                      flush=True)
+                print(f"[ElementPicker DIAG] Win32 wrap(0x{main_hwnd:x}) → {element!r}", flush=True)
             try:
                 rect = element.rectangle()
                 if rect.width() > 0 and rect.height() > 0:
@@ -1081,18 +1161,17 @@ class ElementPickerOverlay(QWidget):
         client_pt = ctypes.wintypes.POINT(x_phys, y_phys)
         user32.ScreenToClient(target_hwnd, ctypes.byref(client_pt))
         # CWP_SKIPINVISIBLE(1) | CWP_SKIPDISABLED(2) = 3
-        child_hwnd = user32.ChildWindowFromPointEx(
-            target_hwnd, client_pt, 3
-        )
+        child_hwnd = user32.ChildWindowFromPointEx(target_hwnd, client_pt, 3)
         if child_hwnd and child_hwnd != target_hwnd:
             target_hwnd = child_hwnd
 
         # pywinauto로 래핑 시도
         try:
             from pywinauto import Desktop
+
             # UIA로 먼저 시도
             try:
-                desktop = Desktop(backend='uia')
+                desktop = Desktop(backend="uia")
                 element = desktop.from_handle(target_hwnd)
                 if element:
                     return element, "win32api+uia"
@@ -1101,7 +1180,7 @@ class ElementPickerOverlay(QWidget):
 
             # Win32로 시도
             try:
-                desktop = Desktop(backend='win32')
+                desktop = Desktop(backend="win32")
                 element = desktop.from_handle(target_hwnd)
                 if element:
                     return element, "win32api+win32"
@@ -1119,7 +1198,7 @@ class ElementPickerOverlay(QWidget):
 
         # 진단: picker 시작 후 첫 10 tick (~1초) 의 진행 상황을 사용자 콘솔에 직접 출력.
         # 사용자가 picker 시작 후 cursor 를 원하는 위치 (탭 등) 로 옮길 시간 확보.
-        if not hasattr(self, '_diag_tick_count'):
+        if not hasattr(self, "_diag_tick_count"):
             self._diag_tick_count = 0
         self._diag_tick_count += 1
         diag = self._diag_tick_count <= 10
@@ -1132,33 +1211,40 @@ class ElementPickerOverlay(QWidget):
 
             # Qt 논리 좌표 (오버레이 로컬 좌표 계산용)
             cursor_logical = QCursor.pos()
-            x_log, y_log = cursor_logical.x(), cursor_logical.y()
 
             if diag:
-                print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
-                      f"cursor phys=({x_phys},{y_phys}) overlay_hwnd=0x{int(self.winId()):x}",
-                      flush=True)
+                print(
+                    f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                    f"cursor phys=({x_phys},{y_phys}) overlay_hwnd=0x{int(self.winId()):x}",
+                    flush=True,
+                )
 
             # 다중 백엔드로 요소 감지
             element, backend_used = self._detect_element_multi_backend(x_phys, y_phys)
 
             if diag:
                 if element is None:
-                    print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
-                          f"_detect_element_multi_backend → None (감지 실패)",
-                          flush=True)
+                    print(
+                        f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                        f"_detect_element_multi_backend → None (감지 실패)",
+                        flush=True,
+                    )
                 else:
                     try:
                         r = element.rectangle()
-                        print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
-                              f"감지 OK backend={backend_used} "
-                              f"rect=({r.left},{r.top})~({r.right},{r.bottom}) "
-                              f"size={r.width()}x{r.height()}",
-                              flush=True)
+                        print(
+                            f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                            f"감지 OK backend={backend_used} "
+                            f"rect=({r.left},{r.top})~({r.right},{r.bottom}) "
+                            f"size={r.width()}x{r.height()}",
+                            flush=True,
+                        )
                     except Exception as _re:
-                        print(f"[ElementPicker DIAG #{self._diag_tick_count}] "
-                              f"감지 OK backend={backend_used} 그러나 rectangle() 실패: {_re}",
-                              flush=True)
+                        print(
+                            f"[ElementPicker DIAG #{self._diag_tick_count}] "
+                            f"감지 OK backend={backend_used} 그러나 rectangle() 실패: {_re}",
+                            flush=True,
+                        )
 
             if element:
                 try:
@@ -1198,7 +1284,6 @@ class ElementPickerOverlay(QWidget):
                     self._cursor_local_pos = cursor_local
 
                     # 디버그: 상세 계산 정보 저장 (사용된 백엔드 포함)
-                    ovr_geo = self.geometry()
                     self._current_screen_info = (
                         f"백엔드:{backend_used or 'N/A'} | "
                         f"배율:{scale:.2f} | "
@@ -1267,26 +1352,30 @@ class ElementPickerOverlay(QWidget):
                             # 예: <span class="ax-menu-item-label">실패사례</span> 처럼 @title 속성이
                             # 없는 SPA 메뉴 아이템도 text 조건으로 즉시 찾을 수 있음.
                             _safe = name[:200].replace('"', "'")
-                            locator_candidates.append((
-                                "xpath",
-                                f'//*[normalize-space(@title)="{_safe}"'
-                                f' or (not(self::script) and not(self::style)'
-                                f' and normalize-space(.)="{_safe}")]'
-                            ))
+                            locator_candidates.append(
+                                (
+                                    "xpath",
+                                    f'//*[normalize-space(@title)="{_safe}"'
+                                    f" or (not(self::script) and not(self::style)"
+                                    f' and normalize-space(.)="{_safe}")]',
+                                )
+                            )
 
                     self._current_element_ref = element  # 계층 수집용 레퍼런스 보관
                     self._current_element_info = {
                         "control_type": ctrl_type,
                         "name": name[:200],
                         "automation_id": auto_id,
-                        "class_name": element.class_name() if hasattr(element, 'class_name') else "",
+                        "class_name": element.class_name()
+                        if hasattr(element, "class_name")
+                        else "",
                         "rect": {
                             "left": rect.left,
                             "top": rect.top,
                             "right": rect.right,
                             "bottom": rect.bottom,
                             "width": rect.width(),
-                            "height": rect.height()
+                            "height": rect.height(),
                         },
                         "parent_window_title": parent_title,
                         "parent_window_class": parent_class,
@@ -1320,7 +1409,9 @@ class ElementPickerOverlay(QWidget):
                     if is_browser:
                         lines.append(f"코드: Selenium ({browser_type})")
                     else:
-                        lines.append(f"백엔드: {backend_used or 'uia'} → 권장: {recommended_backend}")
+                        lines.append(
+                            f"백엔드: {backend_used or 'uia'} → 권장: {recommended_backend}"
+                        )
 
                     self._element_info_text = "\n".join(lines)
 
@@ -1353,7 +1444,7 @@ class ElementPickerOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # 디버그: 실제 위젯 크기 로그 (첫 번째 페인트 이벤트에서만)
-        if not hasattr(self, '_paint_logged'):
+        if not hasattr(self, "_paint_logged"):
             self._paint_logged = True
             geo = self.geometry()
             logger.info(
@@ -1384,10 +1475,7 @@ class ElementPickerOverlay(QWidget):
             painter.drawRect(self._highlight_rect)
 
             # 3) 내부 반투명 채우기 (강조)
-            painter.fillRect(
-                self._highlight_rect,
-                QColor(243, 139, 168, 30)
-            )
+            painter.fillRect(self._highlight_rect, QColor(243, 139, 168, 30))
 
         # 상단 안내 문구
         painter.setPen(QColor("#cdd6f4"))
@@ -1396,7 +1484,7 @@ class ElementPickerOverlay(QWidget):
         painter.drawText(
             self.rect().adjusted(0, 20, 0, 0),
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-            guide_text
+            guide_text,
         )
 
         # 디버그: 모니터 정보 표시 (두 번째 줄)
@@ -1406,7 +1494,7 @@ class ElementPickerOverlay(QWidget):
             painter.drawText(
                 self.rect().adjusted(0, 50, 0, 0),
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                self._current_screen_info
+                self._current_screen_info,
             )
 
         painter.end()
@@ -1488,7 +1576,10 @@ class ElementPickerOverlay(QWidget):
                 # OpenProcess 실패 → 대상이 더 높은 권한일 가능성
                 err = kernel32.GetLastError()
                 if err == 5:  # ERROR_ACCESS_DENIED
-                    return True, "OpenProcess 접근 거부 (ACCESS_DENIED) → 관리자 권한 프로세스로 추정"
+                    return (
+                        True,
+                        "OpenProcess 접근 거부 (ACCESS_DENIED) → 관리자 권한 프로세스로 추정",
+                    )
                 return False, f"OpenProcess 실패 (오류 코드: {err})"
 
             try:
@@ -1504,7 +1595,7 @@ class ElementPickerOverlay(QWidget):
                         TokenElevation,
                         ctypes.byref(elevation),
                         ctypes.sizeof(elevation),
-                        ctypes.byref(ret_len)
+                        ctypes.byref(ret_len),
                     )
                     if ok:
                         elevated = bool(elevation.value)
@@ -1534,52 +1625,51 @@ class ElementPickerOverlay(QWidget):
 
         while current is not None:
             try:
-                handle = getattr(current, 'handle', None)
+                handle = getattr(current, "handle", None)
                 if handle and handle in visited:
                     break
                 if handle:
                     visited.add(handle)
 
                 info: dict[str, Any] = {}
-                info['name'] = (current.window_text() or "")[:120]
-                info['class_name'] = current.class_name() or ""
+                info["name"] = (current.window_text() or "")[:120]
+                info["class_name"] = current.class_name() or ""
 
                 try:
-                    info['control_type'] = current.element_info.control_type or ""
+                    info["control_type"] = current.element_info.control_type or ""
                 except Exception:
-                    info['control_type'] = ""
+                    info["control_type"] = ""
 
                 try:
-                    info['automation_id'] = current.element_info.automation_id or ""
+                    info["automation_id"] = current.element_info.automation_id or ""
                 except Exception:
-                    info['automation_id'] = ""
+                    info["automation_id"] = ""
 
                 try:
                     r = current.rectangle()
-                    info['rect'] = (r.left, r.top, r.right, r.bottom,
-                                    r.width(), r.height())
+                    info["rect"] = (r.left, r.top, r.right, r.bottom, r.width(), r.height())
                 except Exception:
-                    info['rect'] = None
+                    info["rect"] = None
 
                 try:
-                    info['handle'] = hex(current.handle) if current.handle else ""
+                    info["handle"] = hex(current.handle) if current.handle else ""
                 except Exception:
-                    info['handle'] = ""
+                    info["handle"] = ""
 
                 try:
-                    info['process_id'] = current.process_id()
+                    info["process_id"] = current.process_id()
                 except Exception:
-                    info['process_id'] = 0
+                    info["process_id"] = 0
 
                 try:
-                    info['is_visible'] = current.is_visible()
+                    info["is_visible"] = current.is_visible()
                 except Exception:
-                    info['is_visible'] = None
+                    info["is_visible"] = None
 
                 try:
-                    info['is_enabled'] = current.is_enabled()
+                    info["is_enabled"] = current.is_enabled()
                 except Exception:
-                    info['is_enabled'] = None
+                    info["is_enabled"] = None
 
                 hierarchy.append(info)
 
@@ -1589,7 +1679,7 @@ class ElementPickerOverlay(QWidget):
                     if parent is None:
                         break
                     # 부모가 자기 자신이면 종료
-                    parent_handle = getattr(parent, 'handle', None)
+                    parent_handle = getattr(parent, "handle", None)
                     if parent_handle and parent_handle == handle:
                         break
                     current = parent
@@ -1635,16 +1725,20 @@ class ElementPickerOverlay(QWidget):
             elev_icon = "[관리자 권한 !!]" if is_elevated else "[일반 권한]"
             logger.info(f"  권한 상태 : {elev_icon}  {elev_reason}")
             if is_elevated:
-                logger.info("  *** WM 메시지(click/click_input) 불가 - pyautogui.click(x,y) 사용 필요 ***")
+                logger.info(
+                    "  *** WM 메시지(click/click_input) 불가 - pyautogui.click(x,y) 사용 필요 ***"
+                )
 
-        logger.info(f"  감지 백엔드: {element_info.get('detected_backend', '?')}"
-                    f"  →  권장 백엔드: {element_info.get('recommended_backend', '?')}")
+        logger.info(
+            f"  감지 백엔드: {element_info.get('detected_backend', '?')}"
+            f"  →  권장 백엔드: {element_info.get('recommended_backend', '?')}"
+        )
         logger.info("")
 
         # 선택된 요소 속성
         logger.info("  [선택된 요소 속성]")
         logger.info(f"    control_type : {element_info.get('control_type', '')}")
-        logger.info(f"    name         : \"{element_info.get('name', '')}\"")
+        logger.info(f'    name         : "{element_info.get("name", "")}"')
         logger.info(f"    class_name   : {element_info.get('class_name', '')}")
         logger.info(f"    automation_id: {element_info.get('automation_id', '') or '(없음)'}")
         r = element_info.get("rect", {})
@@ -1654,7 +1748,9 @@ class ElementPickerOverlay(QWidget):
                 f"~ ({r.get('right')},{r.get('bottom')})  "
                 f"크기:{r.get('width')}×{r.get('height')}"
             )
-        logger.info(f"    화면 좌표    : ({element_info.get('screen_x')}, {element_info.get('screen_y')})")
+        logger.info(
+            f"    화면 좌표    : ({element_info.get('screen_x')}, {element_info.get('screen_y')})"
+        )
         logger.info("")
 
         # 계층 구조
@@ -1666,13 +1762,19 @@ class ElementPickerOverlay(QWidget):
                     logger.info("  " + "-" * 66)
                     for i, lvl in enumerate(hierarchy):
                         prefix = "  ▶ " if i == 0 else f"  {'  ' * min(i, 8)}└ "
-                        label = "(선택)" if i == 0 else f"(부모 {i})" if i < len(hierarchy) - 1 else "(루트)"
+                        label = (
+                            "(선택)"
+                            if i == 0
+                            else f"(부모 {i})"
+                            if i < len(hierarchy) - 1
+                            else "(루트)"
+                        )
 
-                        ctrl = lvl.get('control_type') or lvl.get('class_name') or "?"
+                        ctrl = lvl.get("control_type") or lvl.get("class_name") or "?"
                         name_str = f' "{lvl["name"]}"' if lvl.get("name") else ""
-                        cls_str = f'  class={lvl["class_name"]}' if lvl.get("class_name") else ""
-                        aid_str = f'  id={lvl["automation_id"]}' if lvl.get("automation_id") else ""
-                        hwnd_str = f'  hwnd={lvl["handle"]}' if lvl.get("handle") else ""
+                        cls_str = f"  class={lvl['class_name']}" if lvl.get("class_name") else ""
+                        aid_str = f"  id={lvl['automation_id']}" if lvl.get("automation_id") else ""
+                        hwnd_str = f"  hwnd={lvl['handle']}" if lvl.get("handle") else ""
 
                         rect_str = ""
                         if lvl.get("rect"):
@@ -1715,7 +1817,6 @@ class ElementPickerOverlay(QWidget):
             return {"cdp_available": False}
 
         import urllib.request
-        import json as _json
 
         # CDP 포트 탐색 (9222 → 9223 → 9224). timeout 짧게 — 미연결 환경에서
         # 사용자 click → 메인 화면 띄워지는 시간 단축 (3초 → ~1초).
@@ -1732,7 +1833,9 @@ class ElementPickerOverlay(QWidget):
                 continue
 
         if not cdp_port:
-            logger.debug("DOM 컨텍스트 수집 스킵: CDP 포트 없음 (Chrome --remote-debugging-port=9222 필요)")
+            logger.debug(
+                "DOM 컨텍스트 수집 스킵: CDP 포트 없음 (Chrome --remote-debugging-port=9222 필요)"
+            )
             return {"cdp_available": False}
 
         ctx: dict = {"cdp_available": True, "cdp_port": cdp_port}
@@ -1814,7 +1917,9 @@ class ElementPickerOverlay(QWidget):
                 if result:
                     ctx.update(result)
                 else:
-                    ctx["dom_note"] = "해당 요소를 DOM에서 찾지 못함 (동적 렌더링 또는 텍스트 불일치)"
+                    ctx["dom_note"] = (
+                        "해당 요소를 DOM에서 찾지 못함 (동적 렌더링 또는 텍스트 불일치)"
+                    )
 
             finally:
                 # debuggerAddress 모드: quit()은 chromedriver만 종료, 브라우저는 유지
@@ -1877,7 +1982,7 @@ class ElementPickerOverlay(QWidget):
         self._pause_countdown = 3
         self._track_timer.stop()
         # transition timer 가 active 면 정지 (post_pause 중 F3 재진입)
-        if hasattr(self, '_post_pause_transition_timer'):
+        if hasattr(self, "_post_pause_transition_timer"):
             self._post_pause_transition_timer.stop()
 
         # 오버레이 숨기기
@@ -1951,7 +2056,7 @@ class ElementPickerOverlay(QWidget):
         self._install_mouse_hook()
 
         # 마우스 클릭 폴링 (hook 실패 시 fallback)
-        if not hasattr(self, '_click_poll_timer'):
+        if not hasattr(self, "_click_poll_timer"):
             self._click_poll_timer = QTimer(self)
             self._click_poll_timer.timeout.connect(self._poll_mouse_click)
         self._click_poll_timer.start(50)
@@ -1963,12 +2068,10 @@ class ElementPickerOverlay(QWidget):
         # mouse-leave 트리거되어 menu 닫힘. 가설 실패. settings 로 0 (비활성)
         # 가능. 0 이면 post_pause_mode 가 click/ESC 까지 유지 (방향 B 직접).
         if self._post_pause_transition_ms > 0:
-            if not hasattr(self, '_post_pause_transition_timer'):
+            if not hasattr(self, "_post_pause_transition_timer"):
                 self._post_pause_transition_timer = QTimer(self)
                 self._post_pause_transition_timer.setSingleShot(True)
-                self._post_pause_transition_timer.timeout.connect(
-                    self._exit_post_pause_mode
-                )
+                self._post_pause_transition_timer.timeout.connect(self._exit_post_pause_mode)
             self._post_pause_transition_timer.start(self._post_pause_transition_ms)
 
     # ── 저수준 키보드 훅 (WH_KEYBOARD_LL) ──
@@ -1984,13 +2087,13 @@ class ElementPickerOverlay(QWidget):
         """
         if sys.platform != "win32":
             return
-        if hasattr(self, '_keyboard_hook') and self._keyboard_hook:
+        if hasattr(self, "_keyboard_hook") and self._keyboard_hook:
             return  # 이미 설치 — 재설치 방지 (leak)
 
         # 콜백 함수 타입 정의
         HOOKPROC = ctypes.CFUNCTYPE(
-            ctypes.c_long,       # return: LRESULT
-            ctypes.c_int,        # nCode
+            ctypes.c_long,  # return: LRESULT
+            ctypes.c_int,  # nCode
             ctypes.c_ulonglong,  # wParam (WPARAM, 64bit)
             ctypes.c_ulonglong,  # lParam (LPARAM, 64bit)
         )
@@ -2028,14 +2131,14 @@ class ElementPickerOverlay(QWidget):
             WH_KEYBOARD_LL,
             self._hook_proc_ref,
             None,  # hMod: None for global hook
-            0      # dwThreadId: 0 for all threads
+            0,  # dwThreadId: 0 for all threads
         )
         if not self._keyboard_hook:
             logger.warning("키보드 훅 설치 실패")
 
     def _uninstall_keyboard_hook(self):
         """저수준 키보드 훅 해제"""
-        if hasattr(self, '_keyboard_hook') and self._keyboard_hook:
+        if hasattr(self, "_keyboard_hook") and self._keyboard_hook:
             user32.UnhookWindowsHookEx(self._keyboard_hook)
             self._keyboard_hook = None
         self._hook_proc_ref = None
@@ -2100,7 +2203,7 @@ class ElementPickerOverlay(QWidget):
 
     def _uninstall_mouse_hook(self):
         """저수준 마우스 훅 해제"""
-        if hasattr(self, '_mouse_hook') and self._mouse_hook:
+        if hasattr(self, "_mouse_hook") and self._mouse_hook:
             user32.UnhookWindowsHookEx(self._mouse_hook)
             self._mouse_hook = None
         self._mouse_hook_proc_ref = None
@@ -2114,10 +2217,7 @@ class ElementPickerOverlay(QWidget):
         if not self._post_pause_mode:
             return
         self._exit_post_pause_mode()
-        element_info = (
-            self._current_element_info.copy()
-            if self._current_element_info else {}
-        )
+        element_info = self._current_element_info.copy() if self._current_element_info else {}
         element_ref = self._current_element_ref
         self.stop_picking()
         if element_info:
@@ -2189,11 +2289,11 @@ class ElementPickerOverlay(QWidget):
         if not self._post_pause_mode:
             return  # idempotent — transition timer 와 user 액션 동시 fire 방어
         self._post_pause_mode = False
-        if hasattr(self, '_post_pause_transition_timer'):
+        if hasattr(self, "_post_pause_transition_timer"):
             self._post_pause_transition_timer.stop()
         # keyboard hook 은 picker 전체 lifecycle 유지 — 여기선 해제 안 함
         self._uninstall_mouse_hook()
-        if hasattr(self, '_click_poll_timer'):
+        if hasattr(self, "_click_poll_timer"):
             self._click_poll_timer.stop()
         if sys.platform == "win32":
             hwnd = int(self.winId())

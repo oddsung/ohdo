@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 프롬프트 품질 테스트
 
@@ -32,6 +33,7 @@ class PromptQualityTest(TestCase):
     def _make_session(self, steps=None, project_type="desktop"):
         """테스트용 세션 객체 생성 헬퍼"""
         from core.session_manager import Session
+
         session = Session(session_id="test", title="테스트 세션", project_type=project_type)
         if steps:
             session.steps = steps
@@ -39,6 +41,7 @@ class PromptQualityTest(TestCase):
 
     def _make_builder(self):
         from core.prompt_builder import PromptBuilder
+
         return PromptBuilder(prompts_config={})
 
     # ──────────────────────────────────────────
@@ -54,8 +57,11 @@ class PromptQualityTest(TestCase):
 
         lines = prompt.strip().split("\n")
         first_line = lines[0]
-        self.assert_contains(first_line, "메모장을 열어줘",
-                             "사용자 요청이 프롬프트 첫 줄에 있어야 합니다 (AI가 무시하지 못하도록)")
+        self.assert_contains(
+            first_line,
+            "메모장을 열어줘",
+            "사용자 요청이 프롬프트 첫 줄에 있어야 합니다 (AI가 무시하지 못하도록)",
+        )
 
     def test_02_code_block_rule_present(self):
         """```python 코드블록 생성 규칙이 포함되는지"""
@@ -99,12 +105,13 @@ class PromptQualityTest(TestCase):
         prompt = builder.build_step_prompt(session=session, user_request="웹 자동화 해줘")
 
         self.assert_contains(prompt, "detach", "detach=True 규칙이 있어야 합니다")
-        self.assert_contains(prompt, "not(self::script)",
-                             "XPath에서 script 태그 제외 규칙이 있어야 합니다")
-        self.assert_contains(prompt, "visibility_of_element_located",
-                             "visibility 대기 규칙이 있어야 합니다")
-        self.assert_contains(prompt, "execute_script",
-                             "JS click 가이드가 있어야 합니다")
+        self.assert_contains(
+            prompt, "not(self::script)", "XPath에서 script 태그 제외 규칙이 있어야 합니다"
+        )
+        self.assert_contains(
+            prompt, "visibility_of_element_located", "visibility 대기 규칙이 있어야 합니다"
+        )
+        self.assert_contains(prompt, "execute_script", "JS click 가이드가 있어야 합니다")
 
     # ──────────────────────────────────────────
     # 2. 누적 코드 컨텍스트 검증
@@ -120,28 +127,39 @@ class PromptQualityTest(TestCase):
             "time.sleep(2)\n"
             "print('메모장 열림')"
         )
-        session = self._make_session(steps=[
-            {"step_id": 1, "status": "completed", "generated_code": prev_code}
-        ])
+        session = self._make_session(
+            steps=[{"step_id": 1, "status": "completed", "generated_code": prev_code}]
+        )
 
         prompt = builder.build_step_prompt(session=session, user_request="텍스트 입력해줘")
 
-        self.assert_contains(prompt, "subprocess.Popen('notepad.exe')",
-                             "이전 스텝의 코드가 그대로 포함되어야 합니다")
-        self.assert_contains(prompt, "print('메모장 열림')",
-                             "이전 코드의 마지막 줄까지 포함되어야 합니다")
+        self.assert_contains(
+            prompt, "subprocess.Popen('notepad.exe')", "이전 스텝의 코드가 그대로 포함되어야 합니다"
+        )
+        self.assert_contains(
+            prompt, "print('메모장 열림')", "이전 코드의 마지막 줄까지 포함되어야 합니다"
+        )
         self.assert_contains(prompt, "누적 코드", "누적 코드 안내가 있어야 합니다")
         self.assert_contains(prompt, "삭제하거나", "코드 삭제 금지 규칙이 있어야 합니다")
 
     def test_07_multi_step_code_chain(self):
         """여러 스텝의 코드 중 마지막 누적 코드만 포함되는지"""
         builder = self._make_builder()
-        session = self._make_session(steps=[
-            {"step_id": 1, "status": "completed", "generated_code": "print('step1')"},
-            {"step_id": 2, "status": "completed", "generated_code": "print('step1')\nprint('step2')"},
-            {"step_id": 3, "status": "completed",
-             "generated_code": "print('step1')\nprint('step2')\nprint('step3')"},
-        ])
+        session = self._make_session(
+            steps=[
+                {"step_id": 1, "status": "completed", "generated_code": "print('step1')"},
+                {
+                    "step_id": 2,
+                    "status": "completed",
+                    "generated_code": "print('step1')\nprint('step2')",
+                },
+                {
+                    "step_id": 3,
+                    "status": "completed",
+                    "generated_code": "print('step1')\nprint('step2')\nprint('step3')",
+                },
+            ]
+        )
 
         prompt = builder.build_step_prompt(session=session, user_request="다음 작업")
 
@@ -155,8 +173,7 @@ class PromptQualityTest(TestCase):
 
         prompt = builder.build_step_prompt(session=session, user_request="메모장 열어줘")
 
-        self.assert_true("누적 코드" not in prompt,
-                         "첫 스텝에서는 누적 코드 섹션이 없어야 합니다")
+        self.assert_true("누적 코드" not in prompt, "첫 스텝에서는 누적 코드 섹션이 없어야 합니다")
 
     # ──────────────────────────────────────────
     # 3. 윈도우/요소 컨텍스트 삽입 검증
@@ -170,21 +187,18 @@ class PromptQualityTest(TestCase):
         window_ctx = (
             "## 대상 윈도우: 메모장\n"
             "### UI 컨트롤 목록:\n"
-            "- [Edit] \"\" (id=15)\n"
-            "- [Button] \"파일\" (id=menuFile)"
+            '- [Edit] "" (id=15)\n'
+            '- [Button] "파일" (id=menuFile)'
         )
         prompt = builder.build_step_prompt(
-            session=session,
-            user_request="텍스트 입력해줘",
-            window_context=window_ctx
+            session=session, user_request="텍스트 입력해줘", window_context=window_ctx
         )
 
-        self.assert_contains(prompt, "대상 윈도우: 메모장",
-                             "윈도우 컨텍스트가 프롬프트에 포함되어야 합니다")
-        self.assert_contains(prompt, "menuFile",
-                             "UI 컨트롤 정보가 포함되어야 합니다")
-        self.assert_contains(prompt, "활용하여",
-                             "컨트롤 정보 활용 지시가 있어야 합니다")
+        self.assert_contains(
+            prompt, "대상 윈도우: 메모장", "윈도우 컨텍스트가 프롬프트에 포함되어야 합니다"
+        )
+        self.assert_contains(prompt, "menuFile", "UI 컨트롤 정보가 포함되어야 합니다")
+        self.assert_contains(prompt, "활용하여", "컨트롤 정보 활용 지시가 있어야 합니다")
 
     def test_10_element_context_desktop(self):
         """데스크톱 요소 선택 시 pywinauto 지시가 삽입되는지"""
@@ -196,11 +210,12 @@ class PromptQualityTest(TestCase):
             session=session,
             user_request="이 버튼을 클릭해줘",
             element_context=element_ctx,
-            is_browser_element=False
+            is_browser_element=False,
         )
 
-        self.assert_contains(prompt, "pywinauto 코드를 작성",
-                             "데스크톱 요소일 때 pywinauto 지시가 있어야 합니다")
+        self.assert_contains(
+            prompt, "pywinauto 코드를 작성", "데스크톱 요소일 때 pywinauto 지시가 있어야 합니다"
+        )
 
     def test_11_element_context_browser(self):
         """브라우저 요소 선택 시 Selenium 지시가 삽입되는지"""
@@ -212,11 +227,12 @@ class PromptQualityTest(TestCase):
             session=session,
             user_request="이 버튼을 클릭해줘",
             element_context=element_ctx,
-            is_browser_element=True
+            is_browser_element=True,
         )
 
-        self.assert_contains(prompt, "Selenium 코드를 작성",
-                             "브라우저 요소일 때 Selenium 지시가 있어야 합니다")
+        self.assert_contains(
+            prompt, "Selenium 코드를 작성", "브라우저 요소일 때 Selenium 지시가 있어야 합니다"
+        )
 
     # ──────────────────────────────────────────
     # 4. 에러 복구 프롬프트 검증
@@ -244,7 +260,7 @@ class PromptQualityTest(TestCase):
         prompt = builder.build_step_prompt(
             session=session,
             user_request="다시 시도해줘",
-            error_context="TimeoutError: 윈도우를 찾을 수 없습니다"
+            error_context="TimeoutError: 윈도우를 찾을 수 없습니다",
         )
 
         self.assert_contains(prompt, "TimeoutError", "에러 메시지가 프롬프트에 포함되어야 합니다")
@@ -257,15 +273,17 @@ class PromptQualityTest(TestCase):
     def test_14_manual_edit_preservation(self):
         """사용자가 수동 편집한 코드가 보존되도록 프롬프트에 경고가 포함되는지"""
         builder = self._make_builder()
-        session = self._make_session(steps=[
-            {
-                "step_id": 1,
-                "status": "completed",
-                "generated_code": "login('user123', 'new_password')",
-                "manually_edited": True,
-                "edit_original_code": "login('user123', 'old_password')",
-            }
-        ])
+        session = self._make_session(
+            steps=[
+                {
+                    "step_id": 1,
+                    "status": "completed",
+                    "generated_code": "login('user123', 'new_password')",
+                    "manually_edited": True,
+                    "edit_original_code": "login('user123', 'old_password')",
+                }
+            ]
+        )
 
         prompt = builder.build_step_prompt(session=session, user_request="다음 단계 진행")
 
@@ -275,23 +293,23 @@ class PromptQualityTest(TestCase):
     def test_15_manual_edit_diff_included(self):
         """수동 편집 diff가 프롬프트에 포함되는지"""
         builder = self._make_builder()
-        session = self._make_session(steps=[
-            {
-                "step_id": 1,
-                "status": "completed",
-                "generated_code": "url = 'https://correct-site.com'",
-                "manually_edited": True,
-                "edit_original_code": "url = 'https://wrong-site.com'",
-            }
-        ])
+        session = self._make_session(
+            steps=[
+                {
+                    "step_id": 1,
+                    "status": "completed",
+                    "generated_code": "url = 'https://correct-site.com'",
+                    "manually_edited": True,
+                    "edit_original_code": "url = 'https://wrong-site.com'",
+                }
+            ]
+        )
 
         prompt = builder.build_step_prompt(session=session, user_request="로그인해줘")
 
         # diff에 이전값과 새값이 모두 표시되어야 함
-        self.assert_contains(prompt, "wrong-site.com",
-                             "diff에 이전 값이 표시되어야 합니다")
-        self.assert_contains(prompt, "correct-site.com",
-                             "diff에 새 값이 표시되어야 합니다")
+        self.assert_contains(prompt, "wrong-site.com", "diff에 이전 값이 표시되어야 합니다")
+        self.assert_contains(prompt, "correct-site.com", "diff에 새 값이 표시되어야 합니다")
 
     # ──────────────────────────────────────────
     # 6. 코드 생성 규칙 완성도 검증
@@ -304,8 +322,9 @@ class PromptQualityTest(TestCase):
 
         prompt = builder.build_step_prompt(session=session, user_request="뭔가 해줘")
 
-        self.assert_contains(prompt, "질문하지 말고",
-                             "'질문하지 말고 코드 생성' 규칙이 있어야 합니다")
+        self.assert_contains(
+            prompt, "질문하지 말고", "'질문하지 말고 코드 생성' 규칙이 있어야 합니다"
+        )
 
     def test_17_korean_output_rule(self):
         """한국어 출력 규칙이 있는지"""
@@ -319,16 +338,18 @@ class PromptQualityTest(TestCase):
     def test_18_previous_code_keep_rule_with_existing_code(self):
         """이전 코드가 있을 때 '삭제/주석 금지' 규칙이 강화되는지"""
         builder = self._make_builder()
-        session = self._make_session(steps=[
-            {"step_id": 1, "status": "completed", "generated_code": "print('existing')"}
-        ])
+        session = self._make_session(
+            steps=[{"step_id": 1, "status": "completed", "generated_code": "print('existing')"}]
+        )
 
         prompt = builder.build_step_prompt(session=session, user_request="새 기능 추가")
 
-        self.assert_contains(prompt, "이전 스텝의 모든 코드",
-                             "이전 코드 유지 규칙이 강화되어야 합니다")
-        self.assert_contains(prompt, "별도 함수로 분리하지 마세요",
-                             "별도 함수 분리 금지 규칙이 있어야 합니다")
+        self.assert_contains(
+            prompt, "이전 스텝의 모든 코드", "이전 코드 유지 규칙이 강화되어야 합니다"
+        )
+        self.assert_contains(
+            prompt, "별도 함수로 분리하지 마세요", "별도 함수 분리 금지 규칙이 있어야 합니다"
+        )
 
     # ──────────────────────────────────────────
     # 7. WindowInspector 코드 템플릿 품질
@@ -340,19 +361,24 @@ class PromptQualityTest(TestCase):
 
         inspector = WindowInspector()
         element = {
-            "control_type": "Button", "name": "OK", "automation_id": "btnOK",
+            "control_type": "Button",
+            "name": "OK",
+            "automation_id": "btnOK",
             "class_name": "Button",
             "rect": {"left": 100, "top": 200, "width": 80, "height": 30},
             "parent_window_title": "앱",
             "is_browser": False,
-            "detected_backend": "uia", "recommended_backend": "uia",
+            "detected_backend": "uia",
+            "recommended_backend": "uia",
         }
         code = inspector.get_element_info_text(element)
 
-        self.assert_contains(code, "SetProcessDpiAwareness",
-                             "DPI Awareness 설정이 코드에 포함되어야 합니다")
-        self.assert_contains(code, "FAILSAFE = False",
-                             "pyautogui FAILSAFE 비활성화가 포함되어야 합니다")
+        self.assert_contains(
+            code, "SetProcessDpiAwareness", "DPI Awareness 설정이 코드에 포함되어야 합니다"
+        )
+        self.assert_contains(
+            code, "FAILSAFE = False", "pyautogui FAILSAFE 비활성화가 포함되어야 합니다"
+        )
 
     def test_20_inspector_admin_privilege_warning(self):
         """관리자 권한 앱에 대한 경고와 pyautogui 폴백이 포함되는지"""
@@ -360,19 +386,23 @@ class PromptQualityTest(TestCase):
 
         inspector = WindowInspector()
         element = {
-            "control_type": "Button", "name": "저장", "automation_id": "btnSave",
+            "control_type": "Button",
+            "name": "저장",
+            "automation_id": "btnSave",
             "class_name": "Button",
             "rect": {"left": 200, "top": 300, "width": 60, "height": 25},
             "parent_window_title": "관리자 앱",
             "is_browser": False,
-            "detected_backend": "uia", "recommended_backend": "uia",
+            "detected_backend": "uia",
+            "recommended_backend": "uia",
         }
         code = inspector.get_element_info_text(element)
 
         self.assert_contains(code, "관리자", "관리자 권한 경고가 있어야 합니다")
         self.assert_contains(code, "pyautogui.click", "pyautogui 폴백 코드가 있어야 합니다")
-        self.assert_contains(code, "SetForegroundWindow",
-                             "창을 전면으로 가져오는 코드가 있어야 합니다")
+        self.assert_contains(
+            code, "SetForegroundWindow", "창을 전면으로 가져오는 코드가 있어야 합니다"
+        )
 
     def test_21_inspector_dynamic_coordinates(self):
         """생성 코드가 하드코딩 좌표가 아닌 동적 좌표를 사용하는지"""
@@ -380,19 +410,24 @@ class PromptQualityTest(TestCase):
 
         inspector = WindowInspector()
         element = {
-            "control_type": "Button", "name": "확인", "automation_id": "btnOK",
+            "control_type": "Button",
+            "name": "확인",
+            "automation_id": "btnOK",
             "class_name": "Button",
             "rect": {"left": 350, "top": 450, "width": 80, "height": 30},
             "parent_window_title": "설정",
             "is_browser": False,
-            "detected_backend": "uia", "recommended_backend": "uia",
+            "detected_backend": "uia",
+            "recommended_backend": "uia",
         }
         code = inspector.get_element_info_text(element)
 
-        self.assert_contains(code, "element.rectangle()",
-                             "실행 시점에 동적으로 좌표를 가져와야 합니다 (하드코딩 금지)")
-        self.assert_contains(code, "center_x",
-                             "중심 좌표 계산이 있어야 합니다")
+        self.assert_contains(
+            code,
+            "element.rectangle()",
+            "실행 시점에 동적으로 좌표를 가져와야 합니다 (하드코딩 금지)",
+        )
+        self.assert_contains(code, "center_x", "중심 좌표 계산이 있어야 합니다")
 
     def test_22_inspector_click_target_verification(self):
         """클릭 전 대상 창 확인 코드가 포함되는지"""
@@ -400,17 +435,21 @@ class PromptQualityTest(TestCase):
 
         inspector = WindowInspector()
         element = {
-            "control_type": "Button", "name": "실행", "automation_id": "btnRun",
+            "control_type": "Button",
+            "name": "실행",
+            "automation_id": "btnRun",
             "class_name": "Button",
             "rect": {"left": 100, "top": 100, "width": 80, "height": 30},
             "parent_window_title": "앱",
             "is_browser": False,
-            "detected_backend": "uia", "recommended_backend": "uia",
+            "detected_backend": "uia",
+            "recommended_backend": "uia",
         }
         code = inspector.get_element_info_text(element)
 
-        self.assert_contains(code, "WindowFromPoint",
-                             "클릭 좌표에 올바른 창이 있는지 확인하는 코드가 있어야 합니다")
+        self.assert_contains(
+            code, "WindowFromPoint", "클릭 좌표에 올바른 창이 있는지 확인하는 코드가 있어야 합니다"
+        )
 
     # ──────────────────────────────────────────
     # 8. 코드 추출기 품질 검증
@@ -474,7 +513,6 @@ import subprocess
         self.assert_true("time" not in packages, "time은 표준 라이브러리이므로 제외되어야 합니다")
         self.assert_true("os" not in packages, "os는 표준 라이브러리이므로 제외되어야 합니다")
 
-
     # ──────────────────────────────────────────
     # 6. WinInspector.should_use_selenium 라우팅 결정 (브라우저 chrome vs DOM)
     # ──────────────────────────────────────────
@@ -496,10 +534,14 @@ import subprocess
 
         # 케이스 A: Chrome 페이지 button + CDP+DOM → Selenium
         page_dom_elem = {
-            "is_browser": True, "browser_type": "Chrome",
-            "control_type": "Button", "name": "검색", "automation_id": "search-btn",
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "Button",
+            "name": "검색",
+            "automation_id": "search-btn",
             "dom_context": {
-                "cdp_available": True, "tagName": "button",
+                "cdp_available": True,
+                "tagName": "button",
                 "attributes": {"id": "real-html-id", "class": "btn-primary"},
             },
         }
@@ -510,13 +552,17 @@ import subprocess
 
         # 케이스 B: Chrome 탭 + CDP 있지만 tagName 없음 → pywinauto (chrome UI)
         chrome_tab_elem = {
-            "is_browser": True, "browser_type": "Chrome",
-            "control_type": "TabItem", "name": "typing.works - Chrome",
-            "automation_id": "view_20", "class_name": "Tab",
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "TabItem",
+            "name": "typing.works - Chrome",
+            "automation_id": "view_20",
+            "class_name": "Tab",
             "dom_context": {"cdp_available": True, "tagName": ""},
         }
         self.assert_equal(
-            WindowInspector.should_use_selenium(chrome_tab_elem), False,
+            WindowInspector.should_use_selenium(chrome_tab_elem),
+            False,
             "CDP 응답이 tagName 없음 = browser chrome 확정 → pywinauto",
         )
 
@@ -524,36 +570,43 @@ import subprocess
         # (Selenium 은 attach 불가하니 새 Chrome 띄워 사용자 보던 페이지 못 찾음.
         #  pywinauto + pyautogui 가 사용자가 본 그 윈도우/element 를 정확히 클릭.)
         chrome_no_cdp = {
-            "is_browser": True, "browser_type": "Chrome",
-            "control_type": "Button", "name": "버튼",
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "Button",
+            "name": "버튼",
             "dom_context": {"cdp_available": False},
         }
         self.assert_equal(
-            WindowInspector.should_use_selenium(chrome_no_cdp), False,
+            WindowInspector.should_use_selenium(chrome_no_cdp),
+            False,
             "CDP 없으면 Selenium attach 불가 → pywinauto + pyautogui",
         )
 
         # 케이스 D: 데스크톱 앱 → pywinauto
         desktop_elem = {
             "is_browser": False,
-            "control_type": "Edit", "name": "메모장 본문",
+            "control_type": "Edit",
+            "name": "메모장 본문",
         }
         self.assert_equal(
-            WindowInspector.should_use_selenium(desktop_elem), False,
+            WindowInspector.should_use_selenium(desktop_elem),
+            False,
             "비-브라우저 데스크톱 앱은 항상 pywinauto",
         )
 
         # 케이스 E: dom_context 키 자체 없음 → False (안전한 default)
         legacy_elem = {"browser_type": "Chrome", "control_type": "Button", "name": "x"}
         self.assert_equal(
-            WindowInspector.should_use_selenium(legacy_elem), False,
+            WindowInspector.should_use_selenium(legacy_elem),
+            False,
             "dom_context 정보 자체 없음 → Selenium 으로 보내는 건 위험 (pywinauto)",
         )
 
         # 케이스 F: 비-브라우저 + dom_context 도 없음 → False
         plain_desktop = {"control_type": "Button", "name": "확인"}
         self.assert_equal(
-            WindowInspector.should_use_selenium(plain_desktop), False,
+            WindowInspector.should_use_selenium(plain_desktop),
+            False,
             "browser_type 자체가 없으면 항상 pywinauto",
         )
 
@@ -574,16 +627,19 @@ import subprocess
             "parent_window_title": "snipaste 요소 - Google 검색 - Chrome",
             "parent_window_class": "Chrome_WidgetWin_1",
             "dom_context": {"cdp_available": True, "tagName": ""},
-            "screen_x": 980, "screen_y": 97,
+            "screen_x": 980,
+            "screen_y": 97,
         }
         text = inspector.get_element_info_text(chrome_tab_with_cdp)
 
         self.assert_contains(text, "데스크톱", "CDP 확정한 chrome UI 는 desktop path")
         self.assert_contains(text, "pywinauto", "pywinauto 자동화 방식")
-        self.assert_contains(text, "snipaste 요소 - Google 검색 - Chrome",
-                             "parent_window_title runtime 값 사용 (하드코딩 0)")
-        self.assert_true("HTML ID" not in text,
-                         "auto_id 를 'HTML ID' 로 잘못 라벨링하면 안 됨")
+        self.assert_contains(
+            text,
+            "snipaste 요소 - Google 검색 - Chrome",
+            "parent_window_title runtime 값 사용 (하드코딩 0)",
+        )
+        self.assert_true("HTML ID" not in text, "auto_id 를 'HTML ID' 로 잘못 라벨링하면 안 됨")
 
     def test_29_browser_no_cdp_routes_to_pywinauto_with_pyautogui_primary(self):
         """browser + CDP 미연결 → desktop path (pywinauto). 코드 템플릿이 pyautogui PRIMARY.
@@ -598,9 +654,12 @@ import subprocess
         inspector = WindowInspector()
         # 사용자 세션 시나리오: Chrome 탭 클릭, CDP 미연결
         chrome_tab_no_cdp = {
-            "is_browser": True, "browser_type": "Chrome",
-            "control_type": "TabItem", "name": "typing.works - 메모리 사용량 - 94.1MB",
-            "automation_id": "view_20", "class_name": "Tab",
+            "is_browser": True,
+            "browser_type": "Chrome",
+            "control_type": "TabItem",
+            "name": "typing.works - 메모리 사용량 - 94.1MB",
+            "automation_id": "view_20",
+            "class_name": "Tab",
             "rect": {"left": 867, "top": 142, "width": 149, "height": 41},
             "parent_window_title": "snipaste 요소 - Google 검색 - Chrome",
             "parent_window_class": "Chrome_WidgetWin_1",
@@ -613,19 +672,24 @@ import subprocess
         self.assert_contains(text, "pywinauto", "pywinauto 자동화 방식")
 
         # picker 의 parent_title 이 그대로 connect 에 사용 (사용자가 본 그 윈도우)
-        self.assert_contains(text, "snipaste 요소 - Google 검색 - Chrome",
-                             "기존 Chrome 윈도우 title 로 connect")
+        self.assert_contains(
+            text, "snipaste 요소 - Google 검색 - Chrome", "기존 Chrome 윈도우 title 로 connect"
+        )
 
         # 핵심: 클릭 코드가 pyautogui 를 PRIMARY 로 사용해야 함
         # (Selenium 새 Chrome 안 띄움 + HTML 콘텐츠도 pyautogui 좌표 클릭으로 OK)
-        self.assert_contains(text, "pyautogui PRIMARY",
-                             "browser process 라 pyautogui 가 PRIMARY")
-        self.assert_contains(text, "pyautogui.click(center_x, center_y)",
-                             "코드 템플릿이 pyautogui.click 을 우선 호출")
+        self.assert_contains(text, "pyautogui PRIMARY", "browser process 라 pyautogui 가 PRIMARY")
+        self.assert_contains(
+            text,
+            "pyautogui.click(center_x, center_y)",
+            "코드 템플릿이 pyautogui.click 을 우선 호출",
+        )
 
         # 새 브라우저 띄우는 webdriver.Chrome() 코드는 절대 안 들어감
-        self.assert_true("webdriver.Chrome" not in text,
-                         "browser+no-CDP 면 절대 새 webdriver.Chrome 띄우지 말 것")
+        self.assert_true(
+            "webdriver.Chrome" not in text,
+            "browser+no-CDP 면 절대 새 webdriver.Chrome 띄우지 말 것",
+        )
 
     def test_31_desktop_app_keeps_wm_click_primary(self):
         """비-브라우저 데스크톱 앱은 element.click() 을 PRIMARY 로 유지 (속도/정확성)."""
@@ -634,17 +698,17 @@ import subprocess
         inspector = WindowInspector()
         notepad_btn = {
             "is_browser": False,
-            "control_type": "Button", "name": "확인", "automation_id": "okBtn",
+            "control_type": "Button",
+            "name": "확인",
+            "automation_id": "okBtn",
             "rect": {"left": 50, "top": 100, "width": 60, "height": 24},
             "parent_window_title": "메모장",
         }
         text = inspector.get_element_info_text(notepad_btn)
 
         # 데스크톱 앱은 WM 메시지 클릭이 빠르고 정확
-        self.assert_contains(text, "element.click()",
-                             "데스크톱 앱은 element.click() PRIMARY")
-        self.assert_true("pyautogui PRIMARY" not in text,
-                         "데스크톱 앱은 pyautogui PRIMARY 가 아님")
+        self.assert_contains(text, "element.click()", "데스크톱 앱은 element.click() PRIMARY")
+        self.assert_true("pyautogui PRIMARY" not in text, "데스크톱 앱은 pyautogui PRIMARY 가 아님")
 
     # ──────────────────────────────────────────
     # 7. 회귀 방지 — 사용자 실제 세션 fixture 기반
@@ -676,12 +740,14 @@ import subprocess
             "parent_window_title": "snipaste 요소 - Google 검색 - Chrome",
             "parent_window_class": "Chrome_WidgetWin_1",
             "dom_context": {"cdp_available": False},
-            "screen_x": 946, "screen_y": 46,
+            "screen_x": 946,
+            "screen_y": 46,
         }
 
         # (1) 라우팅: should_use_selenium=False (pywinauto 경로)
         self.assert_equal(
-            WindowInspector.should_use_selenium(chrome_tab), False,
+            WindowInspector.should_use_selenium(chrome_tab),
+            False,
             "[회귀] Chrome 탭 (CDP 미연결) 은 pywinauto 경로로 가야 함",
         )
 
@@ -697,23 +763,27 @@ import subprocess
         self.assert_contains(text, "pywinauto", "[회귀] pywinauto 자동화 방식")
         self.assert_contains(text, "Application", "[회귀] Application connect")
         self.assert_contains(
-            text, 'title="snipaste 요소 - Google 검색 - Chrome"',
+            text,
+            'title="snipaste 요소 - Google 검색 - Chrome"',
             "[회귀] picker 의 parent_window_title 로 기존 Chrome 에 connect",
         )
 
         # (4) 탭 element selector (UIA 정보 그대로 사용 — 하드코딩 0)
         self.assert_contains(
-            text, 'title="typing.works - 메모리 사용량 - 94.1MB"',
+            text,
+            'title="typing.works - 메모리 사용량 - 94.1MB"',
             "[회귀] 탭 name 으로 child_window selector 구성",
         )
         self.assert_contains(
-            text, 'control_type="TabItem"',
+            text,
+            'control_type="TabItem"',
             "[회귀] 탭 control_type 으로 child_window selector 구성",
         )
 
         # (5) browser process 라 pyautogui PRIMARY 클릭
         self.assert_contains(
-            text, "pyautogui.click(center_x, center_y)",
+            text,
+            "pyautogui.click(center_x, center_y)",
             "[회귀] browser process element 는 pyautogui PRIMARY 클릭",
         )
 
@@ -739,7 +809,8 @@ import subprocess
         }
 
         self.assert_equal(
-            WindowInspector.should_use_selenium(page_text), False,
+            WindowInspector.should_use_selenium(page_text),
+            False,
             "[회귀] Chrome 페이지 Text (CDP 미연결) 도 pywinauto 경로",
         )
 
@@ -748,12 +819,17 @@ import subprocess
             "webdriver.Chrome" not in text,
             "[회귀] HTML 콘텐츠 picker 도 새 webdriver.Chrome() 금지",
         )
-        self.assert_contains(text, 'title="typing.works - Chrome"',
-                             "[회귀] picker 의 parent_window_title 로 connect")
-        self.assert_contains(text, 'title="TYPING SETTING"',
-                             "[회귀] HTML 텍스트 element name 으로 selector")
-        self.assert_contains(text, "pyautogui.click(center_x, center_y)",
-                             "[회귀] browser process 는 pyautogui PRIMARY")
+        self.assert_contains(
+            text, 'title="typing.works - Chrome"', "[회귀] picker 의 parent_window_title 로 connect"
+        )
+        self.assert_contains(
+            text, 'title="TYPING SETTING"', "[회귀] HTML 텍스트 element name 으로 selector"
+        )
+        self.assert_contains(
+            text,
+            "pyautogui.click(center_x, center_y)",
+            "[회귀] browser process 는 pyautogui PRIMARY",
+        )
 
     def test_30_desktop_app_no_browser_specific_guidance(self):
         """비-브라우저 데스크톱 앱은 브라우저 특화 가이드가 안 떠야 한다."""
@@ -762,16 +838,21 @@ import subprocess
         inspector = WindowInspector()
         notepad_btn = {
             "is_browser": False,
-            "control_type": "Button", "name": "확인", "automation_id": "okBtn",
+            "control_type": "Button",
+            "name": "확인",
+            "automation_id": "okBtn",
             "rect": {"left": 50, "top": 100, "width": 60, "height": 24},
             "parent_window_title": "메모장",
         }
         text = inspector.get_element_info_text(notepad_btn)
 
-        self.assert_true("pyautogui PRIMARY" not in text,
-                         "비-브라우저 element 는 pyautogui PRIMARY 가 아니어야 함")
-        self.assert_true("GPU compositor" not in text,
-                         "비-브라우저 element 에는 브라우저 한계 설명이 없어야 함")
+        self.assert_true(
+            "pyautogui PRIMARY" not in text,
+            "비-브라우저 element 는 pyautogui PRIMARY 가 아니어야 함",
+        )
+        self.assert_true(
+            "GPU compositor" not in text, "비-브라우저 element 에는 브라우저 한계 설명이 없어야 함"
+        )
 
     def test_28_page_dom_with_cdp_uses_selenium_path(self):
         """CDP DOM 수집된 페이지 요소는 Selenium path 로"""
@@ -798,12 +879,15 @@ import subprocess
         self.assert_contains(text, "브라우저", "DOM 페이지 요소는 브라우저 path 헤더로")
         self.assert_contains(text, "Selenium", "Selenium 자동화 방식")
         self.assert_contains(text, "AutomationID", "auto_id 는 'AutomationID' 로 정확히 라벨")
-        self.assert_true("HTML ID" not in text or "HTML id 있음" in text,
-                         "auto_id 를 'HTML ID' 로 잘못 라벨링하면 안 됨")
+        self.assert_true(
+            "HTML ID" not in text or "HTML id 있음" in text,
+            "auto_id 를 'HTML ID' 로 잘못 라벨링하면 안 됨",
+        )
 
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
+
     runner = TestRunner(suite_name="prompt_quality")
     runner.add_test_class(PromptQualityTest)
     result = runner.run()

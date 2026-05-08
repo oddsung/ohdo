@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 설정 다이얼로그
 
@@ -5,18 +6,33 @@ AI 엔진 선택, 이미지 품질, 프롬프트 편집, 환경 설정 등을 �
 """
 
 import json
-import sys
 import os
-from pathlib import Path
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QWidget, QLabel, QComboBox, QSlider, QSpinBox,
-    QTextEdit, QCheckBox, QPushButton, QGroupBox,
-    QFormLayout, QLineEdit, QFileDialog, QMessageBox,
-    QTableWidget, QTableWidgetItem, QHeaderView
-)
+import sys
+
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class SettingsDialog(QDialog):
@@ -117,6 +133,7 @@ class SettingsDialog(QDialog):
         # base_url + api_key 만 등록하면 OpenAI / DeepSeek / Groq /
         # OpenRouter / Ollama / LM Studio 등 모두 지원.
         from core.adapters.openai_compat_adapter import PRESETS as _OPENAI_PRESETS
+
         oc_config = engines.get("openai_compat", {})
 
         oc_group = QGroupBox("OpenAI 호환 API")
@@ -149,8 +166,7 @@ class SettingsDialog(QDialog):
         self.openai_base_url_edit.setPlaceholderText("https://api.openai.com/v1")
         self.openai_base_url_edit.setText(oc_config.get("base_url", ""))
         self.openai_base_url_edit.setToolTip(
-            "API 엔드포인트 — '/chat/completions' 앞까지의 경로. "
-            "끝의 슬래시는 자동 제거됨."
+            "API 엔드포인트 — '/chat/completions' 앞까지의 경로. 끝의 슬래시는 자동 제거됨."
         )
         oc_form.addRow("base_url:", self.openai_base_url_edit)
 
@@ -219,9 +235,7 @@ class SettingsDialog(QDialog):
         self.quality_slider.setValue(img_config.get("capture_quality", 60))
 
         self.quality_label = QLabel(f"{self.quality_slider.value()}%")
-        self.quality_slider.valueChanged.connect(
-            lambda v: self.quality_label.setText(f"{v}%")
-        )
+        self.quality_slider.valueChanged.connect(lambda v: self.quality_label.setText(f"{v}%"))
 
         quality_layout = QHBoxLayout()
         quality_layout.addWidget(self.quality_slider)
@@ -247,7 +261,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(widget)
 
         exec_config = self.settings.get("execution", {})
-        vf_config   = self.settings.get("visual_feedback", {})
+        vf_config = self.settings.get("visual_feedback", {})
 
         # 스텝 딜레이
         self.delay_spin = QSpinBox()
@@ -416,18 +430,18 @@ class SettingsDialog(QDialog):
         # 환경 정보 로드
         env_info = self._load_environment_info()
 
-        self.env_python_label = QLabel(env_info.get('python_path', sys.executable))
+        self.env_python_label = QLabel(env_info.get("python_path", sys.executable))
         self.env_python_label.setWordWrap(True)
         self.env_python_label.setStyleSheet("color: #89b4fa;")
         env_layout.addRow("Python 경로:", self.env_python_label)
 
-        self.env_version_label = QLabel(env_info.get('python_version', 'N/A'))
+        self.env_version_label = QLabel(env_info.get("python_version", "N/A"))
         env_layout.addRow("Python 버전:", self.env_version_label)
 
-        self.env_hostname_label = QLabel(env_info.get('hostname', 'N/A'))
+        self.env_hostname_label = QLabel(env_info.get("hostname", "N/A"))
         env_layout.addRow("컴퓨터 이름:", self.env_hostname_label)
 
-        self.env_scan_label = QLabel(env_info.get('last_scan', 'N/A'))
+        self.env_scan_label = QLabel(env_info.get("last_scan", "N/A"))
         env_layout.addRow("마지막 스캔:", self.env_scan_label)
 
         layout.addWidget(env_group)
@@ -443,19 +457,19 @@ class SettingsDialog(QDialog):
         self.env_pkg_table.setMaximumHeight(150)
 
         # 패키지 정보 표시
-        packages = env_info.get('packages', {}).get('required', [])
+        packages = env_info.get("packages", {}).get("required", [])
         self.env_pkg_table.setRowCount(len(packages))
 
         for row, pkg in enumerate(packages):
-            name_item = QTableWidgetItem(pkg.get('package', ''))
+            name_item = QTableWidgetItem(pkg.get("package", ""))
             self.env_pkg_table.setItem(row, 0, name_item)
 
-            installed = pkg.get('installed', False)
+            installed = pkg.get("installed", False)
             status_item = QTableWidgetItem("✅" if installed else "❌")
             status_item.setForeground(QColor("#a6e3a1" if installed else "#f38ba8"))
             self.env_pkg_table.setItem(row, 1, status_item)
 
-            version_item = QTableWidgetItem(pkg.get('version', '-') or '-')
+            version_item = QTableWidgetItem(pkg.get("version", "-") or "-")
             self.env_pkg_table.setItem(row, 2, version_item)
 
         pkg_layout.addWidget(self.env_pkg_table)
@@ -484,6 +498,7 @@ class SettingsDialog(QDialog):
         """저장된 환경 정보 로드"""
         try:
             from core.environment_scanner import get_scanner
+
             scanner = get_scanner()
             env = scanner.load_saved_environment()
             return env if env else {}
@@ -499,10 +514,10 @@ class SettingsDialog(QDialog):
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 # 탭 새로고침
                 env_info = self._load_environment_info()
-                self.env_python_label.setText(env_info.get('python_path', 'N/A'))
-                self.env_version_label.setText(env_info.get('python_version', 'N/A'))
-                self.env_hostname_label.setText(env_info.get('hostname', 'N/A'))
-                self.env_scan_label.setText(env_info.get('last_scan', 'N/A'))
+                self.env_python_label.setText(env_info.get("python_path", "N/A"))
+                self.env_version_label.setText(env_info.get("python_version", "N/A"))
+                self.env_hostname_label.setText(env_info.get("hostname", "N/A"))
+                self.env_scan_label.setText(env_info.get("last_scan", "N/A"))
 
                 QMessageBox.information(self, "완료", "환경 스캔이 완료되었습니다.")
 
@@ -512,10 +527,7 @@ class SettingsDialog(QDialog):
     def _change_python_path(self):
         """Python 경로 변경"""
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Python 실행 파일 선택",
-            "",
-            "Python (python.exe);;모든 파일 (*.*)"
+            self, "Python 실행 파일 선택", "", "Python (python.exe);;모든 파일 (*.*)"
         )
 
         if path:
@@ -529,22 +541,14 @@ class SettingsDialog(QDialog):
                 scanner = get_scanner()
                 result = scanner.full_scan(path)
 
-                if result.get('success'):
+                if result.get("success"):
                     scanner.save_environment(result)
                     self.env_python_label.setText(path)
-                    self.env_version_label.setText(result.get('python_version', 'N/A'))
+                    self.env_version_label.setText(result.get("python_version", "N/A"))
 
-                    QMessageBox.information(
-                        self,
-                        "완료",
-                        f"Python 경로가 변경되었습니다.\n{path}"
-                    )
+                    QMessageBox.information(self, "완료", f"Python 경로가 변경되었습니다.\n{path}")
                 else:
-                    QMessageBox.warning(
-                        self,
-                        "오류",
-                        result.get('error', '알 수 없는 오류')
-                    )
+                    QMessageBox.warning(self, "오류", result.get("error", "알 수 없는 오류"))
 
             except Exception as e:
                 QMessageBox.warning(self, "오류", f"Python 경로 변경 중 오류:\n{e}")

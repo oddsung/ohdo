@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """ohdo Agent — Device Flow 클라이언트 + 자격증명(config.json) 입출력.
 
 M1.3 범위:
@@ -29,6 +30,7 @@ logger = logging.getLogger("ohdo.agent.auth")
 # Dataclasses
 # ──────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class DeviceCodeInfo:
     """POST /v0/agents/device_code 응답."""
@@ -55,6 +57,7 @@ class Credentials:
 # ──────────────────────────────────────────────
 # 에러 계층
 # ──────────────────────────────────────────────
+
 
 class DeviceFlowError(RuntimeError):
     """Device Flow 전용 베이스 예외."""
@@ -120,6 +123,7 @@ def _parse_rfc8628_error(resp: httpx.Response) -> str | None:
 # Device Flow 단계
 # ──────────────────────────────────────────────
 
+
 def start_device_flow(
     server_url: str,
     *,
@@ -147,11 +151,10 @@ def start_device_flow(
     if resp.status_code != 200:
         logger.error(
             "start_device_flow unexpected status=%s body=%s",
-            resp.status_code, resp.text[:300],
+            resp.status_code,
+            resp.text[:300],
         )
-        raise DeviceFlowError(
-            f"device_code request failed: HTTP {resp.status_code}"
-        )
+        raise DeviceFlowError(f"device_code request failed: HTTP {resp.status_code}")
 
     data = resp.json()
     try:
@@ -169,7 +172,10 @@ def start_device_flow(
 
     logger.info(
         "device flow started: user_code=%s verification_uri=%s expires_in=%d interval=%d",
-        info.user_code, info.verification_uri, info.expires_in, info.interval,
+        info.user_code,
+        info.verification_uri,
+        info.expires_in,
+        info.interval,
     )
     return info
 
@@ -210,7 +216,8 @@ def poll_for_token(
             consecutive_network_errors += 1
             logger.warning(
                 "poll_for_token network error #%d: %s",
-                consecutive_network_errors, exc,
+                consecutive_network_errors,
+                exc,
             )
             if consecutive_network_errors >= _NETWORK_FAIL_THRESHOLD:
                 raise DeviceFlowNetworkError(str(exc)) from exc
@@ -232,12 +239,14 @@ def poll_for_token(
             except (KeyError, TypeError) as exc:
                 logger.error(
                     "poll_for_token malformed success response: %s body=%s",
-                    exc, data,
+                    exc,
+                    data,
                 )
                 raise DeviceFlowError("malformed device_token response") from exc
             logger.info(
                 "device flow success: agent_id=%s user_id=%s",
-                creds.agent_id, creds.user_id,
+                creds.agent_id,
+                creds.user_id,
             )
             return creds
 
@@ -261,22 +270,20 @@ def poll_for_token(
                 raise DeviceFlowInvalid("invalid_grant")
             logger.error(
                 "poll_for_token unknown 400 error=%r body=%s",
-                err, resp.text[:300],
+                err,
+                resp.text[:300],
             )
             raise DeviceFlowError(f"unknown device_token error: {err!r}")
 
         logger.error(
             "poll_for_token unexpected status=%s body=%s",
-            resp.status_code, resp.text[:300],
+            resp.status_code,
+            resp.text[:300],
         )
-        raise DeviceFlowError(
-            f"device_token unexpected HTTP {resp.status_code}"
-        )
+        raise DeviceFlowError(f"device_token unexpected HTTP {resp.status_code}")
 
 
-def _interruptible_sleep(
-    seconds: float, stop_event: threading.Event | None
-) -> None:
+def _interruptible_sleep(seconds: float, stop_event: threading.Event | None) -> None:
     """``stop_event`` 가 세팅되면 즉시 깨어나는 sleep."""
     if stop_event is None:
         time.sleep(seconds)

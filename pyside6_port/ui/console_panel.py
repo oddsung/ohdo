@@ -1,18 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 콘솔/로그 패널
 
 프롬프트 로그, 실행 로그, AI 통신 로그를 탭으로 분리하여 표시합니다.
 """
 
-import sys
 import ctypes
+import sys
 from datetime import datetime
+
+from PySide6.QtGui import QColor, QCursor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QTabWidget, QPlainTextEdit, QLabel,
-    QToolTip, QApplication,
+    QApplication,
+    QPlainTextEdit,
+    QTabWidget,
+    QToolTip,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor, QTextCursor, QTextCharFormat, QCursor
 
 
 def _win32_clipboard_copy(text: str) -> bool:
@@ -57,7 +62,7 @@ def _win32_clipboard_copy(text: str) -> bool:
         return False
     try:
         user32.EmptyClipboard()
-        encoded = text.encode('utf-16-le') + b'\x00\x00'
+        encoded = text.encode("utf-16-le") + b"\x00\x00"
         h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
         if not h_mem:
             return False
@@ -130,7 +135,7 @@ class LogTextEdit(QPlainTextEdit):
         text = self.textCursor().selectedText()
         if not text:
             return
-        text = text.replace('\u2029', '\n')
+        text = text.replace("\u2029", "\n")
 
         # \uc2dc\ub3c4 1: Qt clipboard
         try:
@@ -146,8 +151,13 @@ class LogTextEdit(QPlainTextEdit):
             return
 
         # \ubaa8\ub450 \uc2e4\ud328 \u2014 \uc0ac\uc6a9\uc790\uc5d0\uac8c \uc54c\ub9bc
-        QToolTip.showText(QCursor.pos(), "\u274c \ud074\ub9bd\ubcf4\ub4dc \ubcf5\uc0ac \uc2e4\ud328", self)
-        self.append_log("\ud074\ub9bd\ubcf4\ub4dc \ubcf5\uc0ac \uc2e4\ud328 (Qt + Win32 \ubaa8\ub450 \uc2e4\ud328)", "WARNING")
+        QToolTip.showText(
+            QCursor.pos(), "\u274c \ud074\ub9bd\ubcf4\ub4dc \ubcf5\uc0ac \uc2e4\ud328", self
+        )
+        self.append_log(
+            "\ud074\ub9bd\ubcf4\ub4dc \ubcf5\uc0ac \uc2e4\ud328 (Qt + Win32 \ubaa8\ub450 \uc2e4\ud328)",
+            "WARNING",
+        )
 
     def append_log(self, text: str, level: str = "INFO"):
         """로그 메시지를 색상과 함께 추가"""
@@ -257,7 +267,7 @@ class ConsolePanel(QWidget):
         response_time_ms: int = 0,
         ai_engine: str = "",
         has_images: bool = False,
-        element_info: str = ""
+        element_info: str = "",
     ):
         """AI 대화 상세 로그를 프롬프트 탭에 구조화하여 표시"""
         cursor = self.prompt_log.textCursor()
@@ -321,7 +331,7 @@ class ConsolePanel(QWidget):
             preview = full_prompt[:1000] + "\n\n   ... (중략) ...\n\n" + full_prompt[-500:]
         else:
             preview = full_prompt
-        for line in preview.split('\n'):
+        for line in preview.split("\n"):
             cursor.insertText(f"   {line}\n", prompt_content_fmt)
         cursor.insertText("\n", prompt_content_fmt)
 
@@ -333,7 +343,7 @@ class ConsolePanel(QWidget):
 
         ai_content_fmt = QTextCharFormat()
         ai_content_fmt.setForeground(QColor("#cdd6f4"))
-        for line in ai_response.split('\n'):
+        for line in ai_response.split("\n"):
             cursor.insertText(f"   {line}\n", ai_content_fmt)
         cursor.insertText("\n", ai_content_fmt)
 
@@ -347,7 +357,7 @@ class ConsolePanel(QWidget):
             code_content_fmt = QTextCharFormat()
             code_content_fmt.setForeground(QColor("#fab387"))
             cursor.insertText("   ```python\n", code_content_fmt)
-            for line in code.split('\n'):
+            for line in code.split("\n"):
                 cursor.insertText(f"   {line}\n", code_content_fmt)
             cursor.insertText("   ```\n", code_content_fmt)
 
@@ -360,5 +370,5 @@ class ConsolePanel(QWidget):
         # 전체 로그에도 요약 추가
         self.all_log.append_log(
             f"[AI 대화] 요청: {user_message[:50]}... → 응답: {len(ai_response)}자, 코드: {len(code)}자",
-            "AI"
+            "AI",
         )

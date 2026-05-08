@@ -1,14 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """세션 저장소 인터페이스 (ABC).
 
 기존 ``core.session_manager.SessionManager`` 의 공개 API 중 도메인 관점에서
 의미가 있는 메서드만 추상 메서드로 정의한다. 파일 시스템 경로 반환 메서드는
 로컬 어댑터 전용이므로 여기에 포함하지 않는다.
+
+ROADMAP §3 Phase 1 (1) 의 인터페이스 정의 — 데스크톱 앱과 향후 backend 서버
+양쪽에서 공유 가능한 추상화 layer. 현재 구현체:
+
+- ``LocalJsonRepository`` — JSON 파일 기반 (데스크톱 기본값)
+- ``InMemoryRepository`` — 테스트 가속용 (file IO 없음)
+
+Phase 2 추가 예정:
+
+- ``PostgresRepository`` — SaaS backend
+- ``S3CaptureStore`` — capture 이미지 전용
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from core.session_manager import Session, SessionSummary, Step
@@ -19,7 +32,8 @@ class SessionRepository(ABC):
 
     구현체:
         - ``LocalJsonRepository`` — 기존 ``SessionManager`` 위에 구현 (현재 기본값).
-        - 향후: ``HttpRemoteRepository``, ``PostgresRepository`` 등.
+        - ``InMemoryRepository`` — 테스트 가속용 (file IO 없음).
+        - 향후: ``PostgresRepository`` 등.
     """
 
     # ── 세션 ───────────────────────────────────────────
@@ -74,7 +88,64 @@ class SessionRepository(ABC):
         """특정 스텝 뒤에 새 스텝을 삽입한다. 새 스텝 ID 반환."""
 
     @abstractmethod
-    def move_step(
-        self, session: "Session", step_id: int, direction: str
-    ) -> bool:
+    def move_step(self, session: "Session", step_id: int, direction: str) -> bool:
         """스텝을 위/아래로 이동한다. ``direction`` 은 ``"up"`` 또는 ``"down"``."""
+
+    # ── Export / Import (D22) ──────────────────────────
+    #
+    # 5/8 Phase 1 sub-task 1 — AppService 의 ``getattr(self._repo, "manager", ...)``
+    # leak 제거. 데스크톱 backend 는 filesystem 으로 export, future backend
+    # (PostgresRepository 등) 은 zip stream 또는 download URL 등으로 구현 가능.
+    # 실패 시 ``NotImplementedError`` 발생.
+
+    @abstractmethod
+    def export_session_as_project(
+        self,
+        session: "Session",
+        output_dir: "Path",
+        *,
+        settings: Optional[dict] = None,
+        ai_generated_readme: Optional[str] = None,
+    ) -> "Path":
+        """세션을 독립 실행 가능한 프로젝트 폴더로 내보낸다.
+
+        ``LocalJsonRepository`` 는 main.py + requirements.txt + README.md +
+        run.bat + session.json + captures/ + scripts/ 을 ``output_dir`` 에 생성.
+        Backend 미지원 시 ``NotImplementedError``.
+        """
+
+    @abstractmethod
+    def import_session_folder(
+        self,
+        source_dir: "Path",
+        *,
+        new_title: Optional[str] = None,
+    ) -> "Session":
+        """외부 export 폴더로부터 세션을 임포트한다 (새 UUID 발급)."""
+
+
+class CaptureStore(ABC):
+    """캡처 이미지 저장소 인터페이스 (ROADMAP §3 Phase 1 (1)).
+
+    현재 capture 들은 ``data/sessions/<id>/captures/<file>.png`` 의 절대경로 문자열로
+    ``step.captures`` 에 저장된다. Phase 2 의 S3/R2 백엔드 진입을 위한 접점만 정의.
+
+    실제 capture 쓰기 경로 (``ui/screen_capture.py``, ``core/win_inspector.py``)
+    의 마이그레이션은 Phase 2 진입 시 일괄 처리 — 이 인터페이스는 그때를 위한
+    contract 정의에 그친다.
+    """
+
+    @abstractmethod
+    def resolve_capture_path(self, session_id: str, filename: str) -> "Path":
+        """세션 ID + 파일명 → 실제 capture 위치 (로컬: 절대경로, S3: pre-signed URL).
+
+        구현체 (``LocalCaptureStore``): ``<sessions_dir>/<id>/captures/<filename>``.
+        """
+
+    @abstractmethod
+    def list_captures_for_session(self, session_id: str) -> list[str]:
+        """세션의 모든 capture 파일명 목록."""
+
+    @abstractmethod
+    def delete_capture(self, session_id: str, filename: str) -> bool:
+        """capture 파일 삭제. 성공 여부 반환."""

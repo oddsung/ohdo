@@ -6,7 +6,7 @@
 
 ## 0. 문서 메타
 
-- **마지막 업데이트**: 2026-05-05
+- **마지막 업데이트**: 2026-05-08 (Phase 0 완료 + Phase 1 sub-task 1·2A·3·4·5 완료. 남은 sub-task 2B (ui/ legacy 정리) 만 Phase 1 마무리)
 - **Owner**: @toytiger (dohahado22@gmail.com)
 - **타깃 시장**: B2C 개인 개발자 우선 (오픈코어 전략)
 - **관련 문서**:
@@ -84,15 +84,17 @@
 
 현 코드베이스를 GitHub 공개 가능한 수준으로 다듬고, 이후 모든 단계의 기반이 될 개발·테스트 인프라 구축.
 
-- [ ] `pyproject.toml` + **`uv`** 도입 (`requirements.txt` 병행 유지)
-- [ ] `.devcontainer/devcontainer.json` + `docker-compose.dev.yml`
-- [ ] `pre-commit` + `ruff` + `mypy` + `black`
-- [ ] GitHub Actions CI 매트릭스:
-  - `test-core` (ubuntu-latest): `test_core`, `test_prompt_quality`
-  - `test-windows` (windows-latest): `test_ai_integration`, 샌드박스 단위 테스트
-- [ ] `CONTRIBUTING.md`, `LICENSE` (AGPL-3.0)
-- [ ] 구조화 로깅: `structlog` 도입, JSON 포맷, `logs/` 로테이션
-- [ ] Sentry SDK opt-in 통합
+- [x] `pyproject.toml` + **`uv`** 도입 (`requirements.txt` 병행 유지) — 2026-05-07
+- [x] `.devcontainer/devcontainer.json` (Python 3.12 + uv + Qt deps) — 2026-05-08. `docker-compose.dev.yml` 은 Phase 2 backend 진입 시점에 추가 예정.
+- [x] `pre-commit` + `ruff` (lint + format, black 대체) — 2026-05-07. **mypy 는 Phase 1 의 type hint 작업과 묶음** (legacy PyQt6 30K 라인 strict mypy 시 수천 에러).
+- [x] GitHub Actions CI 매트릭스 — 2026-05-08:
+  - `lint` (ubuntu-latest): ruff check + format check
+  - `test-ubuntu`: core + scenarios (Qt deps + offscreen)
+  - `test-windows`: core + scenarios (pywinauto/pyautogui 의존성 native)
+  - **보류**: `ai_integration` (Gemini CLI + API key secret 필요), GUI 자동화 (notepad/calculator/browser)
+- [x] `LICENSE` (AGPL-3.0) — 2026-05-07. SPDX 헤더 113 .py 파일 일괄 (5/8). `CONTRIBUTING.md` 은 외부 기여자 진입 시점에 추가.
+- [ ] 구조화 로깅: `structlog` 도입, JSON 포맷, `logs/` 로테이션 — Phase 0 후반 별도 작업
+- [ ] Sentry SDK opt-in 통합 — Phase 0 후반 별도 작업
 
 **파일 수준 변경**:
 - 신규: `pyproject.toml`, `.devcontainer/`, `.github/workflows/ci.yml`, `.pre-commit-config.yaml`
@@ -423,3 +425,5 @@ Phase 0~1 착수 시 가장 먼저 손대야 할 파일 (프로젝트 루트 기
 | 2026-04-21 | 초안 작성 | SaaS 확장 장기 로드맵 정립, B2C 개인 개발자 우선 타깃 확정 |
 | 2026-04-23 | M1.2 구현 완료 (Device Flow 엔드포인트 + /link 브라우저 승인 페이지 + device_codes 마이그레이션 0002). /link 승인은 M1.2 한정 "이메일 stub" 흐름으로 진행하며 이메일 소유 증명은 M2+ 에서 매직링크로 보강 예정. 상세: [docs/saas/architecture/04-m1.2-device-flow.md](saas/architecture/04-m1.2-device-flow.md). |
 | 2026-05-05 | §1 라이선스 전략 사용자 결정 확정 — 오픈코어 (AGPL-3.0 데스크톱 + 추후 폐쇄 SaaS) 유지. v1.0 은 100% AGPL-3.0 으로 진행, SaaS 유료/무료 라인은 Phase 2 진입 시점에 결정. 결정 근거: B2C 개인 개발자 우선 + 수익화 의향 양립 → 오픈코어가 두 목표 동시 충족. |
+| 2026-05-07 | Phase 0 sub-phase 1+2 — `pyproject.toml` + `uv` 도입 (lockfile `uv.lock` 64 packages), `pre-commit` + `ruff` (lint+format) 설치, ruff `--fix` 로 520 issue 중 468 auto-fix + 47 manual + format 일괄. mypy 는 Phase 1 type hint 작업과 묶음. LICENSE (AGPL-3.0) + README 라이선스 섹션 추가. |
+| 2026-05-08 | Phase 0 sub-phase 3+4+5 — SPDX 헤더 113 .py 파일 일괄 (`# SPDX-License-Identifier: AGPL-3.0-or-later`), GitHub Actions CI 매트릭스 (lint+ubuntu+windows, ai_integration 보류), `.devcontainer/devcontainer.json` (Python 3.12 + uv + Qt deps + ruff/pylance/gitlens 확장). Phase 0 의 인프라 표준화 5/7 항목 완료, structlog/Sentry 는 별도 작업으로 이관. |

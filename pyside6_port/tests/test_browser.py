@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 브라우저(Chrome/Selenium) RPA 테스트 케이스
 
@@ -13,9 +14,7 @@ Selenium 기반 웹 자동화 기능을 테스트합니다:
     python -m tests.test_runner --suite browser
 """
 
-import time
-
-from tests.test_runner import TestCase, SkipTest
+from tests.test_runner import TestCase
 
 
 class BrowserTest(TestCase):
@@ -31,13 +30,14 @@ class BrowserTest(TestCase):
         from selenium.webdriver.chrome.options import Options
 
         options = Options()
-        options.add_experimental_option('detach', True)
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
+        options.add_experimental_option("detach", True)
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
 
         try:
             from selenium.webdriver.chrome.service import Service
             from webdriver_manager.chrome import ChromeDriverManager
+
             service = Service(ChromeDriverManager().install())
             self._driver = webdriver.Chrome(service=service, options=options)
         except ImportError:
@@ -82,8 +82,8 @@ class BrowserTest(TestCase):
     def test_02_find_elements(self):
         """Selenium으로 요소 찾기"""
         from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support.ui import WebDriverWait
 
         driver = self._create_driver()
         driver.get("https://www.google.com")
@@ -92,9 +92,7 @@ class BrowserTest(TestCase):
         self.step("검색창 요소 찾기")
         wait = WebDriverWait(driver, 10)
         try:
-            search_box = wait.until(
-                EC.presence_of_element_located((By.NAME, "q"))
-            )
+            search_box = wait.until(EC.presence_of_element_located((By.NAME, "q")))
             self.assert_not_none(search_box, "Google 검색창이 있어야 합니다")
             self.log("검색창 발견")
         except Exception:
@@ -131,6 +129,7 @@ class BrowserTest(TestCase):
         self.wait(0.5)
 
         from selenium.webdriver.common.by import By
+
         test_div = driver.find_element(By.ID, "rpa-test-div")
         self.assert_equal(test_div.text, "RPA Test Element", "JS로 생성한 요소 텍스트 확인")
         self.capture("browser_js_element")
@@ -140,6 +139,7 @@ class BrowserTest(TestCase):
         self.step("WindowInspector 로드")
         import sys
         from pathlib import Path
+
         sys.path.insert(0, str(Path(__file__).parent.parent))
         from core.win_inspector import WindowInspector
 
@@ -175,7 +175,9 @@ class BrowserTest(TestCase):
         }
         text = inspector.get_element_info_text(text_element)
         self.assert_contains(text, "execute_script", "Text 요소는 JS click을 사용해야 합니다")
-        self.assert_contains(text, "visibility_of_element_located", "visibility 대기를 사용해야 합니다")
+        self.assert_contains(
+            text, "visibility_of_element_located", "visibility 대기를 사용해야 합니다"
+        )
 
         self.step("데스크톱 요소 → pywinauto 코드 생성 테스트")
         desktop_element = {
@@ -196,6 +198,7 @@ class BrowserTest(TestCase):
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
+
     runner = TestRunner(suite_name="browser")
     runner.add_test_class(BrowserTest)
     result = runner.run()

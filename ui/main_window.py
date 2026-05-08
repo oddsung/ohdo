@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 PyQt6 메인 윈도우
 
@@ -5,30 +6,36 @@ PyQt6 메인 윈도우
 하단: 콘솔/로그 패널
 """
 
-import sys
 import json
 import logging
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QMenuBar, QMenu, QToolBar, QStatusBar,
-    QMessageBox, QFileDialog, QApplication, QComboBox
+    QComboBox,
+    QFileDialog,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence, QShortcut
 
 from .chat_panel import ChatPanel
 from .code_viewer import CodeViewer
 from .console_panel import ConsolePanel
+from .screen_capture import ScreenCaptureOverlay
 from .session_list import SessionListPanel
 from .settings_dialog import SettingsDialog
-from .screen_capture import ScreenCaptureOverlay
+
 if sys.platform == "win32":
-    from .window_picker import WindowPickerOverlay
     from .element_picker import ElementPickerOverlay
+    from .window_picker import WindowPickerOverlay
 else:
     from .element_picker_macos import ElementPickerOverlay
 
@@ -38,27 +45,33 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # 시스템 모듈 import
 sys.path.insert(0, str(PROJECT_ROOT))
 from core.ai_engine import AIEngineManager
-from core.session_manager import SessionManager, Session
-from core.prompt_builder import PromptBuilder
-from core.workflow_engine import WorkflowEngine, CodeSandbox, extract_library_block, extract_step_delta_code
-from core.import_manager import extract_initial_block
 from core.execution_kernel import ExecutionKernel
+from core.import_manager import extract_initial_block
+from core.prompt_builder import PromptBuilder
+from core.session_manager import Session, SessionManager
 from core.win_inspector import WindowInspector
+from core.workflow_engine import (
+    CodeSandbox,
+    WorkflowEngine,
+    extract_library_block,
+    extract_step_delta_code,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class AsyncSignals(QObject):
     """스레드 간 통신 시그널"""
-    ai_response_ready = pyqtSignal(dict)    # AI 응답 수신
-    step_executed = pyqtSignal(dict)         # 스텝 실행 완료
-    log_message = pyqtSignal(str)            # 로그 메시지
-    error_occurred = pyqtSignal(str)         # 에러 발생
+
+    ai_response_ready = pyqtSignal(dict)  # AI 응답 수신
+    step_executed = pyqtSignal(dict)  # 스텝 실행 완료
+    log_message = pyqtSignal(str)  # 로그 메시지
+    error_occurred = pyqtSignal(str)  # 에러 발생
     # 블럭 실행 전용
-    block_step_started = pyqtSignal(int)     # 블럭 스텝 시작 (step_id)
-    block_step_done = pyqtSignal(dict)       # 블럭 스텝 완료
-    blocks_finished = pyqtSignal()           # 블럭 실행 모두 완료 (UI 복원 트리거)
-    kernel_status_changed = pyqtSignal()     # 커널 상태 변경
+    block_step_started = pyqtSignal(int)  # 블럭 스텝 시작 (step_id)
+    block_step_done = pyqtSignal(dict)  # 블럭 스텝 완료
+    blocks_finished = pyqtSignal()  # 블럭 실행 모두 완료 (UI 복원 트리거)
+    kernel_status_changed = pyqtSignal()  # 커널 상태 변경
 
 
 class MainWindow(QMainWindow):
@@ -124,16 +137,19 @@ class MainWindow(QMainWindow):
 
         # ── UI 검사 핸들러 (element picker + window inspector 콜백 분리) ──
         from ui.ui_inspection_handler import UIInspectionHandler
+
         self.inspection_handler = UIInspectionHandler(self)
         self.element_picker.element_picked.connect(self.inspection_handler.on_picked)
         self.element_picker.pick_cancelled.connect(self.inspection_handler.on_pick_cancelled)
 
         # ── 블럭/코드 실행 controller (코드 뷰어 ▶ + 블럭 뷰 ▶/⏯ + F9 stop) ──
         from ui.block_execution_handler import BlockExecutionHandler
+
         self.block_executor = BlockExecutionHandler(self)
 
         # ── AI 호출 controller (사용자 메시지 → AI 어댑터 → 응답 처리 → step 누적) ──
         from ui.ai_call_handler import AICallHandler
+
         self.ai_handler = AICallHandler(self)
 
         # ── 비동기 시그널 ──
@@ -532,9 +548,9 @@ class MainWindow(QMainWindow):
 
             file_handler = logging.FileHandler(log_file, encoding="utf-8")
             file_handler.setLevel(logging.DEBUG)
-            file_handler.setFormatter(logging.Formatter(
-                "[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"
-            ))
+            file_handler.setFormatter(
+                logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s")
+            )
             logging.getLogger().addHandler(file_handler)
 
         logging.getLogger().setLevel(log_level)
@@ -549,10 +565,10 @@ class MainWindow(QMainWindow):
         self.ai_combo.clear()
         for engine in self.ai_engine.list_available():
             display = f"{engine['display_name']}"
-            if not engine['available']:
+            if not engine["available"]:
                 display += " (미설치)"
-            self.ai_combo.addItem(display, engine['name'])
-            if engine['is_current']:
+            self.ai_combo.addItem(display, engine["name"])
+            if engine["is_current"]:
                 self.ai_combo.setCurrentText(display)
         self.ai_combo.blockSignals(False)
 
@@ -576,8 +592,10 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QInputDialog
 
         title, ok = QInputDialog.getText(
-            self, "새 세션", "세션 제목을 입력하세요:",
-            text=f"RPA_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            self,
+            "새 세션",
+            "세션 제목을 입력하세요:",
+            text=f"RPA_{datetime.now().strftime('%Y%m%d_%H%M')}",
         )
         if not ok or not title.strip():
             return
@@ -586,8 +604,7 @@ class MainWindow(QMainWindow):
         project_type = "auto"
 
         self.current_session = self.session_manager.create_session(
-            title=title.strip(),
-            project_type=project_type
+            title=title.strip(), project_type=project_type
         )
         self.current_code = ""
 
@@ -607,9 +624,7 @@ class MainWindow(QMainWindow):
         """세션 목록 새로고침. 현재 작업 중인 세션 강조 표시."""
         sessions = self.session_manager.list_sessions()
         self.session_list.refresh(sessions)
-        active_id = (
-            self.current_session.session_id if self.current_session else None
-        )
+        active_id = self.current_session.session_id if self.current_session else None
         self.session_list.set_active_session(active_id)
 
     def _on_session_selected(self, session_id: str):
@@ -627,8 +642,10 @@ class MainWindow(QMainWindow):
     def _on_session_delete(self, session_id: str):
         """세션 삭제 요청"""
         reply = QMessageBox.question(
-            self, "세션 삭제", "선택한 세션을 삭제하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            self,
+            "세션 삭제",
+            "선택한 세션을 삭제하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.session_manager.delete_session(session_id)
@@ -697,40 +714,39 @@ class MainWindow(QMainWindow):
             default_dir = str(Path.home() / "Desktop")
 
         output_dir = QFileDialog.getExistingDirectory(
-            self, "프로젝트 내보내기 - 폴더 선택",
-            default_dir
+            self, "프로젝트 내보내기 - 폴더 선택", default_dir
         )
         if not output_dir:
             return
 
         # 프로젝트 폴더명 = 세션 제목
         import re
-        safe_name = re.sub(r'[<>:"/\\|?*]', '_', self.current_session.title)
+
+        safe_name = re.sub(r'[<>:"/\\|?*]', "_", self.current_session.title)
         project_dir = Path(output_dir) / safe_name
 
         try:
             output_settings = self.settings.get("output_project", {})
 
             self.session_manager.export_as_project(
-                session=self.current_session,
-                output_dir=project_dir,
-                settings=output_settings
+                session=self.current_session, output_dir=project_dir, settings=output_settings
             )
 
             self.console_panel.log(f"프로젝트 내보내기 완료: {project_dir}", "INFO")
-            self.console_panel.log(f"  - main.py (코드)", "INFO")
-            self.console_panel.log(f"  - requirements.txt (패키지 목록)", "INFO")
-            self.console_panel.log(f"  - README.md (설치/실행 가이드)", "INFO")
-            self.console_panel.log(f"  - run.bat (윈도우 실행 스크립트)", "INFO")
+            self.console_panel.log("  - main.py (코드)", "INFO")
+            self.console_panel.log("  - requirements.txt (패키지 목록)", "INFO")
+            self.console_panel.log("  - README.md (설치/실행 가이드)", "INFO")
+            self.console_panel.log("  - run.bat (윈도우 실행 스크립트)", "INFO")
 
             QMessageBox.information(
-                self, "내보내기 완료",
+                self,
+                "내보내기 완료",
                 f"프로젝트가 생성되었습니다:\n{project_dir}\n\n"
                 f"생성된 파일:\n"
                 f"  • main.py - 실행 코드\n"
                 f"  • requirements.txt - 패키지 목록\n"
                 f"  • README.md - 설치/실행 가이드\n"
-                f"  • run.bat - 윈도우 실행 스크립트"
+                f"  • run.bat - 윈도우 실행 스크립트",
             )
         except Exception as e:
             self.console_panel.log(f"내보내기 실패: {e}", "ERROR")
@@ -827,9 +843,7 @@ class MainWindow(QMainWindow):
             self.chat_panel.set_capture_status(
                 f"📷 캡처 완료: {filename} ({img.width}×{img.height})"
             )
-            self.console_panel.log(
-                f"영역 캡처 저장: {filepath} ({img.width}×{img.height})", "INFO"
-            )
+            self.console_panel.log(f"영역 캡처 저장: {filepath} ({img.width}×{img.height})", "INFO")
 
         except Exception as e:
             self.console_panel.log(f"캡처 저장 실패: {e}", "ERROR")
@@ -848,9 +862,9 @@ class MainWindow(QMainWindow):
         """윈도우 피커를 열어 사용자가 검사할 윈도우를 클릭으로 선택하게 합니다."""
         if not self.win_inspector.is_available:
             QMessageBox.warning(
-                self, "기능 비활성화",
-                "pywinauto가 설치되지 않았습니다.\n"
-                "pip install pywinauto 로 설치해주세요."
+                self,
+                "기능 비활성화",
+                "pywinauto가 설치되지 않았습니다.\npip install pywinauto 로 설치해주세요.",
             )
             return
 
@@ -871,8 +885,7 @@ class MainWindow(QMainWindow):
 
         try:
             window_info = self.win_inspector.inspect_window(
-                handle=hwnd,
-                max_depth=3, max_controls=50
+                handle=hwnd, max_depth=3, max_controls=50
             )
             self.inspection_handler.finish_inspect(window_info)
         except Exception as e:
@@ -912,9 +925,10 @@ class MainWindow(QMainWindow):
             return
 
         new_id = self.session_manager.insert_step(
-            self.current_session, after_step_id,
+            self.current_session,
+            after_step_id,
             code="# 여기에 코드를 작성하거나 AI에게 요청하세요\n",
-            description="수동 삽입된 스텝"
+            description="수동 삽입된 스텝",
         )
         self.console_panel.log(
             f"Step #{after_step_id} 다음에 새 스텝 삽입 (→ Step #{new_id})", "INFO"
@@ -926,22 +940,18 @@ class MainWindow(QMainWindow):
         if not self.current_session:
             return
 
-        success = self.session_manager.move_step(
-            self.current_session, step_id, direction
-        )
+        success = self.session_manager.move_step(self.current_session, step_id, direction)
         if success:
             dir_text = "위로" if direction == "up" else "아래로"
             self.console_panel.log(f"Step #{step_id} {dir_text} 이동", "INFO")
             self.console_panel.log(
                 "⚠ 스텝 이동 시 코드 의존성에 주의하세요 "
                 "(이전 스텝의 변수/결과에 의존하는 코드가 있을 수 있습니다)",
-                "WARNING"
+                "WARNING",
             )
             self._refresh_code_viewer()
         else:
-            self.console_panel.log(
-                f"Step #{step_id} 이동 실패 (더 이상 이동 불가)", "WARNING"
-            )
+            self.console_panel.log(f"Step #{step_id} 이동 실패 (더 이상 이동 불가)", "WARNING")
 
     def _apply_manual_edit_patches(self, code: str) -> str:
         """수동 편집 / AI 공백 변조 복원 (위임 → AICallHandler)"""
@@ -981,6 +991,7 @@ class MainWindow(QMainWindow):
         # 원본 step.generated_code 의 import 보존 — block 카드는 import 표시 안 함
         # → 사용자가 수정할 때 import 안 건드림. 재구성 시 옛 import 그대로 살림.
         from core.import_manager import extract_imports, merge_imports
+
         old_imports, _ = extract_imports(old_generated) if old_generated else ([], "")
         prev_imports, prev_body = extract_imports(prev_generated) if prev_generated else ([], "")
         # 새 step_code 도 import 가 들어있을 수 있음 (사용자가 import 라인 추가 가능)
@@ -1000,21 +1011,20 @@ class MainWindow(QMainWindow):
         new_generated = "\n\n".join(parts) if parts else new_code
 
         self.session_manager.update_step(
-            self.current_session, step_id,
+            self.current_session,
+            step_id,
             {
                 "step_code": new_step_body,
                 "step_imports": new_step_imports if new_step_imports else old_imports,
                 "generated_code": new_generated,
                 "manually_edited": True,
                 "edit_original_code": old_generated,
-            }
+            },
         )
         # 코드 뷰어 탭 (StepCard) 갱신 — 위젯이 stale 한 채로 남아 사용자가 변경을 못 보는
         # 회귀 방지 (5/4 사용자 보고: 블럭 뷰 수정 후 코드 뷰어 탭은 옛 값 표시).
         self._refresh_code_viewer()
-        self.console_panel.log(
-            f"[블럭 편집] Step #{step_id} delta 코드가 수정되었습니다.", "INFO"
-        )
+        self.console_panel.log(f"[블럭 편집] Step #{step_id} delta 코드가 수정되었습니다.", "INFO")
 
     def _on_step_code_edited(self, step_id: int, new_code: str):
         """사용자가 코드 직접 수정 시 세션에 반영.
@@ -1040,8 +1050,11 @@ class MainWindow(QMainWindow):
 
         # 새 step_code (delta) + step_imports 재계산
         from core.import_manager import (
-            extract_imports, extract_code_delta, extract_import_delta,
+            extract_code_delta,
+            extract_import_delta,
+            extract_imports,
         )
+
         new_imports_all, new_body_all = extract_imports(new_code)
         if prev_generated.strip():
             prev_imports, prev_body = extract_imports(prev_generated)
@@ -1053,14 +1066,15 @@ class MainWindow(QMainWindow):
             new_step_imports = new_imports_all
 
         self.session_manager.update_step(
-            self.current_session, step_id,
+            self.current_session,
+            step_id,
             {
                 "generated_code": new_code,
                 "step_code": new_step_code,
                 "step_imports": new_step_imports,
                 "manually_edited": True,
                 "edit_original_code": old_code,
-            }
+            },
         )
         # 블럭 뷰 (BlockCard) 도 갱신 — step_code 가 바뀌었으므로 화면 동기화 필수.
         self._refresh_block_view()
@@ -1084,11 +1098,7 @@ class MainWindow(QMainWindow):
                 cap = captures[0] if isinstance(captures[0], dict) else {}
                 capture_path = cap.get("path")
 
-            steps_data.append({
-                "step_id": step_id,
-                "code": code,
-                "capture_path": capture_path
-            })
+            steps_data.append({"step_id": step_id, "code": code, "capture_path": capture_path})
 
         self.code_viewer.refresh_steps(steps_data)
         self._refresh_block_view()
@@ -1183,22 +1193,22 @@ class MainWindow(QMainWindow):
 
             # prev_step 전달 — 저장된 step_code 가 누적이라도 generated_code diff 로 재계산
             delta_code = extract_step_delta_code(step_dict, prev_step_dict)
-            steps_data.append({
-                "step_id": step_id,
-                "title": title,
-                "delta_code": delta_code,
-                "status": "",
-                "wait_after_ms": step_dict.get("wait_after_ms"),
-            })
+            steps_data.append(
+                {
+                    "step_id": step_id,
+                    "title": title,
+                    "delta_code": delta_code,
+                    "status": "",
+                    "wait_after_ms": step_dict.get("wait_after_ms"),
+                }
+            )
             prev_step_dict = step_dict
 
         # Effective default: 세션 default 가 있으면 그 값, 없으면 글로벌 settings.
         # 카드의 "default Nms" 표시 + workflow_engine 의 fallback 모두 사용.
         global_default = self.settings.get("execution", {}).get("step_delay_ms", 500)
         session_default = self.current_session.settings.get("step_delay_ms")
-        effective_default = (
-            session_default if session_default is not None else global_default
-        )
+        effective_default = session_default if session_default is not None else global_default
         self.code_viewer.refresh_block_view(
             library_code, steps_data, initial_code, effective_default
         )
@@ -1241,9 +1251,9 @@ class MainWindow(QMainWindow):
             self._apply_theme()
             self._refresh_ai_combo()
             # 런타임 엔진에 즉시 반영
-            self.workflow_engine.visual_feedback_enabled = (
-                self.settings.get("visual_feedback", {}).get("enabled", True)
-            )
+            self.workflow_engine.visual_feedback_enabled = self.settings.get(
+                "visual_feedback", {}
+            ).get("enabled", True)
             # 요소 picker 의 UIA walk 파라미터 즉시 반영
             self.element_picker.update_settings(self.settings)
             self.console_panel.log("설정이 변경되었습니다.", "INFO")
@@ -1258,7 +1268,7 @@ class MainWindow(QMainWindow):
             " 단계별로 생성·실행하는 솔루션입니다.</p>"
             "<p><b>기술 스택:</b> PyQt6, Gemini CLI, PyAutoGUI, Selenium</p>"
             "<hr>"
-            "<p>© 2025 AI RPA Solution</p>"
+            "<p>© 2025 AI RPA Solution</p>",
         )
 
     # ──────────────────────────────────────────

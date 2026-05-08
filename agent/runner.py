@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """ohdo Agent — Execution Runner (M2.3 ~ M2.8).
 
 서버가 WS 로 ``execution.start`` 를 보내면 그에 대응하는 ``WorkflowEngine``
@@ -211,7 +212,8 @@ def _resolve_python_exe() -> str:
         logger.warning(
             "embedded python not found at %s — falling back to sys.executable "
             "(%s). user code subprocess may misbehave in bundled mode.",
-            candidate, sys.executable,
+            candidate,
+            sys.executable,
         )
     return sys.executable
 
@@ -236,9 +238,7 @@ def _make_frame(ftype: str, payload: dict, in_reply_to: str | None = None) -> di
     return frame
 
 
-def _slice_steps(
-    all_steps: list, from_step: int | None, to_step: int | None
-) -> list:
+def _slice_steps(all_steps: list, from_step: int | None, to_step: int | None) -> list:
     """1-based inclusive 범위로 스텝을 슬라이스. None 은 양끝."""
     if not all_steps:
         return []
@@ -429,35 +429,36 @@ class ExecutionRunner:
         설치 로그는 log_buf 에 engine stream 으로 누적 (호출자가 flush).
         성공 시 캐시 디렉터리 Path, 빈 목록이면 None. 실패 시 예외.
         """
-        normalized = sorted(
-            r.strip() for r in requirements
-            if isinstance(r, str) and r.strip()
-        )
+        normalized = sorted(r.strip() for r in requirements if isinstance(r, str) and r.strip())
         if not normalized:
             return None
 
-        digest = hashlib.sha256(
-            "\n".join(normalized).encode("utf-8")
-        ).hexdigest()[:16]
+        digest = hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()[:16]
         cache_dir = _resolve_agent_appdata() / "packages" / digest
         marker = cache_dir / ".ok"
 
         if marker.is_file():
             log_buf.append(
-                stream="engine", step_id=None,
+                stream="engine",
+                step_id=None,
                 line=f"requirements cache hit: {digest}",
             )
             return cache_dir
 
         log_buf.append(
-            stream="engine", step_id=None,
+            stream="engine",
+            step_id=None,
             line=f"installing requirements (sha256={digest}): {', '.join(normalized)}",
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
         python_exe = _resolve_python_exe()
         cmd = [
-            python_exe, "-m", "pip", "install",
-            "--target", str(cache_dir),
+            python_exe,
+            "-m",
+            "pip",
+            "install",
+            "--target",
+            str(cache_dir),
             "--no-warn-script-location",
             *normalized,
         ]
@@ -476,7 +477,8 @@ class ExecutionRunner:
                 line = raw.rstrip()
                 if line:
                     log_buf.append(
-                        stream="engine", step_id=None,
+                        stream="engine",
+                        step_id=None,
                         line=f"pip: {line}"[:LOG_LINE_MAX],
                     )
             rc = proc.wait(timeout=120)
@@ -492,14 +494,13 @@ class ExecutionRunner:
 
         marker.write_text("ok", encoding="ascii")
         log_buf.append(
-            stream="engine", step_id=None,
+            stream="engine",
+            step_id=None,
             line=f"requirements installed: {cache_dir}",
         )
         return cache_dir
 
-    def _upload_capture(
-        self, execution_id: str, step_id: int, path: str
-    ) -> None:
+    def _upload_capture(self, execution_id: str, step_id: int, path: str) -> None:
         """M2.6: 스크린샷 파일을 `POST /v0/executions/{id}/captures` 로 업로드.
 
         실패는 조용히 swallow — 실행 결과 자체에는 영향 없음.
@@ -545,12 +546,16 @@ class ExecutionRunner:
                 cid = "<unparsed>"
             logger.info(
                 "capture uploaded: execution_id=%s step_id=%s capture_id=%s size=%dB",
-                execution_id, step_id, cid, len(blob),
+                execution_id,
+                step_id,
+                cid,
+                len(blob),
             )
         else:
             logger.warning(
                 "capture upload non-201: status=%s body=%r",
-                resp.status_code, resp.text[:200],
+                resp.status_code,
+                resp.text[:200],
             )
 
     def _flush_logs(self, execution_id: str, buffer: _LogBuffer) -> None:
@@ -565,9 +570,7 @@ class ExecutionRunner:
                 {"execution_id": execution_id, "entries": chunk},
             )
 
-    def _run_execution(
-        self, execution_id: str, payload: dict, in_reply_to: str | None
-    ) -> None:
+    def _run_execution(self, execution_id: str, payload: dict, in_reply_to: str | None) -> None:
         try:
             self._run_execution_inner(execution_id, payload, in_reply_to)
         except Exception as exc:  # noqa: BLE001
@@ -580,8 +583,9 @@ class ExecutionRunner:
                 {
                     "execution_id": execution_id,
                     "status": "cancelled" if was_cancelled else "failed",
-                    "error_summary": None if was_cancelled
-                        else f"runner exception: {exc.__class__.__name__}: {exc}"[:500],
+                    "error_summary": None
+                    if was_cancelled
+                    else f"runner exception: {exc.__class__.__name__}: {exc}"[:500],
                 },
             )
         finally:
@@ -594,9 +598,7 @@ class ExecutionRunner:
         snapshot = payload.get("session_snapshot") or {}
         from_step = payload.get("from_step")
         to_step = payload.get("to_step")
-        requirements = (
-            snapshot.get("requirements") if isinstance(snapshot, dict) else None
-        )
+        requirements = snapshot.get("requirements") if isinstance(snapshot, dict) else None
 
         all_steps = snapshot.get("steps") if isinstance(snapshot, dict) else None
         if not isinstance(all_steps, list):
@@ -626,13 +628,9 @@ class ExecutionRunner:
         cache_dir: Path | None = None
         if isinstance(requirements, list) and requirements:
             try:
-                cache_dir = self._ensure_requirements_installed(
-                    execution_id, requirements, log_buf
-                )
+                cache_dir = self._ensure_requirements_installed(execution_id, requirements, log_buf)
             except Exception as exc:  # noqa: BLE001
-                logger.exception(
-                    "requirements install failed: execution_id=%s", execution_id
-                )
+                logger.exception("requirements install failed: execution_id=%s", execution_id)
                 self._flush_logs(execution_id, log_buf)
                 elapsed_ms = int((time.time() - t_start) * 1000)
                 was_cancelled = self._pop_cancelled(execution_id)
@@ -646,9 +644,10 @@ class ExecutionRunner:
                         "successful_steps": 0,
                         "failed_steps": 0,
                         "total_time_ms": elapsed_ms,
-                        "error_summary": None if was_cancelled else (
-                            f"requirements install failed: "
-                            f"{exc.__class__.__name__}: {exc}"[:500]
+                        "error_summary": None
+                        if was_cancelled
+                        else (
+                            f"requirements install failed: {exc.__class__.__name__}: {exc}"[:500]
                         ),
                     },
                 )
@@ -768,8 +767,9 @@ class ExecutionRunner:
                     "successful_steps": counters["successful"],
                     "failed_steps": counters["failed"],
                     "total_time_ms": elapsed_ms,
-                    "error_summary": None if was_cancelled
-                        else f"engine exception: {exc.__class__.__name__}: {exc}"[:500],
+                    "error_summary": None
+                    if was_cancelled
+                    else f"engine exception: {exc.__class__.__name__}: {exc}"[:500],
                 },
             )
             return

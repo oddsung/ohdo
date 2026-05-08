@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 Visual Feedback Overlay for RPA Execution
 ==========================================
@@ -11,88 +12,109 @@ WorkflowEngine이 실행 시작 전에 subprocess로 띄우고,
 실행 완료 후 terminate() 합니다.
 """
 
-import sys
 import ctypes
 import ctypes.wintypes
-from PySide6.QtWidgets import QApplication, QWidget
+import sys
+
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QColor, QPen, QFont, QGuiApplication
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtWidgets import QApplication, QWidget
 
 # ── Win32 상수 ─────────────────────────────────────────────────────────────────
 
 user32 = ctypes.windll.user32
 
-WH_MOUSE_LL    = 14
+WH_MOUSE_LL = 14
 WH_KEYBOARD_LL = 13
 WM_LBUTTONDOWN = 0x0201
 WM_RBUTTONDOWN = 0x0204
 WM_MBUTTONDOWN = 0x0207
-WM_MOUSEMOVE   = 0x0200
-WM_KEYDOWN     = 0x0100
-WM_SYSKEYDOWN  = 0x0104
+WM_MOUSEMOVE = 0x0200
+WM_KEYDOWN = 0x0100
+WM_SYSKEYDOWN = 0x0104
 
-GWL_EXSTYLE       = -20
-WS_EX_LAYERED     = 0x00080000
+GWL_EXSTYLE = -20
+WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
-WS_EX_NOACTIVATE  = 0x08000000
+WS_EX_NOACTIVATE = 0x08000000
 
 # 가상 데스크톱 메트릭
-SM_XVIRTUALSCREEN  = 76
-SM_YVIRTUALSCREEN  = 77
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
 SM_CXVIRTUALSCREEN = 78
 SM_CYVIRTUALSCREEN = 79
 
 HOOKPROC = ctypes.WINFUNCTYPE(
-    ctypes.c_long, ctypes.c_int,
-    ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
+    ctypes.c_long, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
 )
 
 
 class MSLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [
-        ("pt",          ctypes.wintypes.POINT),
-        ("mouseData",   ctypes.wintypes.DWORD),
-        ("flags",       ctypes.wintypes.DWORD),
-        ("time",        ctypes.wintypes.DWORD),
+        ("pt", ctypes.wintypes.POINT),
+        ("mouseData", ctypes.wintypes.DWORD),
+        ("flags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
         ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
     ]
 
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [
-        ("vkCode",      ctypes.wintypes.DWORD),
-        ("scanCode",    ctypes.wintypes.DWORD),
-        ("flags",       ctypes.wintypes.DWORD),
-        ("time",        ctypes.wintypes.DWORD),
+        ("vkCode", ctypes.wintypes.DWORD),
+        ("scanCode", ctypes.wintypes.DWORD),
+        ("flags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
         ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
     ]
 
 
 # VK 코드 → 표시 이름
 VK_NAMES: dict[int, str] = {
-    0x08: "Bksp", 0x09: "Tab",    0x0D: "Enter",  0x10: "Shift",
-    0x11: "Ctrl", 0x12: "Alt",    0x1B: "Esc",     0x20: "Space",
-    0x21: "PgUp", 0x22: "PgDn",   0x23: "End",     0x24: "Home",
-    0x25: "←",    0x26: "↑",      0x27: "→",       0x28: "↓",
-    0x2E: "Del",  0x2D: "Ins",    0x2C: "PrtSc",
+    0x08: "Bksp",
+    0x09: "Tab",
+    0x0D: "Enter",
+    0x10: "Shift",
+    0x11: "Ctrl",
+    0x12: "Alt",
+    0x1B: "Esc",
+    0x20: "Space",
+    0x21: "PgUp",
+    0x22: "PgDn",
+    0x23: "End",
+    0x24: "Home",
+    0x25: "←",
+    0x26: "↑",
+    0x27: "→",
+    0x28: "↓",
+    0x2E: "Del",
+    0x2D: "Ins",
+    0x2C: "PrtSc",
     **{0x30 + i: str(i) for i in range(10)},
     **{0x41 + i: chr(0x41 + i) for i in range(26)},
     **{0x70 + i: f"F{i + 1}" for i in range(24)},
-    0xBB: "+", 0xBD: "-", 0xBE: ".", 0xBC: ",",
-    0xBA: ";", 0xC0: "`", 0xDB: "[", 0xDD: "]",
+    0xBB: "+",
+    0xBD: "-",
+    0xBE: ".",
+    0xBC: ",",
+    0xBA: ";",
+    0xC0: "`",
+    0xDB: "[",
+    0xDD: "]",
 }
 
 
 # ── 리플 ────────────────────────────────────────────────────────────────────────
 
+
 class Ripple:
     DURATION_MS = 650
-    MAX_RADIUS  = 75
+    MAX_RADIUS = 75
 
     def __init__(self, x: int, y: int, color: QColor):
-        self.x       = x
-        self.y       = y
-        self.color   = color
+        self.x = x
+        self.y = y
+        self.color = color
         self.elapsed = 0
 
     def advance(self, dt: int) -> None:
@@ -117,14 +139,15 @@ class Ripple:
 
 # ── 오버레이 위젯 ───────────────────────────────────────────────────────────────
 
+
 class OverlayWidget(QWidget):
     """
     전체 가상 데스크톱을 덮는 투명 클릭스루 오버레이.
     마우스 리플, 좌표 표시, 키 입력 표시를 렌더링합니다.
     """
 
-    KEY_CLEAR_MS = 2500   # 마지막 키 입력 후 2.5초 지나면 키 버퍼 초기화
-    MAX_RIPPLES  = 12
+    KEY_CLEAR_MS = 2500  # 마지막 키 입력 후 2.5초 지나면 키 버퍼 초기화
+    MAX_RIPPLES = 12
 
     def __init__(self):
         super().__init__()
@@ -138,14 +161,14 @@ class OverlayWidget(QWidget):
         # 가상 데스크톱 원점 (다중 모니터에서 음수일 수 있음)
         self._vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
         self._vy = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
-        vw       = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
-        vh       = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
 
         # 창 스타일
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint     |
-            Qt.WindowType.WindowStaysOnTopHint    |
-            Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
@@ -164,7 +187,7 @@ class OverlayWidget(QWidget):
         self._timer.start()
 
     def _apply_click_through(self) -> None:
-        hwnd  = int(self.winId())
+        hwnd = int(self.winId())
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         style |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
         user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
@@ -222,7 +245,7 @@ class OverlayWidget(QWidget):
 
     def _draw_ripples(self, painter: QPainter) -> None:
         for ripple in self.ripples:
-            r   = ripple.radius
+            r = ripple.radius
             alp = ripple.alpha
 
             # 외곽 링
@@ -255,10 +278,10 @@ class OverlayWidget(QWidget):
         font = QFont("Consolas", 11)
         font.setBold(True)
         painter.setFont(font)
-        fm   = painter.fontMetrics()
-        th   = fm.height()
-        pad  = 6
-        rx   = 5  # 라운드 반경
+        fm = painter.fontMetrics()
+        th = fm.height()
+        pad = 6
+        rx = 5  # 라운드 반경
 
         # ── 마우스 좌표 ─────────────────────────────────────────────────────────
         pos_text = f"  \U0001f5b1  ({self.mouse_x}, {self.mouse_y})  "
@@ -290,15 +313,15 @@ class OverlayWidget(QWidget):
 # ── 전역 참조 (GC 방지 & 훅 콜백 접근) ──────────────────────────────────────────
 
 _overlay: OverlayWidget | None = None
-_mouse_hook    = None
+_mouse_hook = None
 _keyboard_hook = None
-_mouse_cb:    HOOKPROC | None = None  # type: ignore[type-arg]
+_mouse_cb: HOOKPROC | None = None  # type: ignore[type-arg]
 _keyboard_cb: HOOKPROC | None = None  # type: ignore[type-arg]
 
 # 클릭 색상
-COLOR_LEFT   = QColor(80,  160, 255)   # 파란색 — 좌클릭
-COLOR_RIGHT  = QColor(255, 90,  90)    # 빨간색 — 우클릭
-COLOR_MIDDLE = QColor(255, 200, 50)    # 노란색 — 중간 클릭
+COLOR_LEFT = QColor(80, 160, 255)  # 파란색 — 좌클릭
+COLOR_RIGHT = QColor(255, 90, 90)  # 빨간색 — 우클릭
+COLOR_MIDDLE = QColor(255, 200, 50)  # 노란색 — 중간 클릭
 
 
 def _mouse_proc(nCode: int, wParam: int, lParam: int) -> int:
@@ -306,7 +329,7 @@ def _mouse_proc(nCode: int, wParam: int, lParam: int) -> int:
         ms = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
         x, y = ms.pt.x, ms.pt.y
         _overlay.on_mouse_move(x, y)
-        if   wParam == WM_LBUTTONDOWN:
+        if wParam == WM_LBUTTONDOWN:
             _overlay.on_click(x, y, COLOR_LEFT)
         elif wParam == WM_RBUTTONDOWN:
             _overlay.on_click(x, y, COLOR_RIGHT)
@@ -317,7 +340,7 @@ def _mouse_proc(nCode: int, wParam: int, lParam: int) -> int:
 
 def _keyboard_proc(nCode: int, wParam: int, lParam: int) -> int:
     if nCode >= 0 and _overlay is not None and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
-        kb   = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+        kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
         name = VK_NAMES.get(kb.vkCode, f"[{kb.vkCode:02X}]")
         _overlay.on_key(name)
     return user32.CallNextHookEx(None, nCode, wParam, lParam)
@@ -325,9 +348,9 @@ def _keyboard_proc(nCode: int, wParam: int, lParam: int) -> int:
 
 def _install_hooks() -> None:
     global _mouse_hook, _keyboard_hook, _mouse_cb, _keyboard_cb
-    _mouse_cb    = HOOKPROC(_mouse_proc)
+    _mouse_cb = HOOKPROC(_mouse_proc)
     _keyboard_cb = HOOKPROC(_keyboard_proc)
-    _mouse_hook    = user32.SetWindowsHookExW(WH_MOUSE_LL,    _mouse_cb,    None, 0)
+    _mouse_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, _mouse_cb, None, 0)
     _keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _keyboard_cb, None, 0)
 
 

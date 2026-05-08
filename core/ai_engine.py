@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 AI 엔진 매니저
 
@@ -5,12 +6,10 @@ AI 엔진 매니저
 설정에 따라 적절한 어댑터를 선택하고 전환할 수 있습니다.
 """
 
-import json
 import logging
-from pathlib import Path
 from typing import Optional
 
-from .adapters.base_adapter import BaseAIAdapter, AIResponse
+from .adapters.base_adapter import AIResponse, BaseAIAdapter
 from .adapters.gemini_cli_adapter import GeminiCLIAdapter
 from .adapters.openai_compat_adapter import OpenAICompatAdapter
 
@@ -78,8 +77,7 @@ class AIEngineManager:
         """
         if name not in self._adapters:
             raise ValueError(
-                f"알 수 없는 AI 엔진: '{name}'. "
-                f"사용 가능: {list(self._adapters.keys())}"
+                f"알 수 없는 AI 엔진: '{name}'. 사용 가능: {list(self._adapters.keys())}"
             )
         self._current_name = name
         logger.info(f"AI 엔진 전환: {name}")
@@ -93,12 +91,14 @@ class AIEngineManager:
         """
         result = []
         for name, adapter in self._adapters.items():
-            result.append({
-                "name": name,
-                "display_name": adapter.get_name(),
-                "available": adapter.is_available(),
-                "is_current": name == self._current_name,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "display_name": adapter.get_name(),
+                    "available": adapter.is_available(),
+                    "is_current": name == self._current_name,
+                }
+            )
         return result
 
     def cancel(self) -> None:
@@ -108,11 +108,7 @@ class AIEngineManager:
         except Exception:
             pass
 
-    async def generate(
-        self,
-        prompt: str,
-        images: Optional[list[str]] = None
-    ) -> AIResponse:
+    async def generate(self, prompt: str, images: Optional[list[str]] = None) -> AIResponse:
         """
         현재 선택된 AI 엔진으로 코드를 생성합니다.
 
@@ -129,8 +125,7 @@ class AIEngineManager:
 
         if response.success:
             logger.info(
-                f"AI 응답 수신 ({response.response_time_ms}ms, "
-                f"코드 {len(response.code)}자)"
+                f"AI 응답 수신 ({response.response_time_ms}ms, 코드 {len(response.code)}자)"
             )
         else:
             logger.error(f"AI 응답 실패: {response.error}")

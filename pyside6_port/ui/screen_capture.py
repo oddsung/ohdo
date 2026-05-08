@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 화면 영역 캡처 오버레이
 
@@ -7,12 +8,18 @@
 
 import mss
 from PIL import Image
-from PySide6.QtWidgets import QWidget, QApplication, QLabel
-from PySide6.QtCore import Qt, QRect, QPoint, Signal, QTimer
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QPainter, QColor, QPen, QFont, QPixmap, QScreen,
-    QMouseEvent, QPaintEvent, QKeyEvent
+    QColor,
+    QFont,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPixmap,
 )
+from PySide6.QtWidgets import QApplication, QWidget
 
 
 class ScreenCaptureOverlay(QWidget):
@@ -26,7 +33,7 @@ class ScreenCaptureOverlay(QWidget):
     4. ESC로 취소 시 capture_cancelled 시그널 발생
     """
 
-    capture_completed = Signal(object)    # PIL Image 전달
+    capture_completed = Signal(object)  # PIL Image 전달
     capture_cancelled = Signal()
 
     def __init__(self, parent=None):
@@ -34,9 +41,9 @@ class ScreenCaptureOverlay(QWidget):
 
         # 전체 화면 프레임리스 윈도우
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -65,12 +72,14 @@ class ScreenCaptureOverlay(QWidget):
 
                 # QPixmap으로 변환
                 from PySide6.QtGui import QImage
+
                 img_data = bytes(sct_img.rgb)
                 qimg = QImage(
                     img_data,
-                    sct_img.width, sct_img.height,
+                    sct_img.width,
+                    sct_img.height,
                     sct_img.width * 3,
-                    QImage.Format.Format_RGB888
+                    QImage.Format.Format_RGB888,
                 )
                 # mss는 BGR 순서이므로 RGB로 교환
                 qimg = qimg.rgbSwapped()
@@ -103,9 +112,9 @@ class ScreenCaptureOverlay(QWidget):
 
         # 1. 배경 (스크린샷)
         if self._background_pixmap:
-            painter.drawPixmap(0, 0, self._background_pixmap.scaled(
-                w, h, Qt.AspectRatioMode.IgnoreAspectRatio
-            ))
+            painter.drawPixmap(
+                0, 0, self._background_pixmap.scaled(w, h, Qt.AspectRatioMode.IgnoreAspectRatio)
+            )
 
         # 2. 반투명 어둡게 (선택 영역 제외)
         overlay_color = QColor(0, 0, 0, 120)
@@ -117,12 +126,21 @@ class ScreenCaptureOverlay(QWidget):
             # 상단
             painter.fillRect(0, 0, w, selection.top(), overlay_color)
             # 하단
-            painter.fillRect(0, selection.bottom() + 1, w, h - selection.bottom() - 1, overlay_color)
+            painter.fillRect(
+                0, selection.bottom() + 1, w, h - selection.bottom() - 1, overlay_color
+            )
             # 좌측
-            painter.fillRect(0, selection.top(), selection.left(), selection.height(), overlay_color)
+            painter.fillRect(
+                0, selection.top(), selection.left(), selection.height(), overlay_color
+            )
             # 우측
-            painter.fillRect(selection.right() + 1, selection.top(),
-                           w - selection.right() - 1, selection.height(), overlay_color)
+            painter.fillRect(
+                selection.right() + 1,
+                selection.top(),
+                w - selection.right() - 1,
+                selection.height(),
+                overlay_color,
+            )
 
             # 선택 영역 테두리
             pen = QPen(QColor(0, 170, 255), 2, Qt.PenStyle.SolidLine)
@@ -142,8 +160,12 @@ class ScreenCaptureOverlay(QWidget):
             if text_y + text_rect.height() > h:
                 text_y = selection.top() - 8
 
-            bg_rect = QRect(text_x - 6, text_y - text_rect.height() - 2,
-                          text_rect.width() + 12, text_rect.height() + 6)
+            bg_rect = QRect(
+                text_x - 6,
+                text_y - text_rect.height() - 2,
+                text_rect.width() + 12,
+                text_rect.height() + 6,
+            )
             painter.fillRect(bg_rect, QColor(0, 0, 0, 180))
             painter.drawText(text_x, text_y, size_text)
 
@@ -160,8 +182,12 @@ class ScreenCaptureOverlay(QWidget):
         text_y = 40
 
         # 텍스트 배경
-        bg = QRect(text_x - 16, text_y - text_rect.height() - 4,
-                  text_rect.width() + 32, text_rect.height() + 12)
+        bg = QRect(
+            text_x - 16,
+            text_y - text_rect.height() - 4,
+            text_rect.width() + 32,
+            text_rect.height() + 12,
+        )
         painter.fillRect(bg, QColor(0, 0, 0, 200))
         painter.drawText(text_x, text_y, self._guide_text)
 
@@ -217,7 +243,7 @@ class ScreenCaptureOverlay(QWidget):
                     "left": selection.x(),
                     "top": selection.y(),
                     "width": selection.width(),
-                    "height": selection.height()
+                    "height": selection.height(),
                 }
 
                 sct_img = sct.grab(monitor)

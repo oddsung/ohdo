@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-06 새벽 (5/4~5/6 작업 — 자세한 변경은 §5 변경 이력 + §11 인계 노트 참조). baseline: **core 75/75 + scenarios 70/70 그린**. **wireframe D1~D26 100% 구현 완료**. 5/5 밤~5/6: 8 layer 회귀 fix (idempotent driver / SW_RESTORE / step_code 분리 / pyautogui PRIMARY / title_re / walk-up + picker 가드 / element resolution fallback / 환각 import 교정) + tmp/ 정리 + AI 대화 자동 로그 ([tmp/conversations/](../tmp/conversations/)).
+> 마지막 업데이트: 2026-05-08 (5/4~5/8 작업 — 자세한 변경은 §5 변경 이력 + §11/§12/§13 인계 노트 참조). baseline: **core 77/77 + scenarios 72/72 그린**. **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer.
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -11,8 +11,11 @@
 ## 2. 작업 환경 (사용자 preference)
 
 - **터미널**: PowerShell (복붙용 명령은 PowerShell 문법 — `Activate.ps1`, `$env:X`, `Copy-Item`)
-- **Python**: `py -3.12 -m venv venv` 로 venv 생성, **항상 venv python 의 절대경로** 사용 (`venv\Scripts\python.exe` — 점 없음). 시스템 `python` 은 고장난 3.8 32-bit.
+- **Python 의존성 (5/7 Phase 0 sub-phase 1 도입)**: `pyproject.toml` + `uv` (lockfile: `uv.lock`). 새 머신 셋업: `uv sync` → `.venv/` 자동 생성. 실행: `.venv\Scripts\python.exe ...`.
+  - **레거시 `venv/`** (점 없음) 도 그대로 유지 — 5/6 까지 사용한 기존 환경. 둘 다 baseline 그린. 새 setup 은 `.venv/` 권장.
+  - 시스템 `python` 은 고장난 3.8 32-bit — 절대 사용 X.
 - **em-dash (—) cp949 인코딩 금지**: test/log/print 메시지에 사용 X. hyphen (-) 사용. (docstring/markdown 은 OK)
+  - 5/7 부터 `tests/test_runner.py` 가 `sys.stdout.reconfigure(errors='replace')` 로 fallback 처리 — em-dash 가 ERROR 안 내고 `?` 로 표시됨. 그래도 가능한 hyphen 권장.
 - **commit**: 사용자 명시 요청 시에만 (CLAUDE.md 규칙)
 - **PySide6 포트 동기화**: 코드 수정 시 `pyside6_port/` 도 sed 로 자동 sync (PyQt6→PySide6, pyqtSignal→Signal 등)
 
@@ -390,6 +393,336 @@ ui_v2 의 `_on_send_message` 가 이 메서드만 호출 — Step 생성 로직 
 3. 그 결과에 따라:
    - 사용자 만족 → 다음 작업 후보 (§7) 진입 (Phase 0 / D2 / AI 자동 에러 복구 §10 등)
    - 추가 fix 필요 → 사용자 보고 분석 + fix
+
+## 13. 5/7 D22 export/import 워크플로우 정식 구현
+
+**컨텍스트**: 5/6 GUI 검증 결과 큰 문제 없음 → §7 후속 작업 진입. §7-10 (AI 자동 에러 복구) 는 사용자 보류 → §7-2 진행.
+
+### 적용된 변경
+
+| # | 작업 | 영향 | 위치 |
+|---|---|---|---|
+| 1 | `SessionManager.export_as_project` 확장 — session.json + captures/ + scripts/ 도 같이 복사 | export 결과가 실행 가능 + import 가능 단일 번들 | [core/session_manager.py:527](../core/session_manager.py#L527) |
+| 2 | `SessionManager.import_session_folder` 신규 — 외부 export 폴더 → 새 UUID 로 data/sessions/ 복사 + 옛 UUID 일괄 치환 (captures 절대 경로 cover) | 다른 PC 워크플로우 가져오기 가능. 같은 export 두 번 import 도 충돌 X | [core/session_manager.py](../core/session_manager.py) |
+| 3 | `AppService.export_workflow(session_id, output_dir, settings=None)` + `import_workflow(source_dir, new_title=None)` 신규 façade | UI 가 단일 진입점만 의존 (ADR 0001 준수) | [core/app_service.py](../core/app_service.py) |
+| 4 | ui_v2 `_on_tab_export` 교체 — stub `shutil.copytree` → `app_service.export_workflow` | D22 stub 정식판으로 승격 | [ui_v2/main_window_v2.py:1453](../ui_v2/main_window_v2.py#L1453) |
+| 5 | ui_v2 `_on_import_workflow` 신규 + + 탭 메뉴 "📥 워크플로우 가져오기..." 액션 | 가져오기 짝 추가 | [ui_v2/main_window_v2.py](../ui_v2/main_window_v2.py) |
+| 6 | core test_76 (export 결과 main.py + session.json + captures 모두 검증), test_77 (import 새 UUID + 절대경로 재작성 + new_title) | 회귀 가드 | [tests/test_core.py](../tests/test_core.py) |
+| 7 | scenarios test_71 (`_on_tab_export` 가 AppService 사용 + stub copytree 제거 검증), test_72 (가져오기 액션 + AppService 호출 검증) | 회귀 가드 | [tests/test_scenarios.py](../tests/test_scenarios.py) |
+
+### export 결과 폴더 구조
+
+```
+{title}_{session_id_short}/
+├── main.py                # 실행 가능 코드 (기존)
+├── requirements.txt       # 패키지 목록 (기존)
+├── README.md              # 가이드 (기존)
+├── run.bat                # 윈도우 실행 스크립트 (기존)
+├── session.json           # 🆕 가져오기 메타
+├── captures/              # 🆕 스크린샷 (있을 때)
+└── scripts/               # 🆕 원본 스크립트 (있을 때)
+```
+
+### 회귀 가드 갱신
+- core 77/77 ✅ / scenarios 72/72 ✅
+- PySide6 port sync 완료 (`cp` for core/, `sed` for ui_v2/)
+
+### §7-6 ai_integration suite 실측 (5/7)
+
+**결과**: 9/9 PASS — 5/6 fix 회귀 X. 단, 두 가지 테스트 인프라 fix 발견.
+
+| # | 발견 | 원인 | fix |
+|---|---|---|---|
+| 1 | test_01/test_08 가 `'cp949' codec can't encode '—'` 로 ERROR | Windows 콘솔 cp949 가 AI 응답의 em-dash 처리 불가 | [tests/test_runner.py](../tests/test_runner.py) 모듈 로드 시 `sys.stdout/stderr.reconfigure(errors='replace')` |
+| 2 | test_08 의 `_validate_generated_code` 가 `import` 무조건 강제 → trivial 코드 (예: `print(sum(range(1,11)))`) 에서 false negative | AI 가 합리적으로 unnecessary import 생략한 경우도 fail | [tests/test_ai_integration.py](../tests/test_ai_integration.py) `import` 검증을 hard assert → soft `[INFO]` log (try/except/print 패턴과 일관) |
+
+각 step 의 AI 응답 자체는 모두 합격 — prompt 압축 + 모델 변경 + 가이드 강화의 실 효과 확인.
+
+### §7-7 부분 (5/7) — LICENSE + README
+
+| 작업 | 위치 |
+|---|---|
+| AGPL-3.0 공식 텍스트 (gnu.org 661 line) | [LICENSE](../LICENSE) + [pyside6_port/LICENSE](../pyside6_port/LICENSE) |
+| 루트 README.md — 프로젝트 소개 + 설치/실행 + 테스트 + 로드맵 + 라이선스 섹션 | [README.md](../README.md) |
+| **SPDX 헤더** | Phase 0 sub-phase 3 으로 이관 (ruff/pre-commit 도구 셋업 후 일괄) |
+
+### §7-8 Phase 0 sub-phase 1 (5/7) — pyproject.toml + uv
+
+**컨텍스트**: ROADMAP §7.2 의 권장 스택 도입 시작. 이후 Sub-phase 2 (pre-commit + ruff) → 3 (SPDX 헤더) → 4 (GitHub Actions CI) → 5 (devcontainer) 순서.
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `pyproject.toml` 신규 — `[project]` 메타 + `dependencies` (requirements.txt 이주) + `[tool.uv] package = false` (Phase 1 의 `core/` 분리 전까지 packaging 비활성) | [pyproject.toml](../pyproject.toml) | uv / Dependabot / 보안 스캐너가 인식하는 표준 메타 |
+| `uv.lock` 생성 (1050 line, 64 packages 해석) | [uv.lock](../uv.lock) | 재현 가능한 정확한 버전 고정 |
+| pyside6_port 도 같은 패턴 — `pyside6_port/pyproject.toml` + `pyside6_port/uv.lock` (PyQt6 → PySide6 만 차이) | [pyside6_port/pyproject.toml](../pyside6_port/pyproject.toml) | 라이선스 비교 baseline 유지 |
+| README + handoff §2 install 흐름 갱신 — `uv sync` 권장, 레거시 `venv/` 도 그대로 유지 | [README.md](../README.md), 본 §2 | 사용자 muscle memory 보호 + 신규 setup 은 권장 path |
+
+**검증**:
+- core 77/77 ✅ + scenarios 72/72 ✅ (양쪽 venv 모두 — 레거시 `venv/` + uv-managed `.venv/`)
+- pyside6_port 의 `uv.lock` 은 lockfile 만 생성 (`.venv/` 미설치 — 사용자가 `uv sync` 시점에 활성화)
+
+### §7-8 Phase 0 sub-phase 2 (5/7) — pre-commit + ruff
+
+**컨텍스트**: lint + format 자동화. mypy 는 Phase 1 의 type hint 도입과 묶음.
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `pyproject.toml` 의 `[tool.ruff]` 섹션 — 보수적 ruleset (E/F/W/I) + per-file-ignores (E402 in tests/ + ui/main_window.py, F401 in element_picker.py + ws_client.py) + `[tool.ruff.format]` (double quote) | [pyproject.toml](../pyproject.toml) | 30K 라인 legacy 에 너무 엄격하게 켜는 것 회피, Phase 1 type hint 시 점진 강화 |
+| `[project.optional-dependencies].dev` — `ruff>=0.6.0` + `pre-commit>=3.7.0` | [pyproject.toml](../pyproject.toml) | `uv sync --extra dev` 로 dev 도구 일괄 설치 |
+| `.pre-commit-config.yaml` 신규 — ruff lint+format + 표준 위생 hooks (trailing-whitespace, end-of-file-fixer, large file guard 1MB) | [.pre-commit-config.yaml](../.pre-commit-config.yaml) + [pyside6_port/.pre-commit-config.yaml](../pyside6_port/.pre-commit-config.yaml) | 매 commit 자동 검증 |
+| `ruff check --fix` 1회 일괄 적용 — 520 issue 중 468 auto-fix | 코드베이스 전체 | I001 (import 정렬) 270, F541 54, W293 38, F401 105 등 자동 수정 |
+| 남은 47 manual issue 처리 — `l` → `ln` (E741), 디버그 docstring 공백 (W293), `ovr_geo`/`x_log,y_log` 미사용 변수 제거 (F841), unused `Qt` import 제거 (F401), per-file-ignore 추가 | core/import_manager.py + core/workflow_engine.py + ui/element_picker.py + main.py + tests/test_ai_integration.py | 0 lint issue 도달 |
+| `ruff format` 1회 일괄 적용 — 106 파일 reformat (double quote, indent, line break 표준화) | 코드베이스 전체 | 향후 incremental 변경만 format 검사 |
+| 3 scenarios 테스트 fix — format 으로 깨진 string-pattern matching (test_43/44/66) 을 quote/whitespace-agnostic 으로 갱신 | [tests/test_scenarios.py](../tests/test_scenarios.py) | format 무관 검증 |
+| pyside6_port sync — pyproject.toml/.pre-commit + 모든 코드 reformat (uv.lock 75 packages 재해석) | [pyside6_port/](../pyside6_port/) | 양쪽 일관성 |
+| `pre-commit install` 실행 — `.git/hooks/pre-commit` 등록 | (git config) | 매 commit 시 자동 검증 발동 |
+
+**검증**:
+- ruff check . → All checks passed! (0 issue)
+- ruff format --check . → 114 files already formatted (0 diff)
+- core 77/77 ✅ + scenarios 72/72 ✅
+- mypy 보류 (Phase 1 type hint 도입 시점에 추가)
+
+### §7-8 Phase 0 sub-phase 3 (5/8) — SPDX 헤더 일괄
+
+**컨텍스트**: 모든 `.py` 파일에 `# SPDX-License-Identifier: AGPL-3.0-or-later` 추가. 향후 dual-licensing / 법무 검토 / 외부 코드 유입 차단의 법적 근거.
+
+| 작업 | 결과 |
+|---|---|
+| 일회용 스크립트 (`.tmp_spdx_apply.py`) — shebang 다음 줄 OR 첫 줄 삽입. 제외: `venv/`, `.venv/`, `ohdo_20260505_backup/`, `packages/`, `tmp/`, `data/`, 루트 debug 스크립트 (test_click_diagnosis.py 등) | 113개 .py 파일 일괄 추가, 0 skip (이미 있는 파일 X) |
+| Python `write_text()` 가 Windows 에서 CRLF 로 쓰는 문제 → ruff format 으로 LF 통일 | 113 files reformatted |
+| 스크립트 실행 후 즉시 삭제 (`.tmp_spdx_apply.py` 정리) | 일회성 작업 정리 |
+
+**검증**:
+- 113 .py 파일 모두 SPDX 라인 포함 (grep 검증)
+- ruff check . → All checks passed!
+- ruff format --check . → 114 files already formatted
+- core 77/77 ✅ + scenarios 72/72 ✅
+
+**적용 위치 예시** (shebang 유무 분기):
+```python
+# main.py (shebang 있음):
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""AI RPA Solution - Main Entry Point ..."""
+
+# core/app_service.py (shebang 없음):
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""UI·서버 공용 애플리케이션 진입점 (Facade) ..."""
+```
+
+### §7-8 Phase 0 sub-phase 4 (5/8) — GitHub Actions CI
+
+**컨텍스트**: 매 push / PR 마다 자동 회귀 가드. main 머지 전 lint + test 통과 강제.
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `.github/workflows/ci.yml` 신규 — 3 job 매트릭스: `lint`(ubuntu) + `test-ubuntu` + `test-windows` | [.github/workflows/ci.yml](../.github/workflows/ci.yml) | push/PR 자동 검증 |
+| `lint` job — `ruff check .` + `ruff format --check .` (빠른 피드백, ~30s) | (위 파일) | lint 실패 시 test job 차단 (`needs: lint`) |
+| `test-ubuntu` job — Qt system deps (libgl1/libegl1/libxkbcommon0/libdbus-1-3/libfontconfig1/libxcb-cursor0) + `QT_QPA_PLATFORM=offscreen` 환경 + uv sync + core/scenarios 실행 | (위 파일) | cross-platform 회귀 검증 (Phase 1+ backend Linux 호환성 사전 확보) |
+| `test-windows` job — uv sync + core/scenarios (pywinauto/pyautogui 의존성 native 검증) | (위 파일) | Windows-specific 동작 검증 |
+| 테스트 결과 artifact 업로드 — `tests/results/*.json` 14일 보관 | (위 파일) | CI 실패 시 결과 디버그 가능 |
+| README CI 배지 추가 — CI status / AGPL v3 / Python 3.12+ | [README.md](../README.md) | 프로젝트 상태 visibility |
+
+**보류**:
+- `ai_integration` suite — Gemini CLI 셋업 + API key secret 필요 (로컬 수동 유지)
+- GUI 자동화 suite (notepad/calculator/browser) — Windows GUI 환경 필수
+- `pyside6_port` — venv 미설치 (사용자 수동 셋업). CI 미포함
+
+**검증** (로컬):
+- ruff check . → All checks passed!
+- ruff format --check . → 114 files already formatted
+- `uv run python -m tests.test_runner --suite core` → 77/77 ✅
+- `uv run python -m tests.test_runner --suite scenarios` → 72/72 ✅
+- ci.yml YAML 유효성 검증
+
+**최초 commit / push 시**:
+- GitHub Actions 가 자동 트리거됨. 첫 ubuntu test 가 PyQt6 system deps 누락 등 환경 문제로 fail 할 수 있음 → 그땐 `apt-get install` 라인 보강.
+
+### §7-8 Phase 0 sub-phase 5 (5/8) — Dev Container
+
+**컨텍스트**: cross-platform 개발 환경 표준화 마무리. 클릭 한 번에 동일 환경 (Codespaces / VS Code Dev Containers).
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `.devcontainer/devcontainer.json` 신규 — Python 3.12 (mcr.microsoft.com/devcontainers/python:1-3.12-bookworm) + uv (astral-sh/uv:0 feature) + Qt system deps | [.devcontainer/devcontainer.json](../.devcontainer/devcontainer.json) | Codespaces / VS Code Dev Containers 표준 환경 |
+| postCreateCommand — apt-get install Qt deps + `uv sync --extra dev` + `pre-commit install` | (위 파일) | 컨테이너 첫 부팅 시 의존성 + dev 도구 + git hook 자동 셋업 |
+| VS Code 확장 5종 — Python / Pylance / Ruff / GitLens / even-better-toml | (위 파일) | 일관된 에디터 경험 |
+| editor 설정 — ruff 가 default formatter, formatOnSave, codeActionsOnSave (organize imports + auto fix) | (위 파일) | 매 저장 시 자동 lint/format |
+| `QT_QPA_PLATFORM=offscreen` 환경변수 — headless Qt 모듈 import 호환 | (위 파일) | 컨테이너에서 ui_v2 모듈 import 정상 |
+| README Codespaces 배지 + 설치 (Codespaces / Dev Container) 섹션 + 2분할 전략 명시 | [README.md](../README.md) | 신규 기여자 진입점 |
+
+**2분할 전략 (ROADMAP §7.2)**:
+- 컨테이너 (Linux) = `core/` + 미래 `backend/` + `web/` 개발 + `core` / `scenarios` 테스트
+- 로컬 Windows = `pywinauto` / `pyautogui` 의존하는 GUI 자동화 테스트 + 데스크톱 앱 실행
+
+**검증**:
+- devcontainer.json JSON 유효성 (jsonc 주석 strip 후 파싱) ✅
+- ruff check . → All checks passed!
+- ruff format --check . → 114 files already formatted
+- core 77/77 ✅ + scenarios 72/72 ✅
+
+### Phase 0 (§7-8) 완료 체크리스트
+
+- [x] **Sub-phase 1**: `pyproject.toml` + `uv` (5/7)
+- [x] **Sub-phase 2**: `pre-commit` + `ruff` (lint+format) (5/7)
+- [x] **Sub-phase 3**: SPDX 헤더 일괄 (5/8)
+- [x] **Sub-phase 4**: GitHub Actions CI (5/8)
+- [x] **Sub-phase 5**: `.devcontainer/` (5/8)
+- [ ] **structlog + Sentry** — ROADMAP Phase 0 의 observability layer. Phase 0 후반 또는 Phase 1 초반에 별도 작업.
+- [ ] **mypy 도입** — Phase 1 의 "core/* 타입 힌트 완성" 마일스톤과 묶음.
+
+### Phase 1 sub-task 1 (5/8) — 저장소 추상화 강화 + AppService leak 제거
+
+**컨텍스트**: ROADMAP §3 Phase 1 (1) 시작. 데스크톱 앱과 향후 backend (PostgresRepository) 가 **동일한 `core/`** 를 공유하도록 저장소 인터페이스 정리.
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `SessionRepository(ABC)` 에 `export_session_as_project()` + `import_session_folder()` abstract 메서드 추가 | [core/storage/base.py](../core/storage/base.py) | 모든 backend 가 export/import contract 준수 (NotImplementedError 가능) |
+| `CaptureStore(ABC)` 신규 — `resolve_capture_path` / `list_captures_for_session` / `delete_capture` | (위 파일) | Phase 2 의 S3CaptureStore 진입로. 실제 capture 쓰기 경로 마이그레이션은 Phase 2 일괄 |
+| `LocalCaptureStore` 신규 — filesystem 기반 구현 | [core/storage/local_capture.py](../core/storage/local_capture.py) | CaptureStore contract 준수 |
+| `InMemoryRepository` 신규 — 테스트 가속용 (file IO 없음) | [core/storage/in_memory.py](../core/storage/in_memory.py) | tempdir 기반 테스트 대비 빠름. ROADMAP "테스트 전략" 항목 충족 |
+| `LocalJsonRepository` 에 `export_session_as_project` / `import_session_folder` 메서드 추가 (manager 위임) | [core/storage/local_json.py](../core/storage/local_json.py) | 새 abstract 메서드 구현 |
+| `AppService` 의 `getattr(self._repo, "manager", None)` **leak 2 곳 제거** — `export_workflow` / `import_workflow` / `reorder_step` 모두 abstraction 만 사용 | [core/app_service.py](../core/app_service.py) | Phase 2 PostgresRepository 가 manager 속성 없이도 작동 |
+| `reorder_step` 의 `_renumber_steps` 호출 → 인라인 (3 줄) | (위 파일) | private 메서드 의존 제거 |
+| test_78 (InMemoryRepository contract) + test_79 (AppService leak 차단) 추가 | [tests/test_core.py](../tests/test_core.py) | 회귀 가드 |
+
+**검증**:
+- core 79/79 ✅ (test_78 + test_79 신규)
+- scenarios 72/72 ✅
+- ruff check 0 issue + format 0 diff
+- PySide6 port sync 완료 (5 파일)
+
+### Phase 1 sub-task 2 Chunk A (5/8) — UI-Core 분리: ui_v2 정리
+
+**컨텍스트**: ROADMAP §3 Phase 1 (2) KPI: "ui/ 폴더에서 session_manager · workflow_engine · ai_engine 직접 import 0건". 큰 작업이라 2 chunk 분할:
+- **Chunk A** (5/8 완료): ui_v2 의 5 import 정리 + AppService 인터페이스 확장
+- **Chunk B** (예정): ui/ legacy 의 12+ import 정리 + main_window.py 1649 → 600줄 축소
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `AppService` 가 `Session/Step/SessionSummary` + `ExecutionKernel/StepResult` re-export | [core/app_service.py](../core/app_service.py) | UI 가 `core.session_manager` / `core.execution_kernel` 직접 import 안 해도 됨 |
+| `AppService.create_default(data_dir, settings)` classmethod 추가 | (위 파일) | LocalJsonRepository + AIEngineManager 일괄 생성. UI 가 storage/ai_engine 직접 import 안 함 |
+| `AppService.reload_ai(settings)` + `create_kernel()` factory 메서드 | (위 파일) | settings 변경 시 AI 재초기화, 세션별 kernel 생성 모두 facade 경유 |
+| ui_v2/main_window_v2.py 의 5 banned import 모두 제거 — 모든 import 가 `core.app_service` 경유 | [ui_v2/main_window_v2.py](../ui_v2/main_window_v2.py) | KPI 충족 |
+| 함수 내부 `from core.session_manager import Step` → 모듈 상단 `from core.app_service import Step` | (위 파일) | local import 도 정리 |
+| test_80 (ui_v2 banned import 0건 + AppService re-export + factory 메서드 검증) 추가 | [tests/test_core.py](../tests/test_core.py) | KPI 자동 가드 |
+
+**검증**:
+- core 80/80 ✅ (test_80 신규)
+- scenarios 72/72 ✅
+- ruff check 0 issue + format 0 diff
+- PySide6 port sync 완료
+
+### Phase 1 sub-task 5 (5/8) — Agent 브리지 스켈레톤
+
+**컨텍스트**: ROADMAP §3 Phase 1 (5) 의 마지막 결산. agent/ 의 두 항목 평가:
+
+| 항목 | ROADMAP 의도 | 실제 상태 |
+|---|---|---|
+| `agent/runner.py` — WorkflowEngine 감싸 원격 명령 수신 | no-op 스켈레톤 | ✅ **이미 초과 달성** — 827 line, M2.10 까지 완성. ExecutionRunner 가 `execution.start`/`execution.cancel` WS 프레임 처리, capture 업로드, mid-run cancel 등 모두 동작 |
+| `agent/bridge.py` — 로컬 HTTP/WS 브리지 (no-op) | no-op 스켈레톤 | ❌ 미작성 → 5/8 추가 |
+
+**(외 부수적 컴포넌트)**: `agent/agent_main.py` (623), `agent/auth.py` (386 — device flow), `agent/ws_client.py` (319 — cloud → agent WS) 도 이미 운영급 구현 완료.
+
+| 변경 | 위치 |
+|---|---|
+| `agent/bridge.py` 신규 — `LocalBridge` 클래스 (no-op contract). `register_handler` / `start(port)` / `stop()` / `is_running` / `port` / `list_actions` / `get_handler` | [agent/bridge.py](../agent/bridge.py) |
+| 미래 사용 시나리오 명시 — Phase 3 의 `ohdo://session/<id>` URL scheme 처리, desktop UI ↔ agent IPC, 외부 도구 (VS Code 확장 등) | (위 파일 docstring) |
+| scenarios test_73 (LocalBridge contract 가드) 추가 — 인스턴스화 + handler 등록/조회 + 잘못된 입력 ValueError + start/stop 토글 | [tests/test_scenarios.py](../tests/test_scenarios.py) |
+| pyside6_port sync — agent/ 폴더 전체 복사 (Qt 의존성 없음, cp 가능) | [pyside6_port/agent/](../pyside6_port/agent/) |
+
+**검증**:
+- core 80/80 ✅
+- scenarios 73/73 ✅ (test_73 신규)
+- ruff 0 issue + format 0 diff
+- PySide6 port sync 완료
+
+### Phase 1 sub-task 4 (5/8) — 설정 레이어 (Pydantic Settings)
+
+**컨텍스트**: ROADMAP §3 Phase 1 (4) — `config/settings.json` 의 dict 기반 → Pydantic v2 `Settings` 모델 + `.env` / 환경변수 병합. 비파괴 도입 (기존 `_load_settings() -> dict` callers 유지).
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `pydantic-settings>=2.0.0` 의존성 추가 | [pyproject.toml](../pyproject.toml) | typed Settings + .env 병합 도구 |
+| `core/config.py` 신규 — 10 섹션 모델 (AI/Image/Recognition/Execution/VisualFeedback/UI/OutputProject/Logging/Hints/ElementPicker) + `Settings(BaseSettings)` 최상위 | [core/config.py](../core/config.py) | 타입 안전 접근, IDE 자동완성, validation |
+| `load_settings(path) -> Settings` + `load_settings_dict(path) -> dict` (legacy 호환) + `save_settings(s, path)` | (위 파일) | 신/구 callers 양쪽 cover |
+| `settings_customise_sources` override — env > dotenv > init(JSON) > secrets > defaults 우선순위 | (위 파일) | 사용자가 `.env` / shell 로 settings.json 값 override 가능 (CI/Docker 친화) |
+| 모든 섹션 모델에 `extra="allow"` — 미정의 키 보존 (forward compat, settings.json 새 필드 추가 시 모델 갱신 전이라도 무손실) | (위 파일) | breaking change 회피 |
+| test_81 (Settings 모델 + JSON load + env override + save 라운드트립 + extra=allow forward compat) 추가 | [tests/test_core.py](../tests/test_core.py) | 회귀 가드 |
+
+**비파괴 정책**:
+- 기존 `_load_settings()` patterns (ui/, ui_v2/) 그대로 작동 — `load_settings_dict()` 가 동일한 dict 반환
+- 신규 코드는 `from core.config import load_settings; s = load_settings(); s.execution.step_delay_ms` typed access 권장
+- Phase 2 backend 가 같은 `Settings` 모델을 FastAPI 의존성 주입에 활용 가능
+
+**환경변수 override 예**:
+- `OHDO_AI__SELECTED=openai_compat` → `s.ai.selected`
+- `OHDO_EXECUTION__STEP_DELAY_MS=2000` → `s.execution.step_delay_ms`
+- `OHDO_UI__THEME=dark` → `s.ui.theme`
+
+**검증**:
+- core 81/81 ✅ (test_81 신규)
+- scenarios 73/73 ✅
+- ruff 0 issue + format 0 diff
+- pydantic-settings 양 venv (legacy + uv-managed) 설치 완료
+- PySide6 port sync 완료 (uv.lock 76 packages 재해석)
+
+### Phase 1 sub-task 3 (5/8) — Pydantic 모델 승격 (옵션 B parallel)
+
+**컨텍스트**: ROADMAP §3 Phase 1 (3) — dataclass (Session/Step/Capture 등) → Pydantic v2. 비파괴 도입 정책 채택 (옵션 B):
+- 기존 dataclass 유지 — 사용자 JSON 데이터 + 모든 callers 무손상
+- 신규 Pydantic 모델은 **API 경계용** (Phase 2 FastAPI `response_model` 즉시 활용 가능)
+- `from_dataclass()` / `to_dataclass()` 변환 helper
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `core/models.py` 신규 — 7 Pydantic 모델 (CaptureModel/PromptLogModel/ExecutionResultModel/ConversationMessageModel/StepModel/SessionModel/SessionSummaryModel) | [core/models.py](../core/models.py) | dataclass 와 동일 필드 + 기본값 + `extra="allow"` (forward compat) |
+| `from_dataclass(instance)` / `to_dataclass(model)` 변환 helper | (위 파일) | dataclass ↔ 모델 양방향. `_DATACLASS_TO_MODEL` 매핑 dict |
+| 매핑 안 된 타입은 `TypeError` (잘못 호출 시 명시적 fail) | (위 파일) | 안전성 |
+| `model_dump()` 결과 = `asdict(dataclass)` 결과 (JSON wire format 동일) | (검증 by test) | Phase 2 backend 의 `response_model` 호환 보장 |
+| test_82 (round-trip + JSON 직렬화 + extra=allow + TypeError) 추가 | [tests/test_core.py](../tests/test_core.py) | 회귀 가드 |
+
+**API 경계 활용 예** (Phase 2 진입 시):
+```python
+# FastAPI 백엔드
+from core.models import SessionModel, StepModel, from_dataclass
+
+@app.get("/sessions/{sid}", response_model=SessionModel)
+async def get_session(sid: str):
+    session = repo.load_session(sid)  # dataclass
+    return from_dataclass(session)    # SessionModel
+```
+
+**비파괴 검증**:
+- 기존 dataclass 호출 사이트 (수십 개) 전혀 변경 X
+- 사용자 data/sessions/ JSON 파일 호환성 유지
+- `model_dump()` ↔ `asdict()` 라운드트립 손실 0
+
+**검증**:
+- core 82/82 ✅ (test_82 신규)
+- scenarios 73/73 ✅
+- ruff 0 issue + format 0 diff
+- PySide6 port sync 완료
+
+### Phase 1 진행 체크리스트 (ROADMAP §3 Phase 1)
+
+- [x] (1) 저장소 추상화 `core/storage/` — 5/8 완료
+- [ ] (2) UI-Core 완전 분리 — **Chunk A 완료** (ui_v2). Chunk B (ui/ legacy) 만 남음
+- [x] (3) Pydantic 모델 승격 — 5/8 완료 (parallel 모델 + 변환 helper)
+- [x] (4) 설정 레이어 분리 — 5/8 완료
+- [x] (5) Agent 브리지 스켈레톤 — 5/8 완료
+
+**Phase 1 진행률: 4/5 + Chunk A 부분** — Chunk B (ui/ legacy 정리) 만 남으면 Phase 1 완료. Phase 2 진입 직전 [docs/commercial_review.md](commercial_review.md) 재독 필수.
+
+### 다음 작업 후보
+- **Phase 1 sub-task 2 Chunk B (ui/ legacy 정리)** — Phase 1 의 마지막 핵심. ui/main_window.py 7 import + handler 들 정리 → main_window.py 1649 → 600줄 축소가 stretch goal. multi-step 분할 권장.
+- **structlog + Sentry SDK** (ROADMAP Phase 0 후반) — observability layer
+- **§7-10**: AI 자동 에러 복구 — 사용자 보류 중
+
+### ⚠️ Phase 2 (SaaS 백엔드) 진입 직전 필독 문서
+
+[docs/commercial_review.md](commercial_review.md) — 5/8 작성. ohdo 의 상업적 경쟁력 정직 진단 + Computer Use / UiPath / 기타 RPA 와의 비교 + GO/NO-GO 게이트 제안. **Phase 1 완료 직후 / Phase 2 진입 결정 전 반드시 재독.** Phase 1 까지는 어느 시나리오든 가치 있어 진행 OK.
 
 ## 9. 자주 하는 실수 / 주의사항
 

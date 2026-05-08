@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 Gemini CLI 어댑터
 
@@ -6,16 +7,15 @@ PowerShell을 사용하지 않고 직접 호출하여 인코딩/따옴표 문제
 """
 
 import os
-import sys
-import time
 import shutil
-import tempfile
 import subprocess
+import tempfile
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
 
-from .base_adapter import BaseAIAdapter, AIResponse
+from .base_adapter import AIResponse, BaseAIAdapter
 
 
 class GeminiCLIAdapter(BaseAIAdapter):
@@ -37,7 +37,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
         # default 가 preview 모델로 잡혀 capacity 부족 회귀).
         self.model = config.get("model", "")
         self._proc: Optional[subprocess.Popen] = None  # 실행 중인 서브프로세스
-        self._cancelled: bool = False                   # 사용자 취소 플래그
+        self._cancelled: bool = False  # 사용자 취소 플래그
 
     def _build_args(self, gemini_exec: str, *extra: str) -> list:
         """gemini 실행 인자 빌드 — model 설정 시 -m 추가."""
@@ -64,11 +64,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
         """gemini 명령어가 시스템 PATH에 존재하는지 확인합니다."""
         return shutil.which(self.command) is not None
 
-    async def generate(
-        self,
-        prompt: str,
-        images: Optional[list[str]] = None
-    ) -> AIResponse:
+    async def generate(self, prompt: str, images: Optional[list[str]] = None) -> AIResponse:
         """
         Gemini CLI를 통해 프롬프트를 전송하고 응답을 받습니다.
         """
@@ -79,14 +75,17 @@ class GeminiCLIAdapter(BaseAIAdapter):
         if not gemini_exec:
             return AIResponse(
                 success=False,
-                error=f"'{self.command}' 명령어를 찾을 수 없습니다. Gemini CLI를 설치해주세요."
+                error=f"'{self.command}' 명령어를 찾을 수 없습니다. Gemini CLI를 설치해주세요.",
             )
 
         sandbox_dir = None
 
         try:
             # 샌드박스 디렉터리 생성
-            sandbox_dir = Path(tempfile.gettempdir()) / f"gemini_rpa_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+            sandbox_dir = (
+                Path(tempfile.gettempdir())
+                / f"gemini_rpa_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+            )
             sandbox_dir.mkdir(parents=True, exist_ok=True)
 
             # 이미지 첨부가 있는 경우 프롬프트 앞에 추가
@@ -108,8 +107,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
 
             try:
                 with tempfile.NamedTemporaryFile(
-                    mode='w', suffix='.txt', delete=False,
-                    encoding='utf-8', dir=str(sandbox_dir)
+                    mode="w", suffix=".txt", delete=False, encoding="utf-8", dir=str(sandbox_dir)
                 ) as f:
                     f.write(full_prompt)
                     prompt_file = f.name
@@ -119,13 +117,11 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    encoding='utf-8',
-                    cwd=str(sandbox_dir)
+                    encoding="utf-8",
+                    cwd=str(sandbox_dir),
                 )
                 try:
-                    stdout, stderr = self._proc.communicate(
-                        input=full_prompt, timeout=self.timeout
-                    )
+                    stdout, stderr = self._proc.communicate(input=full_prompt, timeout=self.timeout)
                     returncode = self._proc.returncode
                     raw_output = (stdout or "").strip()
                     stderr_output = (stderr or "").strip()
@@ -146,9 +142,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
             # 취소된 경우 즉시 반환
             if self._cancelled:
                 return AIResponse(
-                    success=False,
-                    cancelled=True,
-                    error="사용자가 요청을 취소했습니다."
+                    success=False, cancelled=True, error="사용자가 요청을 취소했습니다."
                 )
 
             elapsed_ms = int((time.time() - start_time) * 1000)
@@ -162,8 +156,8 @@ class GeminiCLIAdapter(BaseAIAdapter):
                         self._build_args(gemini_exec, "-p", full_prompt),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        encoding='utf-8',
-                        cwd=str(sandbox_dir)
+                        encoding="utf-8",
+                        cwd=str(sandbox_dir),
                     )
                     try:
                         stdout, stderr = self._proc.communicate(timeout=self.timeout)
@@ -179,9 +173,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
 
                     if self._cancelled:
                         return AIResponse(
-                            success=False,
-                            cancelled=True,
-                            error="사용자가 요청을 취소했습니다."
+                            success=False, cancelled=True, error="사용자가 요청을 취소했습니다."
                         )
                     elapsed_ms = int((time.time() - start_time) * 1000)
 
@@ -212,7 +204,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
                     raw_response=error_msg,
                     response_time_ms=elapsed_ms,
                     success=False,
-                    error=f"Gemini CLI 오류 (코드 {returncode}): {error_msg[:500]}"
+                    error=f"Gemini CLI 오류 (코드 {returncode}): {error_msg[:500]}",
                 )
 
         except subprocess.TimeoutExpired:
@@ -220,7 +212,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
             return AIResponse(
                 response_time_ms=elapsed_ms,
                 success=False,
-                error=f"Gemini CLI 응답 시간 초과 ({self.timeout}초)"
+                error=f"Gemini CLI 응답 시간 초과 ({self.timeout}초)",
             )
 
         except Exception as e:
@@ -228,7 +220,7 @@ class GeminiCLIAdapter(BaseAIAdapter):
             return AIResponse(
                 response_time_ms=elapsed_ms,
                 success=False,
-                error=f"Gemini CLI 실행 중 예외: {str(e)}"
+                error=f"Gemini CLI 실행 중 예외: {str(e)}",
             )
 
         finally:

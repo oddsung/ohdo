@@ -1,22 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 세션 목록 패널
 
 저장된 세션들을 표시하고 선택/삭제할 수 있는 패널입니다.
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLabel, QPushButton, QLineEdit, QFrame
-)
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class SessionListPanel(QWidget):
     """세션 목록 패널"""
 
-    session_selected = Signal(str)              # 세션 선택 시그널
-    session_delete_requested = Signal(str)      # 세션 삭제 요청 시그널
+    session_selected = Signal(str)  # 세션 선택 시그널
+    session_delete_requested = Signal(str)  # 세션 삭제 요청 시그널
 
     def __init__(self, parent=None):
         super().__init__(parent)

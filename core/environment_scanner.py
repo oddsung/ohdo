@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 환경 스캐너 모듈
 
@@ -5,17 +6,17 @@
 컴퓨터별 환경 설정을 저장하고 로드하여 중복 스캔을 방지합니다.
 """
 
-import sys
-import os
-import json
-import subprocess
-import platform
 import hashlib
+import json
+import os
+import platform
 import shutil
-from pathlib import Path
-from datetime import datetime
-from typing import Optional, Dict, List, Tuple
+import subprocess
+import sys
 import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 
 class EnvironmentScanner:
@@ -33,9 +34,7 @@ class EnvironmentScanner:
         ("pywin32", "win32api"),
     ]
     REQUIRED_PACKAGES = (
-        _COMMON_PACKAGES + _WINDOWS_ONLY_PACKAGES
-        if sys.platform == "win32"
-        else _COMMON_PACKAGES
+        _COMMON_PACKAGES + _WINDOWS_ONLY_PACKAGES if sys.platform == "win32" else _COMMON_PACKAGES
     )
 
     # 선택적 패키지 (없어도 실행 가능)
@@ -69,17 +68,18 @@ class EnvironmentScanner:
 
         # MAC 주소 추가 (가능한 경우)
         try:
-            mac = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff)
-                          for ele in range(0, 48, 8)][::-1])
+            mac = ":".join(
+                ["{:02x}".format((uuid.getnode() >> ele) & 0xFF) for ele in range(0, 48, 8)][::-1]
+            )
             info_parts.append(mac)
         except Exception as e:
             # uuid.getnode() 가 매우 드물게 실패할 수 있음 — 호스트명/CPU 만으로도 ID 안정적
             print(f"[DEBUG] MAC 주소 수집 실패 (무시됨): {e}")
 
         # 사용자 이름 추가
-        info_parts.append(os.environ.get('USERNAME', os.environ.get('USER', '')))
+        info_parts.append(os.environ.get("USERNAME", os.environ.get("USER", "")))
 
-        combined = '|'.join(info_parts)
+        combined = "|".join(info_parts)
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     def load_saved_environment(self) -> Optional[Dict]:
@@ -88,16 +88,16 @@ class EnvironmentScanner:
             return None
 
         try:
-            with open(self.env_file, 'r', encoding='utf-8') as f:
+            with open(self.env_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             # 현재 컴퓨터의 환경인지 확인
-            saved_machine_id = data.get('machine_id')
+            saved_machine_id = data.get("machine_id")
             current_machine_id = self.get_machine_id()
 
             if saved_machine_id == current_machine_id:
                 # 추가 검증: Python 경로가 존재하는지 확인
-                python_path = data.get('python_path')
+                python_path = data.get("python_path")
                 if python_path and os.path.exists(python_path):
                     return data
                 else:
@@ -107,8 +107,10 @@ class EnvironmentScanner:
                     return None
             else:
                 # 다른 컴퓨터의 환경 - 파일 삭제 후 새로 스캔 필요
-                saved_hostname = data.get('hostname', 'unknown')
-                print(f"[INFO] 다른 컴퓨터의 환경 설정 감지 (호스트: {saved_hostname}). 환경 파일을 삭제하고 새로 스캔합니다.")
+                saved_hostname = data.get("hostname", "unknown")
+                print(
+                    f"[INFO] 다른 컴퓨터의 환경 설정 감지 (호스트: {saved_hostname}). 환경 파일을 삭제하고 새로 스캔합니다."
+                )
                 self._delete_environment_file()
                 return None
 
@@ -129,11 +131,11 @@ class EnvironmentScanner:
     def save_environment(self, env_data: Dict) -> bool:
         """환경 설정 저장"""
         try:
-            env_data['machine_id'] = self.get_machine_id()
-            env_data['last_scan'] = datetime.now().isoformat()
-            env_data['hostname'] = platform.node()
+            env_data["machine_id"] = self.get_machine_id()
+            env_data["last_scan"] = datetime.now().isoformat()
+            env_data["hostname"] = platform.node()
 
-            with open(self.env_file, 'w', encoding='utf-8') as f:
+            with open(self.env_file, "w", encoding="utf-8") as f:
                 json.dump(env_data, f, ensure_ascii=False, indent=2)
 
             self._cached_env = env_data
@@ -151,10 +153,9 @@ class EnvironmentScanner:
         """
         try:
             result = subprocess.run(
-                [python_path, '--version'],
-                capture_output=True, text=True, timeout=timeout
+                [python_path, "--version"], capture_output=True, text=True, timeout=timeout
             )
-            return result.stdout.strip().replace('Python ', '') or "unknown"
+            return result.stdout.strip().replace("Python ", "") or "unknown"
         except (subprocess.SubprocessError, OSError, UnicodeDecodeError) as e:
             print(f"[DEBUG] Python 버전 조회 실패 ({python_path}): {e}")
             return "unknown"
@@ -171,45 +172,44 @@ class EnvironmentScanner:
             - detail: 사람이 읽을 수 있는 추가 메시지 (옵션)
         """
         result: Dict = {
-            'installed': False,
-            'command': command,
-            'path': None,
-            'version': None,
-            'error': None,
-            'detail': None,
+            "installed": False,
+            "command": command,
+            "path": None,
+            "version": None,
+            "error": None,
+            "detail": None,
         }
 
         path = shutil.which(command)
         if not path:
-            result['error'] = 'not_found'
-            result['detail'] = f"PATH 에서 '{command}' 를 찾을 수 없습니다."
+            result["error"] = "not_found"
+            result["detail"] = f"PATH 에서 '{command}' 를 찾을 수 없습니다."
             return result
 
-        result['path'] = path
+        result["path"] = path
 
         try:
             proc = subprocess.run(
-                [path, '--version'],
-                capture_output=True, text=True, timeout=timeout
+                [path, "--version"], capture_output=True, text=True, timeout=timeout
             )
         except subprocess.TimeoutExpired:
-            result['error'] = 'timeout'
-            result['detail'] = f"'{command} --version' 이 {timeout}초 안에 응답하지 않았습니다."
+            result["error"] = "timeout"
+            result["detail"] = f"'{command} --version' 이 {timeout}초 안에 응답하지 않았습니다."
             return result
         except (OSError, UnicodeDecodeError) as e:
-            result['error'] = 'execution_error'
-            result['detail'] = f"실행 중 오류: {e}"
+            result["error"] = "execution_error"
+            result["detail"] = f"실행 중 오류: {e}"
             return result
 
         if proc.returncode != 0:
-            result['error'] = 'non_zero_exit'
-            stderr_tail = (proc.stderr or '').strip().splitlines()[-1:] or ['']
-            result['detail'] = f"종료 코드 {proc.returncode}: {stderr_tail[0]}"
+            result["error"] = "non_zero_exit"
+            stderr_tail = (proc.stderr or "").strip().splitlines()[-1:] or [""]
+            result["detail"] = f"종료 코드 {proc.returncode}: {stderr_tail[0]}"
             return result
 
-        version = (proc.stdout or proc.stderr or '').strip()
-        result['installed'] = True
-        result['version'] = version or 'unknown'
+        version = (proc.stdout or proc.stderr or "").strip()
+        result["installed"] = True
+        result["version"] = version or "unknown"
         return result
 
     def find_python_paths(self) -> List[Dict]:
@@ -218,59 +218,68 @@ class EnvironmentScanner:
 
         # 1. 현재 실행 중인 Python
         current_python = {
-            'path': sys.executable,
-            'version': platform.python_version(),
-            'is_current': True,
-            'is_venv': hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix),
-            'exists': os.path.exists(sys.executable)
+            "path": sys.executable,
+            "version": platform.python_version(),
+            "is_current": True,
+            "is_venv": hasattr(sys, "real_prefix")
+            or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix),
+            "exists": os.path.exists(sys.executable),
         }
         python_paths.append(current_python)
 
         # 2. PATH에서 python 검색
-        for name in ['python', 'python3', 'py']:
+        for name in ["python", "python3", "py"]:
             path = shutil.which(name)
             if path and path != sys.executable and os.path.exists(path):
-                python_paths.append({
-                    'path': path,
-                    'version': self._probe_python_version(path),
-                    'is_current': False,
-                    'is_venv': False,
-                    'exists': True
-                })
+                python_paths.append(
+                    {
+                        "path": path,
+                        "version": self._probe_python_version(path),
+                        "is_current": False,
+                        "is_venv": False,
+                        "exists": True,
+                    }
+                )
 
         # 3. 일반적인 설치 위치 검색 (Windows)
         common_locations = [
-            Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Python',
-            Path('C:/Python'),
-            Path('C:/Program Files/Python'),
-            Path(os.environ.get('USERPROFILE', '')) / 'AppData' / 'Local' / 'Programs' / 'Python',
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python",
+            Path("C:/Python"),
+            Path("C:/Program Files/Python"),
+            Path(os.environ.get("USERPROFILE", "")) / "AppData" / "Local" / "Programs" / "Python",
         ]
 
         for base_path in common_locations:
             if base_path.exists():
                 for subdir in base_path.iterdir():
                     if subdir.is_dir():
-                        python_exe = subdir / 'python.exe'
-                        if python_exe.exists() and str(python_exe) not in [p['path'] for p in python_paths]:
-                            python_paths.append({
-                                'path': str(python_exe),
-                                'version': self._probe_python_version(str(python_exe)),
-                                'is_current': False,
-                                'is_venv': False,
-                                'exists': True
-                            })
+                        python_exe = subdir / "python.exe"
+                        if python_exe.exists() and str(python_exe) not in [
+                            p["path"] for p in python_paths
+                        ]:
+                            python_paths.append(
+                                {
+                                    "path": str(python_exe),
+                                    "version": self._probe_python_version(str(python_exe)),
+                                    "is_current": False,
+                                    "is_venv": False,
+                                    "exists": True,
+                                }
+                            )
 
         # 4. 프로젝트 내 venv 검색
         project_root = Path(__file__).parent.parent
-        venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
-        if venv_python.exists() and str(venv_python) not in [p['path'] for p in python_paths]:
-            python_paths.append({
-                'path': str(venv_python),
-                'version': self._probe_python_version(str(venv_python)),
-                'is_current': False,
-                'is_venv': True,
-                'exists': True
-            })
+        venv_python = project_root / "venv" / "Scripts" / "python.exe"
+        if venv_python.exists() and str(venv_python) not in [p["path"] for p in python_paths]:
+            python_paths.append(
+                {
+                    "path": str(venv_python),
+                    "version": self._probe_python_version(str(venv_python)),
+                    "is_current": False,
+                    "is_venv": True,
+                    "exists": True,
+                }
+            )
 
         return python_paths
 
@@ -278,18 +287,26 @@ class EnvironmentScanner:
         """특정 Python 경로에서 패키지 설치 여부 확인"""
         try:
             result = subprocess.run(
-                [python_path, '-c', f'import {import_name}; print("OK")'],
-                capture_output=True, text=True, timeout=10
+                [python_path, "-c", f'import {import_name}; print("OK")'],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
-            installed = result.returncode == 0 and 'OK' in result.stdout
+            installed = result.returncode == 0 and "OK" in result.stdout
 
             # 버전 확인 시도
             version = None
             if installed:
                 try:
                     ver_result = subprocess.run(
-                        [python_path, '-c', f'import {import_name}; print(getattr({import_name}, "__version__", "unknown"))'],
-                        capture_output=True, text=True, timeout=10
+                        [
+                            python_path,
+                            "-c",
+                            f'import {import_name}; print(getattr({import_name}, "__version__", "unknown"))',
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                     version = ver_result.stdout.strip()
                 except (subprocess.SubprocessError, OSError, UnicodeDecodeError) as e:
@@ -297,61 +314,57 @@ class EnvironmentScanner:
                     print(f"[DEBUG] {package_name} 버전 조회 실패 (무시됨): {e}")
 
             return {
-                'package': package_name,
-                'import_name': import_name,
-                'installed': installed,
-                'version': version,
-                'error': None
+                "package": package_name,
+                "import_name": import_name,
+                "installed": installed,
+                "version": version,
+                "error": None,
             }
 
         except subprocess.TimeoutExpired:
             return {
-                'package': package_name,
-                'import_name': import_name,
-                'installed': False,
-                'version': None,
-                'error': 'timeout'
+                "package": package_name,
+                "import_name": import_name,
+                "installed": False,
+                "version": None,
+                "error": "timeout",
             }
         except Exception as e:
             return {
-                'package': package_name,
-                'import_name': import_name,
-                'installed': False,
-                'version': None,
-                'error': str(e)
+                "package": package_name,
+                "import_name": import_name,
+                "installed": False,
+                "version": None,
+                "error": str(e),
             }
 
     def check_all_packages(self, python_path: str) -> Dict[str, List[Dict]]:
         """모든 필수/선택 패키지 상태 확인"""
-        results = {
-            'required': [],
-            'optional': [],
-            'all_required_installed': True
-        }
+        results = {"required": [], "optional": [], "all_required_installed": True}
 
         for pkg, imp in self.REQUIRED_PACKAGES:
             status = self.check_package(python_path, pkg, imp)
-            results['required'].append(status)
-            if not status['installed']:
-                results['all_required_installed'] = False
+            results["required"].append(status)
+            if not status["installed"]:
+                results["all_required_installed"] = False
 
         for pkg, imp in self.OPTIONAL_PACKAGES:
             status = self.check_package(python_path, pkg, imp)
-            results['optional'].append(status)
+            results["optional"].append(status)
 
         return results
 
     def get_system_info(self) -> Dict:
         """시스템 정보 수집"""
         return {
-            'os': platform.system(),
-            'os_version': platform.version(),
-            'os_release': platform.release(),
-            'architecture': platform.machine(),
-            'processor': platform.processor(),
-            'hostname': platform.node(),
-            'username': os.environ.get('USERNAME', os.environ.get('USER', 'unknown')),
-            'python_version': platform.python_version(),
+            "os": platform.system(),
+            "os_version": platform.version(),
+            "os_release": platform.release(),
+            "architecture": platform.machine(),
+            "processor": platform.processor(),
+            "hostname": platform.node(),
+            "username": os.environ.get("USERNAME", os.environ.get("USER", "unknown")),
+            "python_version": platform.python_version(),
         }
 
     def full_scan(self, python_path: Optional[str] = None) -> Dict:
@@ -362,30 +375,30 @@ class EnvironmentScanner:
         # Python 경로 유효성 확인
         if not os.path.exists(python_path):
             return {
-                'success': False,
-                'error': f'Python 경로를 찾을 수 없습니다: {python_path}',
-                'python_path': python_path
+                "success": False,
+                "error": f"Python 경로를 찾을 수 없습니다: {python_path}",
+                "python_path": python_path,
             }
 
         env_data = {
-            'success': True,
-            'machine_id': self.get_machine_id(),
-            'system_info': self.get_system_info(),
-            'python_path': python_path,
-            'python_version': self._probe_python_version(python_path),
-            'available_pythons': self.find_python_paths(),
-            'packages': None,
-            'gemini_cli': None,
-            'scan_time': datetime.now().isoformat()
+            "success": True,
+            "machine_id": self.get_machine_id(),
+            "system_info": self.get_system_info(),
+            "python_path": python_path,
+            "python_version": self._probe_python_version(python_path),
+            "available_pythons": self.find_python_paths(),
+            "packages": None,
+            "gemini_cli": None,
+            "scan_time": datetime.now().isoformat(),
         }
 
         # 패키지 상태 확인
-        env_data['packages'] = self.check_all_packages(python_path)
+        env_data["packages"] = self.check_all_packages(python_path)
 
         # Gemini CLI 검사 — 미설치여도 앱은 기동 가능 (UI 만 동작), 따라서
         # full_scan 결과에는 포함하되 is_environment_valid 의 invalid 사유에는
         # 포함하지 않는다. dialog 가 별도로 게이트한다.
-        env_data['gemini_cli'] = self.check_gemini_cli()
+        env_data["gemini_cli"] = self.check_gemini_cli()
 
         return env_data
 
@@ -398,17 +411,17 @@ class EnvironmentScanner:
             return False, "저장된 환경 설정이 없습니다."
 
         # Python 경로 존재 확인
-        python_path = saved_env.get('python_path')
+        python_path = saved_env.get("python_path")
         if not python_path or not os.path.exists(python_path):
             return False, f"Python 경로를 찾을 수 없습니다: {python_path}"
 
         # 머신 ID 확인
-        if saved_env.get('machine_id') != self.get_machine_id():
+        if saved_env.get("machine_id") != self.get_machine_id():
             return False, "다른 컴퓨터의 환경 설정입니다."
 
         # 패키지 상태 확인 (캐시된 정보 사용 - 빠른 체크)
-        packages = saved_env.get('packages', {})
-        if not packages.get('all_required_installed', False):
+        packages = saved_env.get("packages", {})
+        if not packages.get("all_required_installed", False):
             return False, "일부 필수 패키지가 설치되어 있지 않습니다."
 
         return True, "환경이 유효합니다."
@@ -417,8 +430,10 @@ class EnvironmentScanner:
         """패키지 설치"""
         try:
             result = subprocess.run(
-                [python_path, '-m', 'pip', 'install', package_name],
-                capture_output=True, text=True, timeout=300
+                [python_path, "-m", "pip", "install", package_name],
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
 
             if result.returncode == 0:
@@ -436,19 +451,15 @@ class EnvironmentScanner:
         results = []
 
         for pkg in packages:
-            if not pkg.get('installed'):
-                success, message = self.install_package(python_path, pkg['package'])
-                results.append({
-                    'package': pkg['package'],
-                    'success': success,
-                    'message': message
-                })
+            if not pkg.get("installed"):
+                success, message = self.install_package(python_path, pkg["package"])
+                results.append({"package": pkg["package"], "success": success, "message": message})
 
         return results
 
 
 def get_scanner() -> EnvironmentScanner:
     """환경 스캐너 싱글톤 인스턴스 반환"""
-    if not hasattr(get_scanner, '_instance'):
+    if not hasattr(get_scanner, "_instance"):
         get_scanner._instance = EnvironmentScanner()
     return get_scanner._instance

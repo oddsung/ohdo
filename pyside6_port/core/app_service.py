@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """UI·서버 공용 애플리케이션 진입점 (Facade).
 
 현재 ``ui/main_window.py`` 가 ``SessionManager`` / ``AIEngineManager`` /
@@ -16,17 +17,30 @@ UI 와 같은 import 경로를 반복할 수는 없다.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Optional
 
+from core.execution_kernel import ExecutionKernel, StepResult
 from core.session_manager import Session, SessionSummary, Step
 
 from .storage.base import SessionRepository
 
 if TYPE_CHECKING:
+    from core.adapters.base_adapter import AIResponse
     from core.ai_engine import AIEngineManager
     from core.workflow_engine import WorkflowEngine
-    from core.execution_kernel import ExecutionKernel, StepResult
-    from core.adapters.base_adapter import AIResponse
+
+# UI 가 직접 ``core.session_manager`` / ``core.execution_kernel`` 를 import 하지
+# 않도록 도메인 타입을 AppService 모듈에서 re-export. ROADMAP §3 Phase 1 (2)
+# KPI: "ui/ 폴더에서 session_manager·workflow_engine·ai_engine 직접 import 0건".
+__all__ = [
+    "AppService",
+    "Session",
+    "SessionSummary",
+    "Step",
+    "ExecutionKernel",
+    "StepResult",
+]
 
 
 class AppService:
@@ -48,9 +62,53 @@ class AppService:
         self._ai = ai_manager
         self._engine = workflow_engine
 
+    @classmethod
+    def create_default(
+        cls,
+        data_dir: "Path | str",
+        settings: Optional[dict] = None,
+    ) -> "AppService":
+        """데스크톱 앱 기본 셋업 — LocalJsonRepository + AIEngineManager 를 자동 생성.
+
+        UI 가 ``core.ai_engine`` / ``core.storage.local_json`` 를 직접 import
+        하지 않아도 되게 한다 (ROADMAP §3 Phase 1 (2) KPI).
+
+        Args:
+            data_dir: 세션 저장소 디렉토리 (보통 ``Path("data")``).
+            settings: ``settings.json`` 내용. ``None`` 이면 AI 미주입 상태로 생성.
+
+        Returns:
+            바로 사용 가능한 ``AppService`` 인스턴스.
+        """
+        from core.ai_engine import AIEngineManager
+
+        from .storage.local_json import LocalJsonRepository
+
+        repo = LocalJsonRepository(data_dir=Path(data_dir))
+        ai_mgr = AIEngineManager(settings) if settings is not None else None
+        return cls(session_repo=repo, ai_manager=ai_mgr)
+
+    def reload_ai(self, settings: dict) -> None:
+        """Settings 변경 후 AI 엔진 재초기화 (UI 가 ``AIEngineManager`` 를 직접 import 안 하도록)."""
+        from core.ai_engine import AIEngineManager
+
+        self._ai = AIEngineManager(settings)
+
+    def create_kernel(self) -> ExecutionKernel:
+        """새 ``ExecutionKernel`` 인스턴스 — 세션별 분리 사용.
+
+        UI 가 ``core.execution_kernel`` 을 직접 import 안 하도록 factory 제공.
+        """
+        return ExecutionKernel()
+
     @property
     def repo(self) -> SessionRepository:
         return self._repo
+
+    @property
+    def ai_manager(self) -> Optional["AIEngineManager"]:
+        """AI 엔진 매니저 — UI 가 가끔 직접 호출 필요한 경우 (예: chat panel)."""
+        return self._ai
 
     # ── 세션 ───────────────────────────────────────────
 
@@ -83,6 +141,72 @@ class AppService:
         ui_v2 가 AttributeError 발생 (5/6 사용자 보고).
         """
         self._repo.save_session(session)
+
+    # ── Export / Import (D22) ──────────────────────────
+
+    def export_workflow(
+        self,
+        session_id: str,
+        output_dir: "Path | str",
+        *,
+        settings: Optional[dict] = None,
+        ai_generated_readme: Optional[str] = None,
+    ) -> "Path":
+        """세션을 독립 프로젝트 폴더로 내보낸다.
+
+        결과 폴더 구성: ``main.py`` / ``requirements.txt`` / ``README.md`` /
+        ``run.bat`` (실행 가능) + ``session.json`` / ``captures/`` / ``scripts/``
+        (``import_workflow`` 로 재가져오기 가능).
+
+        Args:
+            session_id: 내보낼 세션 ID.
+            output_dir: 출력 폴더 경로. 없으면 자동 생성.
+            settings: ``output_project`` 설정 (settings.json). ``None`` 이면 기본값.
+            ai_generated_readme: AI 가 생성한 README 내용 (선택).
+
+        Returns:
+            생성된 프로젝트 폴더 경로 (``Path``).
+
+        Raises:
+            NotImplementedError: 저장소 백엔드가 export 미지원
+                (``InMemoryRepository`` 등). file IO 가 의도되지 않는 backend
+                는 raise — Phase 2 의 ``PostgresRepository`` 는 zip stream 같은
+                대안 메커니즘으로 구현 가능.
+        """
+        session = self._repo.load_session(session_id)
+        return self._repo.export_session_as_project(
+            session=session,
+            output_dir=Path(output_dir),
+            settings=settings,
+            ai_generated_readme=ai_generated_readme,
+        )
+
+    def import_workflow(
+        self,
+        source_dir: "Path | str",
+        *,
+        new_title: Optional[str] = None,
+    ) -> "Session":
+        """외부 export 폴더로부터 세션을 임포트한다.
+
+        ``export_workflow`` 결과 폴더 (또는 같은 구조의 폴더 — ``session.json`` 필수)
+        를 받아 새 UUID 로 ``data/sessions/`` 에 복사. 기존 세션과 충돌하지 않음.
+
+        Args:
+            source_dir: ``session.json`` 이 들어있는 폴더 경로.
+            new_title: 임포트 후 세션 제목 변경. ``None`` 이면 원본 제목 유지.
+
+        Returns:
+            새로 만든 세션 (``Session``).
+
+        Raises:
+            NotImplementedError: 저장소 백엔드가 import 미지원
+                (``InMemoryRepository`` 등).
+        """
+        return self._repo.import_session_folder(
+            source_dir=Path(source_dir),
+            new_title=new_title,
+        )
 
     # ── 스텝 ───────────────────────────────────────────
 
@@ -125,10 +249,7 @@ class AppService:
         steps = session.steps
         cur = None
         for i, s in enumerate(steps):
-            ssid = (
-                s.get("step_id") if isinstance(s, dict)
-                else getattr(s, "step_id", 0)
-            )
+            ssid = s.get("step_id") if isinstance(s, dict) else getattr(s, "step_id", 0)
             if ssid == step_id:
                 cur = i
                 break
@@ -142,14 +263,13 @@ class AppService:
             return False
         target_step = steps[target_idx]
         target_sid = (
-            target_step.get("step_id") if isinstance(target_step, dict)
+            target_step.get("step_id")
+            if isinstance(target_step, dict)
             else getattr(target_step, "step_id", 0)
         )
         return self.reorder_step(session_id, step_id, target_sid)
 
-    def reorder_step(
-        self, session_id: str, step_id: int, target_step_id: int
-    ) -> bool:
+    def reorder_step(self, session_id: str, step_id: int, target_step_id: int) -> bool:
         """drag-drop reorder — step_id 를 target_step_id 의 자리로 이동.
 
         **누적 chain 보존** (사용자 보고 5/5): 단순 pop+insert 는 cumulative
@@ -179,10 +299,7 @@ class AppService:
 
         def _idx(sid):
             for i, s in enumerate(steps):
-                ssid = (
-                    s.get("step_id") if isinstance(s, dict)
-                    else getattr(s, "step_id", 0)
-                )
+                ssid = s.get("step_id") if isinstance(s, dict) else getattr(s, "step_id", 0)
                 if ssid == sid:
                     return i
             return None
@@ -195,9 +312,10 @@ class AppService:
         # 1. 모든 step 의 step_code 사전 추출 (재정렬 전 — chain 정상 시점).
         #    이미 step_code + manually_edited=True 면 그대로 보존.
         from core.workflow_engine import (
-            extract_step_delta_code,
             extract_library_block,
+            extract_step_delta_code,
         )
+
         library_code = extract_library_block(session)
         prev = None
         for s in steps:
@@ -230,13 +348,13 @@ class AppService:
             # accumulated 가 빈 채로 sc 도 빈 경우는 그대로 유지
             s["generated_code"] = accumulated
 
-        # 4. renumber + save — LocalJsonRepository 의 manager 통해서 호출.
-        manager = getattr(self._repo, "manager", None)
-        if manager is not None and hasattr(manager, "_renumber_steps"):
-            manager._renumber_steps(session)
-            manager.save_session(session)
-        else:
-            self._repo.save_session(session)
+        # 4. renumber (step_id 1..N 재부여) + save — abstraction 만 사용.
+        for i, s in enumerate(steps):
+            if isinstance(s, dict):
+                s["step_id"] = i + 1
+            else:
+                s.step_id = i + 1
+        self._repo.save_session(session)
         return True
 
     # ── 코드 추출 (pure functions 위임) ──────────────────────────────
@@ -245,21 +363,22 @@ class AppService:
     def get_library_block_code(self, session: "Session") -> str:
         """라이브러리 블럭 (imports + 헬퍼) 코드 추출."""
         from core.workflow_engine import extract_library_block
+
         return extract_library_block(session)
 
     def get_initial_block_code(self, session: "Session") -> str:
         """Initial 블럭 (모듈 레벨 변수/setup) 코드 추출."""
         from core.import_manager import extract_initial_block
+
         return extract_initial_block(session)
 
-    def get_step_delta_code(
-        self, step: dict, prev_step: Optional[dict] = None
-    ) -> str:
+    def get_step_delta_code(self, step: dict, prev_step: Optional[dict] = None) -> str:
         """Step delta 코드 (이전 step 과의 차이) 추출.
 
         manually_edited=True + step_code 우선, marker 추출, diff 재계산 순.
         """
         from core.workflow_engine import extract_step_delta_code
+
         return extract_step_delta_code(step, prev_step)
 
     # ── Block 실행 ops (kernel 외부 주입) ──────────────────────────────
@@ -320,6 +439,7 @@ class AppService:
         """WorkflowEngine lazy 생성. 외부 주입돼있으면 그대로 사용."""
         if self._engine is None:
             from core.workflow_engine import WorkflowEngine
+
             self._engine = WorkflowEngine()
         return self._engine
 
@@ -345,7 +465,7 @@ class AppService:
         Returns:
             ``StepResult`` — kernel.execute_block 결과
         """
-        from core.execution_kernel import LIBRARY_BLOCK_STEP_ID, INITIAL_BLOCK_STEP_ID
+        from core.execution_kernel import INITIAL_BLOCK_STEP_ID, LIBRARY_BLOCK_STEP_ID
 
         if LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps:
             lib_block = self.get_library_block_code(session)
@@ -360,15 +480,11 @@ class AppService:
 
         if on_log:
             on_log("🎬 Initial 블럭 실행 시작...")
-        return kernel.execute_block(
-            initial_code, step_id=INITIAL_BLOCK_STEP_ID
-        )
+        return kernel.execute_block(initial_code, step_id=INITIAL_BLOCK_STEP_ID)
 
     # ── AI ops (AIEngineManager 위임 — None 주입 시 NotImplementedError) ──
 
-    async def generate(
-        self, prompt: str, images: Optional[list[str]] = None
-    ) -> "AIResponse":
+    async def generate(self, prompt: str, images: Optional[list[str]] = None) -> "AIResponse":
         if self._ai is None:
             raise RuntimeError(
                 "AppService 에 AIEngineManager 가 주입되지 않았습니다. "
@@ -420,6 +536,7 @@ class AppService:
 
         if prompt_builder is None:
             from core.prompt_builder import PromptBuilder
+
             prompt_builder = PromptBuilder()
 
         if on_progress:
@@ -469,10 +586,15 @@ class AppService:
         # step_imports 에 새 import 만 분리 저장. workflow_engine 의 extract_step_delta_code
         # 가 manually_edited 조건이면 우선순위 0 으로 step_code 사용.
         from .import_manager import (
-            extract_imports as _ei,
             extract_code_delta as _ecd,
+        )
+        from .import_manager import (
             extract_import_delta as _eid,
         )
+        from .import_manager import (
+            extract_imports as _ei,
+        )
+
         full_code = response.code or ""
         separated_imports, separated_body = _ei(full_code)
         prev_body = ""
@@ -540,8 +662,8 @@ class AppService:
         Returns:
             저장된 파일의 절대 경로. 실패 시 None.
         """
-        from pathlib import Path
         from datetime import datetime
+        from pathlib import Path
 
         # 프로젝트 루트 = core/app_service.py 의 부모의 부모
         project_root = Path(__file__).resolve().parent.parent
@@ -550,7 +672,7 @@ class AppService:
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         next_step_id = len(session.steps) + 1 if hasattr(session, "steps") else 0
-        sid_short = (session.session_id[:8] if hasattr(session, "session_id") else "noid")
+        sid_short = session.session_id[:8] if hasattr(session, "session_id") else "noid"
         filename = f"{ts}_step{next_step_id}_{sid_short}.md"
         out_path = log_dir / filename
 
@@ -558,7 +680,7 @@ class AppService:
         sep = "=" * 70
         meta_lines = [
             sep,
-            f"# AI 대화 로그",
+            "# AI 대화 로그",
             sep,
             f"- **타임스탬프**: {datetime.now().isoformat()}",
             f"- **세션 ID**: {getattr(session, 'session_id', 'unknown')}",
@@ -571,15 +693,17 @@ class AppService:
         if image_paths:
             for i, p in enumerate(image_paths, 1):
                 meta_lines.append(f"  - {i}. {p}")
-        meta_lines.extend([
-            f"- **프롬프트 길이**: {len(prompt)} 자",
-            f"- **응답 길이**: {len(response.text or '')} 자",
-            f"- **추출된 코드 길이**: {len(response.code or '')} 자",
-            f"- **응답 success**: {response.success}",
-            f"- **응답 partial**: {getattr(response, 'partial', False)}",
-            f"- **소요 시간**: {getattr(response, 'response_time_ms', 0)} ms",
-            f"- **토큰 사용량**: {getattr(response, 'tokens_used', 0)}",
-        ])
+        meta_lines.extend(
+            [
+                f"- **프롬프트 길이**: {len(prompt)} 자",
+                f"- **응답 길이**: {len(response.text or '')} 자",
+                f"- **추출된 코드 길이**: {len(response.code or '')} 자",
+                f"- **응답 success**: {response.success}",
+                f"- **응답 partial**: {getattr(response, 'partial', False)}",
+                f"- **소요 시간**: {getattr(response, 'response_time_ms', 0)} ms",
+                f"- **토큰 사용량**: {getattr(response, 'tokens_used', 0)}",
+            ]
+        )
         if not response.success:
             meta_lines.append(f"- **에러**: {response.error}")
 

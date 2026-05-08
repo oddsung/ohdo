@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """블럭/코드 실행 controller (메인 윈도우 분해 Step 3).
 
 main_window.py 가 1880 줄로 비대해져 영역별 분리. 이 모듈은:
@@ -15,23 +16,23 @@ main_window 에 위임 stub 메서드는 유지 (signal connect 호환 + 테스�
 
 from __future__ import annotations
 
-import os
-import sys
 import logging
-import threading
+import os
 import subprocess
+import sys
+import threading
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMessageBox
 
-from core.workflow_engine import CodeSandbox, extract_library_block
 from core.execution_kernel import (
-    ExecutionKernel,
-    LIBRARY_BLOCK_STEP_ID,
     INITIAL_BLOCK_STEP_ID,
+    LIBRARY_BLOCK_STEP_ID,
+    ExecutionKernel,
 )
+from core.workflow_engine import CodeSandbox, extract_library_block
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -65,11 +66,7 @@ class BlockExecutionHandler:
         # UI 상태 - 실행 중 표시 (run_btn 비활성, stop_btn 활성)
         mw.code_viewer.set_running(True)
 
-        thread = threading.Thread(
-            target=self.execute_code_thread,
-            args=(code,),
-            daemon=True
-        )
+        thread = threading.Thread(target=self.execute_code_thread, args=(code,), daemon=True)
         thread.start()
 
     def execute_code_thread(self, code: str) -> None:
@@ -78,32 +75,33 @@ class BlockExecutionHandler:
         try:
             cwd = None
             if mw.current_session:
-                cwd = str(mw.session_manager.get_scripts_dir(
-                    mw.current_session.session_id
-                ))
+                cwd = str(mw.session_manager.get_scripts_dir(mw.current_session.session_id))
 
             # Python 실행 경로 결정 (유효성 검증 포함)
             python_exe = self.get_valid_python_exe()
-            sandbox = CodeSandbox(
-                python_exe=python_exe,
-                timeout=60
-            )
+            sandbox = CodeSandbox(python_exe=python_exe, timeout=60)
             mw._current_sandbox = sandbox  # F9 강제 중지용 참조 보관
 
             # UI 자동화 코드 실행 시 우리 창이 대상 창을 가리지 않도록 최소화
             if sys.platform == "win32":
                 import ctypes as _ctypes
+
                 is_admin = bool(_ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
                 if not is_admin:
-                    logger.info("주의: 현재 프로세스가 일반 권한으로 실행 중입니다. "
-                                "대상 앱이 관리자 권한이면 WM 메시지 클릭이 차단됩니다.")
+                    logger.info(
+                        "주의: 현재 프로세스가 일반 권한으로 실행 중입니다. "
+                        "대상 앱이 관리자 권한이면 WM 메시지 클릭이 차단됩니다."
+                    )
 
             def _minimize_self():
                 """스크립트 실행 전 RPA 창 최소화 (대상 창이 가려지지 않도록)"""
                 try:
                     import ctypes as ct
+
                     hwnd = int(mw.winId())
-                    ct.windll.user32.ShowWindow(hwnd, 2)  # SW_MINIMIZE  # type: ignore[attr-defined]
+                    ct.windll.user32.ShowWindow(
+                        hwnd, 2
+                    )  # SW_MINIMIZE  # type: ignore[attr-defined]
                 except Exception:
                     pass
 
@@ -111,22 +109,25 @@ class BlockExecutionHandler:
                 """스크립트 실행 후 RPA 창 복원"""
                 try:
                     import ctypes as ct
+
                     hwnd = int(mw.winId())
                     ct.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE  # type: ignore[attr-defined]
                 except Exception:
                     pass
 
-            result = sandbox.execute(code, cwd,
-                                     pre_exec_callback=_minimize_self,
-                                     post_exec_callback=_restore_self)
+            result = sandbox.execute(
+                code, cwd, pre_exec_callback=_minimize_self, post_exec_callback=_restore_self
+            )
 
-            mw.signals.step_executed.emit({
-                "step_id": len(mw.current_session.steps) if mw.current_session else 0,
-                "success": result.success,
-                "output": result.output,
-                "error": result.error,
-                "duration_ms": result.duration_ms
-            })
+            mw.signals.step_executed.emit(
+                {
+                    "step_id": len(mw.current_session.steps) if mw.current_session else 0,
+                    "success": result.success,
+                    "output": result.output,
+                    "error": result.error,
+                    "duration_ms": result.duration_ms,
+                }
+            )
 
         except Exception as e:
             mw.signals.error_occurred.emit(f"코드 실행 오류: {str(e)}")
@@ -144,10 +145,7 @@ class BlockExecutionHandler:
             return None
         sid = mw.current_session.session_id
         if sid not in mw._kernels or not mw._kernels[sid].is_alive:
-            kernel = ExecutionKernel(
-                python_exe=self.get_valid_python_exe(),
-                default_timeout=60
-            )
+            kernel = ExecutionKernel(python_exe=self.get_valid_python_exe(), default_timeout=60)
             kernel.start()
             mw._kernels[sid] = kernel
             logger.info("세션 %s 용 ExecutionKernel 생성", sid)
@@ -179,9 +177,7 @@ class BlockExecutionHandler:
         mw.lower()
 
         thread = threading.Thread(
-            target=self.run_blocks_thread,
-            args=(kernel, start_step_id, None),
-            daemon=True
+            target=self.run_blocks_thread, args=(kernel, start_step_id, None), daemon=True
         )
         thread.start()
 
@@ -211,9 +207,10 @@ class BlockExecutionHandler:
                     break
         if not initial_code.strip():
             QMessageBox.information(
-                mw, "안내",
+                mw,
+                "안내",
                 "Initial 블럭 코드가 비어 있습니다. 첫 step 의 setup 코드가 "
-                "있어야 Initial 블럭이 추출됩니다."
+                "있어야 Initial 블럭이 추출됩니다.",
             )
             return
 
@@ -234,9 +231,7 @@ class BlockExecutionHandler:
         )
         thread.start()
 
-    def _run_initial_block_thread(
-        self, kernel: ExecutionKernel, initial_code: str
-    ) -> None:
+    def _run_initial_block_thread(self, kernel: ExecutionKernel, initial_code: str) -> None:
         """Initial 블럭 단독 실행 워커 (백그라운드)."""
         mw = self.mw
         try:
@@ -255,19 +250,13 @@ class BlockExecutionHandler:
                         )
 
             mw.signals.log_message.emit("🎬 Initial 블럭 실행 시작...")
-            result = kernel.execute_block(
-                initial_code, step_id=INITIAL_BLOCK_STEP_ID
-            )
+            result = kernel.execute_block(initial_code, step_id=INITIAL_BLOCK_STEP_ID)
             if result.success:
-                mw.signals.log_message.emit(
-                    f"✅ Initial 블럭 완료 ({result.duration_ms}ms)"
-                )
+                mw.signals.log_message.emit(f"✅ Initial 블럭 완료 ({result.duration_ms}ms)")
                 if result.output:
                     mw.signals.log_message.emit(f"  출력: {result.output[:300]}")
             else:
-                mw.signals.log_message.emit(
-                    f"❌ Initial 블럭 실패 ({result.duration_ms}ms)"
-                )
+                mw.signals.log_message.emit(f"❌ Initial 블럭 실패 ({result.duration_ms}ms)")
                 if result.error:
                     for line in result.error.splitlines():
                         if line.strip():
@@ -317,7 +306,7 @@ class BlockExecutionHandler:
         thread = threading.Thread(
             target=self.run_blocks_thread,
             args=(kernel, step_id, step_id),  # start = stop = step_id
-            daemon=True
+            daemon=True,
         )
         thread.start()
 
@@ -339,9 +328,7 @@ class BlockExecutionHandler:
             mw.current_session.settings["step_delay_ms"] = new_wait
             mw.session_manager.save_session(mw.current_session)
             label = f"{new_wait}ms" if new_wait is not None else "글로벌 사용"
-            mw.console_panel.log(
-                f"⏱ 세션 default 대기시간 -> {label}", "INFO"
-            )
+            mw.console_panel.log(f"⏱ 세션 default 대기시간 -> {label}", "INFO")
             # 세션 default 변경 시에는 모든 카드의 effective default 표시 갱신 필요.
             # _refresh_block_view 대신 set_session_wait 만 호출 — 카드 재생성 회피.
             global_default = mw.settings.get("execution", {}).get("step_delay_ms", 500)
@@ -355,13 +342,8 @@ class BlockExecutionHandler:
                     step["wait_after_ms"] = new_wait
                     break
             mw.session_manager.save_session(mw.current_session)
-            label = (
-                f"{new_wait}ms (개별 override)" if new_wait is not None
-                else "기본값 사용"
-            )
-            mw.console_panel.log(
-                f"⏱ Step {step_id} 대기시간 -> {label}", "INFO"
-            )
+            label = f"{new_wait}ms (개별 override)" if new_wait is not None else "기본값 사용"
+            mw.console_panel.log(f"⏱ Step {step_id} 대기시간 -> {label}", "INFO")
 
     def on_kernel_reset(self) -> None:
         """커널 재시작 요청"""
@@ -386,6 +368,7 @@ class BlockExecutionHandler:
         stop_after_step_id 가 None 이 아니면 그 step 까지만 실행 (단독 실행 모드).
         """
         import asyncio
+
         mw = self.mw
 
         def on_step_start(step_id):
@@ -393,13 +376,15 @@ class BlockExecutionHandler:
             mw.signals.log_message.emit(f"▶ 블럭 스텝 #{step_id} 실행 중...")
 
         def on_step_complete(step_id, result):
-            mw.signals.block_step_done.emit({
-                "step_id": step_id,
-                "success": result.success,
-                "output": result.output,
-                "error": result.error,
-                "duration_ms": result.duration_ms,
-            })
+            mw.signals.block_step_done.emit(
+                {
+                    "step_id": step_id,
+                    "success": result.success,
+                    "output": result.output,
+                    "error": result.error,
+                    "duration_ms": result.duration_ms,
+                }
+            )
 
         def on_error(step_id, error_msg):
             mw.signals.log_message.emit(f"❌ 스텝 #{step_id} 실패: {error_msg}")
@@ -521,9 +506,7 @@ class BlockExecutionHandler:
             try:
                 # 실제로 실행 가능한지 테스트
                 result = subprocess.run(
-                    [str(venv_python), "--version"],
-                    capture_output=True,
-                    timeout=5
+                    [str(venv_python), "--version"], capture_output=True, timeout=5
                 )
                 if result.returncode == 0:
                     return str(venv_python)
@@ -533,16 +516,15 @@ class BlockExecutionHandler:
         # 2. 환경 스캐너에서 저장된 Python 경로 확인
         try:
             from core.environment_scanner import get_scanner
+
             scanner = get_scanner()
             saved_env = scanner.load_saved_environment()
             if saved_env:
-                python_path = saved_env.get('python_path')
+                python_path = saved_env.get("python_path")
                 if python_path and os.path.exists(python_path):
                     try:
                         result = subprocess.run(
-                            [python_path, "--version"],
-                            capture_output=True,
-                            timeout=5
+                            [python_path, "--version"], capture_output=True, timeout=5
                         )
                         if result.returncode == 0:
                             return python_path

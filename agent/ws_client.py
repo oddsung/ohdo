@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """ohdo Agent — WebSocket 게이트웨이 클라이언트 (M1.5).
 
 ``/v0/agent`` 에 Bearer 인증으로 연결해 ``server.hello`` / ``agent.hello``
@@ -16,7 +17,6 @@ import platform
 import socket
 import sys
 import threading
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Callable
@@ -24,7 +24,7 @@ from typing import Callable
 try:
     import auth as agent_auth  # type: ignore[no-redef]
 except ImportError:  # pragma: no cover
-    from agent import auth as agent_auth  # type: ignore[no-redef]
+    pass  # type: ignore[no-redef]
 
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import connect
@@ -47,9 +47,9 @@ CLOSE_PROTOCOL_VIOLATION = 4400
 def _http_to_ws(url: str) -> str:
     """``http(s)://`` 을 ``ws(s)://`` 으로 치환. 그 외는 원본 그대로."""
     if url.startswith("https://"):
-        return "wss://" + url[len("https://"):]
+        return "wss://" + url[len("https://") :]
     if url.startswith("http://"):
-        return "ws://" + url[len("http://"):]
+        return "ws://" + url[len("http://") :]
     return url
 
 
@@ -86,6 +86,7 @@ def _resolve_agent_version() -> str:
     # 의 값을 시도한다. 실패 시 기본값.
     try:
         from agent import __version__  # type: ignore[attr-defined]
+
         return str(__version__)
     except Exception:
         return "0.0.0"
@@ -250,8 +251,7 @@ class WebSocketClient:
         with self._send_lock:
             ws = self._ws
         if ws is None:
-            logger.debug("send_frame dropped: no active connection type=%s",
-                         frame.get("type"))
+            logger.debug("send_frame dropped: no active connection type=%s", frame.get("type"))
             return False
         try:
             ws.send(json.dumps(frame))
@@ -290,14 +290,12 @@ class WebSocketClient:
             if not isinstance(frame, dict):
                 continue
             if self.frame_handler is None:
-                logger.debug("ws recv frame (no handler) type=%s",
-                             frame.get("type"))
+                logger.debug("ws recv frame (no handler) type=%s", frame.get("type"))
                 continue
             try:
                 self.frame_handler(frame)
             except Exception:  # pragma: no cover
-                logger.exception("frame_handler raised (type=%s)",
-                                 frame.get("type"))
+                logger.exception("frame_handler raised (type=%s)", frame.get("type"))
 
     def _handle_connection_closed(self, exc: ConnectionClosed) -> None:
         code = getattr(getattr(exc, "rcvd", None), "code", None)
@@ -307,7 +305,9 @@ class WebSocketClient:
         sent_code = getattr(sent, "code", None) if sent is not None else None
         logger.info(
             "ws closed: rcvd_code=%s reason=%r sent_code=%s",
-            code, reason, sent_code,
+            code,
+            reason,
+            sent_code,
         )
         if code in (CLOSE_UNAUTHORIZED, CLOSE_REVOKED):
             logger.warning("ws auth failure (code=%s reason=%r)", code, reason)

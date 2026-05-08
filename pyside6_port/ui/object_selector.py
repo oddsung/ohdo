@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 화면 객체 선택 오버레이 (Phase 7에서 본격 구현)
 
 현재는 스텁으로, Phase 7에서 전체 구현됩니다.
 """
 
-from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QWidget
 
 
 class ObjectSelector(QWidget):
@@ -17,6 +18,7 @@ class ObjectSelector(QWidget):
     - 마우스 이동 시 UI 요소 하이라이트
     - 클릭 시 요소 정보 수집 + 캡처
     """
+
     object_selected = Signal(dict)
 
     def __init__(self, parent=None):

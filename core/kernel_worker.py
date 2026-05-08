@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 커널 워커 - 영속적 Python 실행 환경
 
@@ -15,11 +16,11 @@ IPC 프로토콜:
   stdout ← <<<PONG>>>\n<<<DONE>>>\n
 """
 
-import sys
-import os
-import io
-import traceback
 import contextlib
+import io
+import os
+import sys
+import traceback
 
 # IPC 프로토콜 센티넬
 SENTINEL_END = "<<<EXECUTE_END>>>"
@@ -40,14 +41,14 @@ def _run_loop():
     # UTF-8 강제 설정 (한글 출력 깨짐 방지)
     # 일부 환경 (3.6 미만, redirected stream) 에서 reconfigure 가 OSError/AttributeError
     # 던질 수 있으므로 폴백. 기능 자체는 best-effort.
-    if hasattr(sys.stdout, 'reconfigure'):
+    if hasattr(sys.stdout, "reconfigure"):
         try:
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except (OSError, AttributeError):
             pass
-    if hasattr(sys.stdin, 'reconfigure'):
+    if hasattr(sys.stdin, "reconfigure"):
         try:
-            sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
         except (OSError, AttributeError):
             pass
 
@@ -58,7 +59,7 @@ def _run_loop():
 
         try:
             for raw_line in sys.stdin:
-                stripped = raw_line.rstrip('\r\n')
+                stripped = raw_line.rstrip("\r\n")
                 if stripped == SENTINEL_END:
                     break
                 if stripped == PING_CMD:
@@ -86,8 +87,7 @@ def _run_loop():
         captured_err = io.StringIO()
 
         try:
-            with contextlib.redirect_stdout(captured_out), \
-                 contextlib.redirect_stderr(captured_err):
+            with contextlib.redirect_stdout(captured_out), contextlib.redirect_stderr(captured_err):
                 compiled = compile(code, "<kernel_block>", "exec")
                 exec(compiled, _globals)  # noqa: S102
 
@@ -123,6 +123,7 @@ def _run_loop():
         if _parent_pid and sys.platform == "win32":
             try:
                 import ctypes
+
                 ctypes.windll.user32.AllowSetForegroundWindow(int(_parent_pid))
             except Exception:
                 pass

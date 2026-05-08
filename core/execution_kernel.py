@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 ExecutionKernel - 영속적 Python 커널 관리자
 
@@ -12,15 +13,15 @@ Jupyter/Colab 방식과 동일하게 한 번 시작된 Python 프로세스를
   - 스레드 안전 실행 (threading.Lock)
 """
 
-import sys
-import os
-import time
-import queue
-import threading
-import subprocess
 import logging
+import os
+import queue
+import subprocess
+import sys
+import threading
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ INITIAL_BLOCK_STEP_ID = -1
 @dataclass
 class StepResult:
     """단일 블럭 실행 결과 (workflow_engine.StepResult와 호환 구조)"""
+
     step_id: int = 0
     success: bool = False
     output: str = ""
@@ -110,12 +112,12 @@ class ExecutionKernel:
             [self.python_exe, "-u", str(worker_path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,   # stderr를 stdout으로 병합
+            stderr=subprocess.STDOUT,  # stderr를 stdout으로 병합
             text=True,
             encoding="utf-8",
             errors="replace",
             env=env,
-            bufsize=1,                  # 라인 버퍼 (실시간 출력)
+            bufsize=1,  # 라인 버퍼 (실시간 출력)
         )
         self._executed_steps = []
         self.library_hash = None
@@ -123,9 +125,7 @@ class ExecutionKernel:
 
         # 비동기 reader 스레드 시작 (Windows에서 readline 블로킹 우회)
         self._reader_thread = threading.Thread(
-            target=self._read_loop,
-            daemon=True,
-            name=f"KernelReader-{id(self)}"
+            target=self._read_loop, daemon=True, name=f"KernelReader-{id(self)}"
         )
         self._reader_thread.start()
         logger.info("ExecutionKernel 시작 (PID=%s)", self._proc.pid)
@@ -245,7 +245,7 @@ class ExecutionKernel:
             return StepResult(
                 step_id=step_id,
                 success=False,
-                error="커널이 실행 중이 아닙니다. start()를 먼저 호출하세요."
+                error="커널이 실행 중이 아닙니다. start()를 먼저 호출하세요.",
             )
 
         with self._lock:
@@ -270,7 +270,7 @@ class ExecutionKernel:
                 line = proc.stdout.readline()
                 if not line:
                     break
-                self._output_queue.put(line.rstrip('\r\n'))
+                self._output_queue.put(line.rstrip("\r\n"))
         except (OSError, ValueError) as e:
             # ValueError: I/O on closed file (정상 종료 경로)
             # OSError: Windows 에서 broken pipe / Unix 에서 EBADF
@@ -305,7 +305,7 @@ class ExecutionKernel:
                 step_id=step_id,
                 success=False,
                 error=f"커널 stdin 쓰기 오류: {e}",
-                duration_ms=int((time.time() - start_time) * 1000)
+                duration_ms=int((time.time() - start_time) * 1000),
             )
 
         # 결과 수신 (RESULT_DONE까지 읽기)
@@ -321,7 +321,7 @@ class ExecutionKernel:
                     step_id=step_id,
                     success=False,
                     error=f"실행 시간 초과 ({t}초). 커널이 재시작되었습니다.",
-                    duration_ms=int((time.time() - start_time) * 1000)
+                    duration_ms=int((time.time() - start_time) * 1000),
                 )
 
             try:
@@ -334,7 +334,7 @@ class ExecutionKernel:
                         step_id=step_id,
                         success=False,
                         error=f"실행 시간 초과 ({t}초). 커널이 재시작되었습니다.",
-                        duration_ms=int((time.time() - start_time) * 1000)
+                        duration_ms=int((time.time() - start_time) * 1000),
                     )
                 continue
 
@@ -344,7 +344,7 @@ class ExecutionKernel:
                     step_id=step_id,
                     success=False,
                     error="커널 프로세스가 예기치 않게 종료되었습니다.",
-                    duration_ms=int((time.time() - start_time) * 1000)
+                    duration_ms=int((time.time() - start_time) * 1000),
                 )
 
             if line == self._RESULT_DONE:
@@ -369,13 +369,13 @@ class ExecutionKernel:
                 step_id=step_id,
                 success=True,
                 output="" if silent else output_text,
-                duration_ms=elapsed_ms
+                duration_ms=elapsed_ms,
             )
         else:
             return StepResult(
                 step_id=step_id,
                 success=False,
-                output="" if silent else output_text.split('\n')[0] if output_text else "",
+                output="" if silent else output_text.split("\n")[0] if output_text else "",
                 error=output_text,
-                duration_ms=elapsed_ms
+                duration_ms=elapsed_ms,
             )

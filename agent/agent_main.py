@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """ohdo Agent — 트레이 아이콘 + 헬스체크 ping 루프.
 
 M0 범위: 백그라운드 스레드가 30초마다 ``OHDO_SERVER_URL/healthz`` 를 호출하고
@@ -39,12 +40,12 @@ from pystray import Icon, Menu, MenuItem
 # 반영한 것.
 try:
     import auth as agent_auth  # type: ignore[no-redef]
-    import ws_client as agent_ws  # type: ignore[no-redef]
     import runner as agent_runner  # type: ignore[no-redef]
+    import ws_client as agent_ws  # type: ignore[no-redef]
 except ImportError:  # pragma: no cover
     from agent import auth as agent_auth  # type: ignore[no-redef]
-    from agent import ws_client as agent_ws  # type: ignore[no-redef]
     from agent import runner as agent_runner  # type: ignore[no-redef]
+    from agent import ws_client as agent_ws  # type: ignore[no-redef]
 
 # agent/ 폴더 안에서 스크립트로 직접 실행되는 경로와 PyInstaller 번들 모두를
 # 지원하기 위해 버전은 이 파일 안에 둔다. agent/__init__.py 와 동기화 유지.
@@ -105,6 +106,7 @@ def resolve_server_url() -> str:
 # 로깅
 # ──────────────────────────────────────────────
 
+
 def _setup_logging() -> logging.Logger:
     APPDATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -140,6 +142,7 @@ log = _setup_logging()
 # 헬스체크 ping 루프
 # ──────────────────────────────────────────────
 
+
 class HealthPinger:
     """서버 헬스체크를 주기적으로 호출하는 백그라운드 워커.
 
@@ -170,9 +173,7 @@ class HealthPinger:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        self._thread = threading.Thread(
-            target=self._loop, name="ohdo-ping", daemon=True
-        )
+        self._thread = threading.Thread(target=self._loop, name="ohdo-ping", daemon=True)
         self._thread.start()
         log.info("pinger started: url=%s interval=%ss", self.server_url, self.interval)
 
@@ -212,7 +213,10 @@ class HealthPinger:
             if resp.status_code == 200:
                 log.info(
                     "ping ok (%s): %s status=200 elapsed=%dms body=%s",
-                    mode, url, elapsed_ms, resp.text[:200],
+                    mode,
+                    url,
+                    elapsed_ms,
+                    resp.text[:200],
                 )
                 return
 
@@ -236,19 +240,26 @@ class HealthPinger:
 
             log.warning(
                 "ping non-200 (%s): %s status=%d elapsed=%dms",
-                mode, url, resp.status_code, elapsed_ms,
+                mode,
+                url,
+                resp.status_code,
+                elapsed_ms,
             )
         except httpx.RequestError as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             log.error(
                 "ping failed (%s): %s elapsed=%dms error=%s",
-                mode, url, elapsed_ms, exc,
+                mode,
+                url,
+                elapsed_ms,
+                exc,
             )
 
 
 # ──────────────────────────────────────────────
 # 트레이 아이콘
 # ──────────────────────────────────────────────
+
 
 def _make_icon_image() -> Image.Image:
     """외부 파일 의존 없이 16색 톤의 트레이 아이콘을 만든다."""
@@ -301,6 +312,7 @@ def _quit(
 # ──────────────────────────────────────────────
 # 인증 상태 + Sign In/Out 핸들러 (M1.3)
 # ──────────────────────────────────────────────
+
 
 def _collect_agent_metadata() -> dict:
     """Device Flow 요청에 실어 보낼 부가 정보."""
@@ -362,9 +374,7 @@ class AuthState:
         with self._lock:
             self._creds = creds
 
-    def _set_polling(
-        self, thread: threading.Thread | None, stop: threading.Event | None
-    ) -> None:
+    def _set_polling(self, thread: threading.Thread | None, stop: threading.Event | None) -> None:
         with self._lock:
             self._polling_thread = thread
             self._stop_event = stop
@@ -485,7 +495,9 @@ class AuthState:
         self._set_polling(None, None)
         log.info(
             "signed in: agent_id=%s user_id=%s server=%s",
-            creds.agent_id, creds.user_id, creds.token_server_url,
+            creds.agent_id,
+            creds.user_id,
+            creds.token_server_url,
         )
         _safe_notify(
             icon,
@@ -507,13 +519,16 @@ def _safe_notify(icon: Icon, message: str, title: str) -> None:
 # 엔트리포인트
 # ──────────────────────────────────────────────
 
+
 def main() -> int:
     server_url = resolve_server_url()
     ping_seconds = int(os.getenv("OHDO_PING_SECONDS", str(DEFAULT_PING_SECONDS)))
 
     log.info(
         "ohdo agent starting: version=%s server=%s appdata=%s",
-        __version__, server_url, APPDATA_DIR,
+        __version__,
+        server_url,
+        APPDATA_DIR,
     )
 
     auth = AuthState(server_url=server_url)
@@ -522,7 +537,9 @@ def main() -> int:
         assert creds is not None
         log.info(
             "credentials loaded: agent_id=%s user_id=%s signed_in_at=%s",
-            creds.agent_id, creds.user_id, creds.signed_in_at,
+            creds.agent_id,
+            creds.user_id,
+            creds.signed_in_at,
         )
     else:
         log.warning("no credentials found — Sign In required")

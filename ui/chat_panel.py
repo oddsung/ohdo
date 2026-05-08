@@ -1,15 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 대화 패널
 
 사용자와 AI 간의 대화를 표시하고 입력을 받는 패널입니다.
 """
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QTextEdit, QPushButton, QLabel, QFrame, QSizePolicy
-)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.win_inspector import format_element_label
 
@@ -78,8 +86,8 @@ class ChatBubble(QFrame):
         content_label.setWordWrap(True)
         content_label.setFont(QFont("Malgun Gothic", 10))
         content_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse |
-            Qt.TextInteractionFlag.TextSelectableByKeyboard
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         content_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         content_label.setMinimumHeight(20)
@@ -130,16 +138,16 @@ class ChatBubble(QFrame):
 class ChatPanel(QWidget):
     """대화 패널 위젯"""
 
-    message_sent = pyqtSignal(str)          # 사용자 메시지 전송 시그널
-    capture_requested = pyqtSignal()        # 화면 캡처 요청 시그널
-    element_pick_requested = pyqtSignal()   # UI 요소 선택 요청 시그널
-    cancel_requested = pyqtSignal()         # AI 생성 중지 요청 시그널
+    message_sent = pyqtSignal(str)  # 사용자 메시지 전송 시그널
+    capture_requested = pyqtSignal()  # 화면 캡처 요청 시그널
+    element_pick_requested = pyqtSignal()  # UI 요소 선택 요청 시그널
+    cancel_requested = pyqtSignal()  # AI 생성 중지 요청 시그널
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._pending_elements: list[dict] = []   # element_info 목록
+        self._pending_elements: list[dict] = []  # element_info 목록
         self._chip_widgets: list[ElementChip] = []
-        self._is_generating: bool = False          # AI 생성 중 여부
+        self._is_generating: bool = False  # AI 생성 중 여부
         self._setup_ui()
 
     def _setup_ui(self):
@@ -158,9 +166,7 @@ class ChatPanel(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setMinimumHeight(200)
-        self.scroll_area.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self.scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.chat_container = QWidget()
         self.chat_layout = QVBoxLayout(self.chat_container)
@@ -217,7 +223,9 @@ class ChatPanel(QWidget):
         input_layout.setContentsMargins(0, 0, 0, 0)
 
         self.input_box = QTextEdit()
-        self.input_box.setPlaceholderText("자동화할 작업을 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)")
+        self.input_box.setPlaceholderText(
+            "자동화할 작업을 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)"
+        )
         self.input_box.setMaximumHeight(80)
         self.input_box.setFont(QFont("Malgun Gothic", 10))
         self.input_box.installEventFilter(self)
@@ -254,16 +262,16 @@ class ChatPanel(QWidget):
 
         layout.addWidget(bottom_frame, stretch=0)  # stretch=0: 하단 고정
 
-
     def eventFilter(self, obj, event):
         """Enter 키로 전송, Shift+Enter는 줄바꿈"""
         from PyQt6.QtCore import QEvent
-        from PyQt6.QtGui import QKeyEvent
 
         if obj == self.input_box and event.type() == QEvent.Type.KeyPress:
             key_event = event
-            if (key_event.key() == Qt.Key.Key_Return and
-                not key_event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            if (
+                key_event.key() == Qt.Key.Key_Return
+                and not key_event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
                 if not self._is_generating:
                     self._send_message()
                 return True
@@ -312,9 +320,12 @@ class ChatPanel(QWidget):
         self.chat_layout.addWidget(bubble)
 
         # 레이아웃 갱신 후 최하단으로 스크롤
-        QTimer.singleShot(50, lambda: self.scroll_area.verticalScrollBar().setValue(
-            self.scroll_area.verticalScrollBar().maximum()
-        ))
+        QTimer.singleShot(
+            50,
+            lambda: self.scroll_area.verticalScrollBar().setValue(
+                self.scroll_area.verticalScrollBar().maximum()
+            ),
+        )
 
     def set_capture_status(self, text: str):
         """캡처 상태 라벨 업데이트"""
@@ -336,7 +347,7 @@ class ChatPanel(QWidget):
         if generating:
             self.send_btn.setText("⏹ 중지")
             self.send_btn.setStyleSheet(self._send_btn_stop_style)
-            self.send_btn.setEnabled(True)   # 중지 버튼은 항상 클릭 가능
+            self.send_btn.setEnabled(True)  # 중지 버튼은 항상 클릭 가능
             self.input_box.setEnabled(False)
             self.capture_btn.setEnabled(False)
             self.element_pick_btn.setEnabled(False)

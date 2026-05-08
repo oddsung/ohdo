@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 Windows UI 인스펙터
 
@@ -21,14 +22,16 @@ def _strip_pua(text: str) -> str:
     """
     # BMP PUA: U+E000–U+F8FF
     # Supplementary PUA-A/B: U+F0000–U+10FFFF
-    cleaned = re.sub(r'[\uE000-\uF8FF\U000F0000-\U0010FFFF]', '', text)
+    cleaned = re.sub(r"[\uE000-\uF8FF\U000F0000-\U0010FFFF]", "", text)
     return cleaned.strip()
+
 
 # pywinauto가 없어도 앱 실행은 가능하도록 lazy import
 _pywinauto_available = False
 try:
     import pywinauto
     from pywinauto import Desktop
+
     _pywinauto_available = True
 except ImportError:
     logger.warning("pywinauto가 설치되어 있지 않습니다. UI 인스펙터 기능이 비활성화됩니다.")
@@ -60,8 +63,8 @@ def format_element_label(info: dict) -> str:
         # name 없는 element (예: TitleBar) — 부모 윈도우 title 을 빌려옴
         return f'[{ctrl_type}] "{parent_title}"'
     if auto_id:
-        return f'[{ctrl_type}] (ID: {auto_id})'
-    return f'[{ctrl_type}]'
+        return f"[{ctrl_type}] (ID: {auto_id})"
+    return f"[{ctrl_type}]"
 
 
 class WindowInspector:
@@ -100,19 +103,21 @@ class WindowInspector:
                         continue
 
                     rect = win.rectangle()
-                    windows.append({
-                        "title": title,
-                        "handle": win.handle,
-                        "class_name": win.class_name(),
-                        "rect": {
-                            "left": rect.left,
-                            "top": rect.top,
-                            "right": rect.right,
-                            "bottom": rect.bottom,
-                            "width": rect.width(),
-                            "height": rect.height()
+                    windows.append(
+                        {
+                            "title": title,
+                            "handle": win.handle,
+                            "class_name": win.class_name(),
+                            "rect": {
+                                "left": rect.left,
+                                "top": rect.top,
+                                "right": rect.right,
+                                "bottom": rect.bottom,
+                                "width": rect.width(),
+                                "height": rect.height(),
+                            },
                         }
-                    })
+                    )
                 except Exception:
                     continue
 
@@ -123,11 +128,7 @@ class WindowInspector:
             return []
 
     def inspect_window(
-        self,
-        title: str = None,
-        handle: int = None,
-        max_depth: int = 3,
-        max_controls: int = 50
+        self, title: str = None, handle: int = None, max_depth: int = 3, max_controls: int = 50
     ) -> dict:
         """
         특정 윈도우의 UI 컨트롤 트리를 추출합니다.
@@ -158,16 +159,16 @@ class WindowInspector:
             window_title = window.window_text()
 
             controls = []
-            self._collect_controls(window, controls, depth=0,
-                                   max_depth=max_depth,
-                                   max_controls=max_controls)
+            self._collect_controls(
+                window, controls, depth=0, max_depth=max_depth, max_controls=max_controls
+            )
 
             return {
                 "window_title": window_title,
                 "window_class": window.class_name(),
                 "window_rect": self._rect_to_dict(window.rectangle()),
                 "control_count": len(controls),
-                "controls": controls
+                "controls": controls,
             }
 
         except pywinauto.findwindows.ElementNotFoundError:
@@ -185,11 +186,12 @@ class WindowInspector:
 
         try:
             import ctypes
+
             hwnd = ctypes.windll.user32.GetForegroundWindow()
             if hwnd:
-                return self.inspect_window(handle=hwnd,
-                                          max_depth=max_depth,
-                                          max_controls=max_controls)
+                return self.inspect_window(
+                    handle=hwnd, max_depth=max_depth, max_controls=max_controls
+                )
             return {"error": "포그라운드 윈도우를 가져올 수 없습니다."}
         except Exception as e:
             return {"error": str(e)}
@@ -206,7 +208,7 @@ class WindowInspector:
             f"클래스: {window_info.get('window_class', '?')}",
             f"컨트롤 수: {window_info.get('control_count', 0)}",
             "",
-            "### UI 컨트롤 목록:"
+            "### UI 컨트롤 목록:",
         ]
 
         for ctrl in window_info.get("controls", []):
@@ -288,7 +290,7 @@ class WindowInspector:
         lines = [
             f"## 선택된 UI 요소 (브라우저: {browser_type})",
             f"- **타입**: {ctrl_type}",
-            f"- **자동화 방식**: Selenium (DOM 직접 제어)",
+            "- **자동화 방식**: Selenium (DOM 직접 제어)",
         ]
         if name:
             lines.append(f'- **텍스트/이름**: "{name}"')
@@ -311,8 +313,23 @@ class WindowInspector:
         # DOM 컨텍스트 (CDP 수집 성공 시)
         dom_ctx: dict = element_info.get("dom_context", {})
         # 비인터랙티브 태그 목록 (클릭 핸들러가 부모에 있을 가능성 높음)
-        _NON_INTERACTIVE = {"span", "em", "strong", "i", "b", "small", "label",
-                            "p", "td", "th", "li", "dt", "dd", "abbr", "cite"}
+        _NON_INTERACTIVE = {
+            "span",
+            "em",
+            "strong",
+            "i",
+            "b",
+            "small",
+            "label",
+            "p",
+            "td",
+            "th",
+            "li",
+            "dt",
+            "dd",
+            "abbr",
+            "cite",
+        }
         dom_tag = dom_ctx.get("tagName", "")
         dom_attrs = dom_ctx.get("attributes", {}) if dom_ctx.get("cdp_available") else {}
         dom_classes = (dom_attrs.get("class") or "").strip()
@@ -329,7 +346,11 @@ class WindowInspector:
                 lines.append(f"- **HTML 속성**: {attr_str}")
             # CSS 선택자 — class 속성에서 자동 도출
             if dom_classes:
-                css_sel = dom_tag + "." + ".".join(dom_classes.split()) if dom_tag else "." + ".".join(dom_classes.split())
+                css_sel = (
+                    dom_tag + "." + ".".join(dom_classes.split())
+                    if dom_tag
+                    else "." + ".".join(dom_classes.split())
+                )
                 lines.append(f"- **CSS 선택자**: `{css_sel}`")
             if dom_ctx.get("xpath"):
                 lines.append(f"- **절대 XPath**: `{dom_ctx['xpath']}`")
@@ -383,7 +404,16 @@ class WindowInspector:
         # - 텍스트/정적 요소 (<span>, <div> 등): presence_of_element_located + JS click
         #   이유: <span> 같은 비인터랙티브 요소는 element_to_be_clickable 조건을 만족하지 못해 TimeoutException 발생
         # - 입력 요소: element_to_be_clickable + .send_keys()
-        CLICK_TYPES = {"Button", "CheckBox", "RadioButton", "Hyperlink", "ComboBox", "ListItem", "MenuItem", "TabItem"}
+        CLICK_TYPES = {
+            "Button",
+            "CheckBox",
+            "RadioButton",
+            "Hyperlink",
+            "ComboBox",
+            "ListItem",
+            "MenuItem",
+            "TabItem",
+        }
         INPUT_TYPES = {"Edit", "Document"}
 
         if ctrl_type in CLICK_TYPES:
@@ -399,7 +429,7 @@ class WindowInspector:
         def _fmt_locator(s: str, v: str) -> str:
             if s == "xpath":
                 # XPath 값은 내부에 큰따옴표 포함 가능 → 작은따옴표 Python 문자열 사용
-                return f'("xpath", \'{v}\')'
+                return f"(\"xpath\", '{v}')"
             escaped = v.replace('"', '\\"')
             return f'("{s}", "{escaped}")'
 
@@ -418,10 +448,12 @@ class WindowInspector:
                 safe_text = _strip_pua(dom_text[:100]).replace('"', "'")
                 tag_sel = dom_tag or "*"
                 if safe_text:
-                    dom_locators.append((
-                        "xpath",
-                        f'//{tag_sel}[contains(@class, "{first_cls}") and ./text()[contains(normalize-space(), "{safe_text}")]]'
-                    ))
+                    dom_locators.append(
+                        (
+                            "xpath",
+                            f'//{tag_sel}[contains(@class, "{first_cls}") and ./text()[contains(normalize-space(), "{safe_text}")]]',
+                        )
+                    )
             if dom_classes and not elem_id:
                 # CSS selector (클래스 기반) — id 없을 때 유용
                 css_sel = (dom_tag or "") + "." + ".".join(dom_classes.split())
@@ -456,7 +488,7 @@ class WindowInspector:
                         f'//*[contains(normalize-space(@title),"{safe_name}")'
                         f' or ./text()[contains(normalize-space(),"{safe_name}")]]'
                     )
-                    locator_items.append(f'("xpath", \'{xpath_combined}\')')
+                    locator_items.append(f"(\"xpath\", '{xpath_combined}')")
             if not locator_items:
                 locator_items.append('("css", "")  # 개발자 도구로 선택자 확인 후 수정')
 
@@ -465,12 +497,20 @@ class WindowInspector:
         # CDP 가용성에 따라 어떤 connection 방법을 추천할지 명확히
         cdp_active = dom_ctx.get("cdp_available", False)
         if cdp_active:
-            lines.append("**🌟 권장 connection: 방법 2 (기존 Chrome attach)** — picker 가 CDP 로 DOM")
-            lines.append("정보를 수집한 것은 사용자가 이미 `--remote-debugging-port=9222` 로 Chrome 을")
-            lines.append("실행했다는 뜻. 같은 브라우저에 attach 해야 picker 가 본 그 페이지/요소를 조작 가능.")
+            lines.append(
+                "**🌟 권장 connection: 방법 2 (기존 Chrome attach)** — picker 가 CDP 로 DOM"
+            )
+            lines.append(
+                "정보를 수집한 것은 사용자가 이미 `--remote-debugging-port=9222` 로 Chrome 을"
+            )
+            lines.append(
+                "실행했다는 뜻. 같은 브라우저에 attach 해야 picker 가 본 그 페이지/요소를 조작 가능."
+            )
         else:
             lines.append("**💡 connection 선택 가이드**:")
-            lines.append("- 사용자가 새 페이지를 열어 자동화하는 시나리오 → 방법 1 (새 브라우저 + driver.get)")
+            lines.append(
+                "- 사용자가 새 페이지를 열어 자동화하는 시나리오 → 방법 1 (새 브라우저 + driver.get)"
+            )
             lines.append("- 사용자가 이미 띄워둔 Chrome 의 페이지를 조작 → 방법 2 활성화 후 attach")
             lines.append("  - 단, Chrome 이 `--remote-debugging-port=9222` 옵션으로 떠 있어야 함")
             lines.append("  - 안 떠 있으면 방법 2 는 connection refused 발생")
@@ -510,7 +550,9 @@ class WindowInspector:
             lines.append("except Exception:")
             lines.append("    driver = webdriver.Chrome(options=options)")
             lines.append("")
-            lines.append("# 방법 2: 이미 열린 브라우저에 연결 (Chrome 이 --remote-debugging-port=9222 로 떠 있어야 함)")
+            lines.append(
+                "# 방법 2: 이미 열린 브라우저에 연결 (Chrome 이 --remote-debugging-port=9222 로 떠 있어야 함)"
+            )
             lines.append("# options.add_experimental_option('debuggerAddress', 'localhost:9222')")
             lines.append("# try:")
             lines.append("#     _ = driver.window_handles")
@@ -519,7 +561,7 @@ class WindowInspector:
         lines.append("")
         lines.append("")
         lines.append("def find_and_click(driver, locators, timeout=10, visible_only=False):")
-        lines.append("    \"\"\"로케이터 우선순위로 요소를 찾아 클릭. iframe 내부 자동 탐색 지원.\"\"\"")
+        lines.append('    """로케이터 우선순위로 요소를 찾아 클릭. iframe 내부 자동 탐색 지원."""')
         lines.append("    import time as _t, re as _re")
         lines.append("    from selenium.webdriver.support.ui import WebDriverWait")
         lines.append("    from selenium.webdriver.support import expected_conditions as EC")
@@ -529,13 +571,21 @@ class WindowInspector:
         lines.append("        bm = {'id': By.ID, 'css': By.CSS_SELECTOR, 'xpath': By.XPATH}")
         lines.append("        if strategy == 'title':")
         lines.append("            v = _re.sub(r'[\\uE000-\\uF8FF]', '', value).strip()")
-        lines.append("            return By.XPATH, f'//*[contains(normalize-space(@title),\"{v}\")]'")
+        lines.append(
+            "            return By.XPATH, f'//*[contains(normalize-space(@title),\"{v}\")]'"
+        )
         lines.append("        elif strategy == 'text':")
         lines.append("            v = _re.sub(r'[\\uE000-\\uF8FF]', '', value).strip()")
-        lines.append("            return By.XPATH, f'//*[not(self::script)][not(self::style)][./text()[contains(normalize-space(),\"{v}\")]]'")
-        lines.append("        if strategy == 'xpath':  # xpath 전략: contains() 내부 값 앞뒤 공백 자동 제거")
-        lines.append("            value = _re.sub(r'contains\\(([^,]+),\"([^\"]+)\"\\)',")
-        lines.append("                            lambda m: f'contains({m.group(1)},\"{m.group(2).strip()}\")', value)")
+        lines.append(
+            "            return By.XPATH, f'//*[not(self::script)][not(self::style)][./text()[contains(normalize-space(),\"{v}\")]]'"
+        )
+        lines.append(
+            "        if strategy == 'xpath':  # xpath 전략: contains() 내부 값 앞뒤 공백 자동 제거"
+        )
+        lines.append('            value = _re.sub(r\'contains\\(([^,]+),"([^"]+)"\\)\',')
+        lines.append(
+            "                            lambda m: f'contains({m.group(1)},\"{m.group(2).strip()}\")', value)"
+        )
         lines.append("        return bm.get(strategy, By.XPATH), value")
         lines.append("    def _click(ctx, by, val, visible_only, t):")
         lines.append("        if visible_only:")
@@ -543,21 +593,33 @@ class WindowInspector:
         lines.append("            while _t.time()<dl:")
         lines.append("                for _c in ctx.find_elements(by,val):")
         lines.append("                    try:")
-        lines.append("                        _r=ctx.execute_script('var r=arguments[0].getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};',_c)")
-        lines.append("                        if _r['w']>0 and _r['h']>0 and _r['x']>-10 and _r['y']>-10: el=_c; break")
+        lines.append(
+            "                        _r=ctx.execute_script('var r=arguments[0].getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};',_c)"
+        )
+        lines.append(
+            "                        if _r['w']>0 and _r['h']>0 and _r['x']>-10 and _r['y']>-10: el=_c; break"
+        )
         lines.append("                    except Exception: continue")
         lines.append("                if el: break")
         lines.append("                _t.sleep(0.1)")
         lines.append("            if el is None: raise Exception(f'visible 요소 없음: {by}={val}')")
         lines.append("        else:")
-        lines.append("            el = WebDriverWait(ctx,t).until(EC.presence_of_element_located((by,val)))")
-        lines.append("        r=ctx.execute_script('var r=arguments[0].getBoundingClientRect();return {x:r.x,y:r.y};',el)")
-        lines.append("        if r['x']<0 or r['y']<0: ctx.execute_script('arguments[0].click()',el)")
+        lines.append(
+            "            el = WebDriverWait(ctx,t).until(EC.presence_of_element_located((by,val)))"
+        )
+        lines.append(
+            "        r=ctx.execute_script('var r=arguments[0].getBoundingClientRect();return {x:r.x,y:r.y};',el)"
+        )
+        lines.append(
+            "        if r['x']<0 or r['y']<0: ctx.execute_script('arguments[0].click()',el)"
+        )
         lines.append("        else:")
         lines.append("            try: ActionChains(ctx).move_to_element(el).click().perform()")
         lines.append("            except Exception:")
         lines.append("                try: el.click()")
-        lines.append("                except Exception: ctx.execute_script('arguments[0].click()',el)")
+        lines.append(
+            "                except Exception: ctx.execute_script('arguments[0].click()',el)"
+        )
         lines.append("        return el")
         lines.append("    last_err = None")
         lines.append("    for strategy, value in locators:")
@@ -569,7 +631,9 @@ class WindowInspector:
         lines.append("            for _f in driver.find_elements(By.TAG_NAME,'iframe'):")
         lines.append("                try:")
         lines.append("                    driver.switch_to.frame(_f)")
-        lines.append("                    return _click(driver, by, val, visible_only, min(timeout,4))")
+        lines.append(
+            "                    return _click(driver, by, val, visible_only, min(timeout,4))"
+        )
         lines.append("                except Exception: driver.switch_to.default_content()")
         lines.append("        except Exception as e:")
         lines.append("            last_err = e")
@@ -582,20 +646,30 @@ class WindowInspector:
         if click_strategy == "input":
             lines.append("# 입력 요소")
             if auto_id:
-                lines.append(f'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "{auto_id}")))')
+                lines.append(
+                    f'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "{auto_id}")))'
+                )
             elif name:
                 safe_name = _strip_pua(name).replace('"', '\\"')
-                lines.append(f'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, \'//*[@title="{safe_name}" or ./text()[contains(normalize-space(),"{safe_name}")]]\')))')
+                lines.append(
+                    f'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, \'//*[@title="{safe_name}" or ./text()[contains(normalize-space(),"{safe_name}")]]\')))'
+                )
             else:
-                lines.append('element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "")))')
+                lines.append(
+                    'element = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "")))'
+                )
             lines.append("element.clear()")
             lines.append('element.send_keys("입력할 텍스트")')
         else:
             lines.append(f"# 클릭할 요소: {name or auto_id or '(선택자 직접 지정 필요)'}")
             # 비인터랙티브 태그(span, li 등)는 동일 텍스트가 사이드바 등에 중복 존재할 가능성이 높음
             # → visible_only=True로 뷰포트 내 실제 보이는 요소만 선택
-            visible_arg = ", visible_only=True  # 드롭다운/서브메뉴라면 반드시 True 유지" if dom_tag in _NON_INTERACTIVE else ""
-            lines.append(f"find_and_click(driver, [")
+            visible_arg = (
+                ", visible_only=True  # 드롭다운/서브메뉴라면 반드시 True 유지"
+                if dom_tag in _NON_INTERACTIVE
+                else ""
+            )
+            lines.append("find_and_click(driver, [")
             lines.append(f"    {locators_str},")
             lines.append(f"]{visible_arg})")
 
@@ -619,13 +693,22 @@ class WindowInspector:
         # Owner-drawn 감지: UIA/Win32에서 요소 식별 정보가 없는 경우
         # (예: Delphi FastReport TToolBar의 owner-drawn 버튼)
         # 이 경우 pywinauto child_window()로 찾을 수 없으므로 좌표 기반 클릭 사용
-        is_owner_drawn = (not name and not auto_id and
-                          ctrl_type in ("Window", "Pane", "TitleBar", "Custom", "")
-                          and parent_title)
+        is_owner_drawn = (
+            not name
+            and not auto_id
+            and ctrl_type in ("Window", "Pane", "TitleBar", "Custom", "")
+            and parent_title
+        )
         if is_owner_drawn:
             return self._get_owner_drawn_element_info_text(
-                element_info, ctrl_type, class_name, rect,
-                parent_title, parent_class, screen_x, screen_y
+                element_info,
+                ctrl_type,
+                class_name,
+                rect,
+                parent_title,
+                parent_class,
+                screen_x,
+                screen_y,
             )
 
         # 백엔드 정보 (기본값: uia)
@@ -635,14 +718,16 @@ class WindowInspector:
         lines = [
             "## 선택된 UI 요소 (데스크톱 앱)",
             f"- **타입**: {ctrl_type}",
-            f"- **자동화 방식**: pywinauto",
+            "- **자동화 방식**: pywinauto",
         ]
         if name:
             lines.append(f'- **이름**: "{name}"')
         if auto_id:
             auto_id_is_dynamic = auto_id.isdigit()
             if auto_id_is_dynamic:
-                lines.append(f"- **Automation ID**: {auto_id} ⚠️ 동적 ID (숫자만 → 윈도우 핸들, 매번 변경됨! 사용 금지)")
+                lines.append(
+                    f"- **Automation ID**: {auto_id} ⚠️ 동적 ID (숫자만 → 윈도우 핸들, 매번 변경됨! 사용 금지)"
+                )
             else:
                 lines.append(f"- **Automation ID**: {auto_id}")
         if class_name:
@@ -671,7 +756,7 @@ class WindowInspector:
                 lines.append(
                     f"⚠️ 이 element 의 부모는 **모달 다이얼로그** (control_type=Dialog) 입니다. "
                     f"실행 시점에 다이얼로그가 떠 있지 않을 수 있으므로 (예: 첫 저장 vs 재저장 환경), "
-                    f"가이드 #18 의 `_find_dialog` 패턴 사용 — `keywords=[\"{parent_title}\"]` 로 검색 후 "
+                    f'가이드 #18 의 `_find_dialog` 패턴 사용 — `keywords=["{parent_title}"]` 로 검색 후 '
                     f"발견 시에만 클릭/키 입력, 미발견 시 silent skip (조건부 흐름)."
                 )
 
@@ -685,7 +770,9 @@ class WindowInspector:
         lines.append("> - `pyautogui.click(x, y)` (입력 시뮬레이션): **정상 동작** (UIPI 우회)")
         lines.append("> - 단, pyautogui는 **실행 시점의 요소 좌표**를 동적으로 가져와야 정확함")
         if recommended_backend == "win32":
-            lines.append(f"> - 이 요소는 `{detected_backend}` 방식으로 감지됨. `backend=\"win32\"` 사용 필수.")
+            lines.append(
+                f'> - 이 요소는 `{detected_backend}` 방식으로 감지됨. `backend="win32"` 사용 필수.'
+            )
         lines.append("")
 
         # 참고: browser process 가 desktop path 로 오는 두 경우 — (1) CDP 미연결
@@ -704,16 +791,20 @@ class WindowInspector:
             elif name:
                 element_selector = f'win.child_window(title="{name}")'
             else:
-                element_selector = 'win.child_window(found_index=0)'
+                element_selector = "win.child_window(found_index=0)"
         else:
             # auto_id가 순수 숫자이면 윈도우 핸들(동적 값)일 가능성이 높음 → 불안정
             auto_id_is_dynamic = auto_id and auto_id.isdigit()
 
             if name and ctrl_type:
-                element_selector = f'win.child_window(title="{name}", control_type="{ctrl_type}", found_index=0)'
+                element_selector = (
+                    f'win.child_window(title="{name}", control_type="{ctrl_type}", found_index=0)'
+                )
             elif auto_id and not auto_id_is_dynamic:
                 # 안정적인 auto_id (문자 포함: "btnOK", "txtName" 등)
-                element_selector = f'win.child_window(auto_id="{auto_id}", control_type="{ctrl_type}")'
+                element_selector = (
+                    f'win.child_window(auto_id="{auto_id}", control_type="{ctrl_type}")'
+                )
             elif class_name and ctrl_type:
                 # auto_id가 동적이거나 없을 때 → class_name + control_type 조합 (안정적)
                 element_selector = f'win.child_window(class_name="{class_name}", control_type="{ctrl_type}", found_index=0)'
@@ -723,7 +814,9 @@ class WindowInspector:
                 element_selector = f'win.child_window(title="{name}", found_index=0)'
             elif auto_id:
                 # 동적 auto_id라도 다른 대안이 전혀 없으면 최후 수단으로 사용
-                element_selector = f'win.child_window(auto_id="{auto_id}", control_type="{ctrl_type}")'
+                element_selector = (
+                    f'win.child_window(auto_id="{auto_id}", control_type="{ctrl_type}")'
+                )
             else:
                 element_selector = f'win.child_window(control_type="{ctrl_type}", found_index=0)'
 
@@ -750,12 +843,12 @@ class WindowInspector:
                 title_re_literal = repr(".*" + escaped)
                 connect_line = (
                     f'Application(backend="{recommended_backend}").connect('
-                    f'title_re={title_re_literal}, timeout=10, found_index=0)'
+                    f"title_re={title_re_literal}, timeout=10, found_index=0)"
                 )
-                window_line = f'app.window(title_re={title_re_literal}, found_index=0)'
+                window_line = f"app.window(title_re={title_re_literal}, found_index=0)"
         else:
             connect_line = f'Application(backend="{recommended_backend}").connect(title="...", timeout=10, found_index=0)'
-            window_line = 'app.top_window()'
+            window_line = "app.top_window()"
 
         lines.append("```python")
         lines.append("import ctypes")
@@ -770,7 +863,9 @@ class WindowInspector:
         lines.append("    ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))")
         lines.append("except Exception:")
         lines.append("    try:")
-        lines.append("        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE")
+        lines.append(
+            "        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE"
+        )
         lines.append("    except Exception:")
         lines.append("        pass")
         lines.append("")
@@ -787,16 +882,22 @@ class WindowInspector:
         if name:
             # 1차 fallback: control_type 빼고 title 만
             safe_name_repr = repr(name)
-            lines.append(f"    _selectors.append(lambda: win.child_window(title={safe_name_repr}, found_index=0))")
+            lines.append(
+                f"    _selectors.append(lambda: win.child_window(title={safe_name_repr}, found_index=0))"
+            )
             # 2차 fallback: title_re 로 정규식 매칭 (관대)
             esc_name = re.escape(name)
-            lines.append(f"    _selectors.append(lambda: win.child_window(title_re={repr('.*' + esc_name)}, found_index=0))")
+            lines.append(
+                f"    _selectors.append(lambda: win.child_window(title_re={repr('.*' + esc_name)}, found_index=0))"
+            )
         # 3차 fallback (generic): title 무시, control_type + found_index=0 만
         # 사용자 보고 (5/6): picker 가 잡은 메모장 Document name = "<한글 텍스트 가득>" → 다중 메모장 환경
         # 또는 다른 메모장 인스턴스에 connect 잡힌 경우 specific name 매칭 fail. 단일 인스턴스 element
         # (Document/TitleBar/MenuBar/StatusBar 등 앱당 1개 보장) 는 control_type 만으로 매칭 가능.
         if ctrl_type:
-            lines.append(f"    _selectors.append(lambda: win.child_window(control_type={repr(ctrl_type)}, found_index=0))")
+            lines.append(
+                f"    _selectors.append(lambda: win.child_window(control_type={repr(ctrl_type)}, found_index=0))"
+            )
         lines.append("    for _build in _selectors:")
         lines.append("        try:")
         lines.append("            _cand = _build()")
@@ -808,13 +909,17 @@ class WindowInspector:
         lines.append("element = _resolve_element()")
         lines.append("")
         lines.append("# 대상 창을 최상위로 가져오기 (관리자 창이면 일부 실패할 수 있음)")
-        lines.append("# ★ SW_RESTORE 는 maximized 창을 normal 사이즈로 축소시키므로 minimized 일 때만 사용")
+        lines.append(
+            "# ★ SW_RESTORE 는 maximized 창을 normal 사이즈로 축소시키므로 minimized 일 때만 사용"
+        )
         lines.append("user32 = ctypes.windll.user32")
         lines.append("hwnd = win.handle")
         lines.append("if user32.IsIconic(hwnd):")
         lines.append("    user32.ShowWindow(hwnd, 9)   # SW_RESTORE: minimized → 복원")
         lines.append("else:")
-        lines.append("    user32.ShowWindow(hwnd, 5)   # SW_SHOW: 현재 상태 유지하며 활성화 (maximized 보존)")
+        lines.append(
+            "    user32.ShowWindow(hwnd, 5)   # SW_SHOW: 현재 상태 유지하며 활성화 (maximized 보존)"
+        )
         lines.append("user32.BringWindowToTop(hwnd)")
         lines.append("try:")
         lines.append("    user32.SetForegroundWindow(hwnd)")
@@ -823,12 +928,20 @@ class WindowInspector:
         lines.append("time.sleep(0.5)  # 창 전환 대기")
         lines.append("")
         lines.append("# Picker 가 leaf Text/Image/Pane 같은 비클릭 요소를 잡았을 수 있으므로,")
-        lines.append("# 클릭 가능한 부모 (Button/MenuItem/MenuBarItem/TabItem/ListItem/CheckBox/RadioButton/")
+        lines.append(
+            "# 클릭 가능한 부모 (Button/MenuItem/MenuBarItem/TabItem/ListItem/CheckBox/RadioButton/"
+        )
         lines.append("# Hyperlink/Edit/ComboBox) 까지 walk up 해서 해당 부모의 rectangle 사용.")
         lines.append("# 사용자 보고 (5/5): Win11 메모장 메뉴바 'TextBlock 파일' center 클릭 → 부모")
-        lines.append("# MenuBarItem 의 hit area 와 좌표가 맞지 않거나 routed event 가 propagate 안 돼서 메뉴 안 열림.")
-        lines.append("_clickable_types = {'Button', 'MenuItem', 'MenuBarItem', 'TabItem', 'ListItem',")
-        lines.append("                    'CheckBox', 'RadioButton', 'Hyperlink', 'Edit', 'ComboBox',")
+        lines.append(
+            "# MenuBarItem 의 hit area 와 좌표가 맞지 않거나 routed event 가 propagate 안 돼서 메뉴 안 열림."
+        )
+        lines.append(
+            "_clickable_types = {'Button', 'MenuItem', 'MenuBarItem', 'TabItem', 'ListItem',"
+        )
+        lines.append(
+            "                    'CheckBox', 'RadioButton', 'Hyperlink', 'Edit', 'ComboBox',"
+        )
         lines.append("                    'SplitButton', 'TreeItem'}")
         lines.append("click_target = element")
         lines.append("try:")
@@ -840,7 +953,9 @@ class WindowInspector:
         lines.append("                break")
         lines.append("            if _cur.element_info.control_type in _clickable_types:")
         lines.append("                click_target = _cur")
-        lines.append("                print(f'클릭 가능한 부모로 promote: {_cur.element_info.control_type} \"{_cur.element_info.name}\"')")
+        lines.append(
+            "                print(f'클릭 가능한 부모로 promote: {_cur.element_info.control_type} \"{_cur.element_info.name}\"')"
+        )
         lines.append("                break")
         lines.append("except Exception as _e_walkup:")
         lines.append("    print(f'부모 walk up 실패 (원래 element 사용): {_e_walkup}')")
@@ -849,19 +964,25 @@ class WindowInspector:
         lines.append("rect = click_target.rectangle()")
         lines.append("center_x = (rect.left + rect.right) // 2")
         lines.append("center_y = (rect.top + rect.bottom) // 2")
-        lines.append("print(f'요소 위치: ({center_x}, {center_y})  크기: {rect.width()}x{rect.height()}')")
+        lines.append(
+            "print(f'요소 위치: ({center_x}, {center_y})  크기: {rect.width()}x{rect.height()}')"
+        )
         lines.append("")
         lines.append("# 클릭 좌표에 실제로 있는 창 확인")
         lines.append("pt = ctypes.wintypes.POINT(center_x, center_y)")
         lines.append("hwnd_at_pt = user32.WindowFromPoint(pt)")
         lines.append("buf = ctypes.create_unicode_buffer(256)")
         lines.append("user32.GetWindowTextW(hwnd_at_pt, buf, 256)")
-        lines.append("print(f'클릭 좌표의 창: \"{buf.value}\" (hwnd={hex(hwnd_at_pt)}, 대상={hex(hwnd)})')")
+        lines.append(
+            "print(f'클릭 좌표의 창: \"{buf.value}\" (hwnd={hex(hwnd_at_pt)}, 대상={hex(hwnd)})')"
+        )
         lines.append("if hwnd_at_pt != hwnd:")
         lines.append("    # 자식 창일 수 있으니 최상위 부모 확인")
         lines.append("    root = user32.GetAncestor(hwnd_at_pt, 2)  # GA_ROOT=2")
         lines.append("    if root != hwnd:")
-        lines.append("        print('경고: 클릭 좌표에 다른 창이 있습니다. 대상 창이 가려져 있을 수 있습니다.')")
+        lines.append(
+            "        print('경고: 클릭 좌표에 다른 창이 있습니다. 대상 창이 가려져 있을 수 있습니다.')"
+        )
         lines.append("")
         # 클릭 전략: pyautogui PRIMARY (브라우저/데스크톱 공통). element.click() 은 fallback.
         # ─ pyautogui (OS 레벨 SendInput) 의 장점 ─
@@ -905,9 +1026,13 @@ class WindowInspector:
         )
         lines.append("")
         lines.append("```python")
-        lines.append("# pyautogui.write 는 US 키보드 매핑 → 한글 silent skip. ASCII / CJK 자동 분기:")
+        lines.append(
+            "# pyautogui.write 는 US 키보드 매핑 → 한글 silent skip. ASCII / CJK 자동 분기:"
+        )
         lines.append("time.sleep(0.3)  # 클릭 후 포커스 안정화")
-        lines.append("text = '<<USER_TEXT>>'   # ← 사용자가 요청한 실제 텍스트로 반드시 교체 (이 자리표시자 그대로 두지 말 것)")
+        lines.append(
+            "text = '<<USER_TEXT>>'   # ← 사용자가 요청한 실제 텍스트로 반드시 교체 (이 자리표시자 그대로 두지 말 것)"
+        )
         lines.append("if all(ord(c) < 128 for c in text):")
         lines.append("    pyautogui.write(text)               # ASCII 안전")
         lines.append("else:")
@@ -927,9 +1052,15 @@ class WindowInspector:
         return "\n".join(lines)
 
     def _get_owner_drawn_element_info_text(
-        self, element_info: dict, ctrl_type: str, class_name: str,
-        rect: dict, parent_title: str, parent_class: str,
-        screen_x: int, screen_y: int
+        self,
+        element_info: dict,
+        ctrl_type: str,
+        class_name: str,
+        rect: dict,
+        parent_title: str,
+        parent_class: str,
+        screen_x: int,
+        screen_y: int,
     ) -> str:
         """
         Owner-drawn 컨트롤용 코드 생성.
@@ -943,7 +1074,7 @@ class WindowInspector:
         lines = [
             "## 선택된 UI 요소 (데스크톱 앱 — Owner-drawn 컨트롤)",
             f"- **타입**: {ctrl_type} (owner-drawn: UIA/Win32 자식으로 노출되지 않음)",
-            f"- **자동화 방식**: pyautogui 좌표 기반 클릭",
+            "- **자동화 방식**: pyautogui 좌표 기반 클릭",
         ]
         if class_name:
             lines.append(f"- **클래스**: {class_name}")
@@ -993,7 +1124,7 @@ class WindowInspector:
         lines.append("buf = ctypes.create_unicode_buffer(256)")
         lines.append("")
         lines.append(f"# 부모 윈도우 '{parent_title}' 를 전면으로 가져오기")
-        lines.append(f"target_title = \"{parent_title}\"")
+        lines.append(f'target_title = "{parent_title}"')
         lines.append("target_hwnd = None")
         lines.append("for hwnd in find_windows(visible_only=True):")
         lines.append("    user32.GetWindowTextW(hwnd, buf, 256)")
@@ -1002,7 +1133,9 @@ class WindowInspector:
         lines.append("        break")
         lines.append("")
         lines.append("if target_hwnd:")
-        lines.append("    # SW_RESTORE 는 maximized 창을 normal 사이즈로 축소시키므로 minimized 일 때만 사용")
+        lines.append(
+            "    # SW_RESTORE 는 maximized 창을 normal 사이즈로 축소시키므로 minimized 일 때만 사용"
+        )
         lines.append("    if user32.IsIconic(target_hwnd):")
         lines.append("        user32.ShowWindow(target_hwnd, 9)   # SW_RESTORE")
         lines.append("    else:")
@@ -1014,19 +1147,20 @@ class WindowInspector:
         lines.append("        pass")
         lines.append("    time.sleep(0.5)")
         lines.append("")
-        lines.append(f"    # Owner-drawn 요소 좌표 클릭 (스크린 좌표)")
+        lines.append("    # Owner-drawn 요소 좌표 클릭 (스크린 좌표)")
         lines.append(f"    click_x, click_y = {screen_x}, {screen_y}")
         lines.append("    print(f'Owner-drawn 요소 좌표 클릭: ({click_x}, {click_y})')")
         lines.append("    pyautogui.click(click_x, click_y)")
         lines.append("    print('클릭 완료')")
         lines.append("else:")
-        lines.append(f"    print(f'윈도우를 찾지 못했습니다: {{target_title}}')")
+        lines.append("    print(f'윈도우를 찾지 못했습니다: {target_title}')")
         lines.append("```")
 
         return "\n".join(lines)
 
-    def _collect_controls(self, element, controls: list, depth: int,
-                          max_depth: int, max_controls: int):
+    def _collect_controls(
+        self, element, controls: list, depth: int, max_depth: int, max_controls: int
+    ):
         """재귀적으로 UI 컨트롤을 수집합니다."""
         if depth > max_depth or len(controls) >= max_controls:
             return
@@ -1057,24 +1191,36 @@ class WindowInspector:
 
                 # 의미 있는 컨트롤만 수집 (이름이나 타입이 있는 것)
                 if name or ctrl_type in (
-                    "Button", "MenuItem", "Edit", "ComboBox",
-                    "TabItem", "CheckBox", "RadioButton", "ListItem",
-                    "TreeItem", "Menu", "MenuBar", "ToolBar",
-                    "Hyperlink", "Text", "Image"
+                    "Button",
+                    "MenuItem",
+                    "Edit",
+                    "ComboBox",
+                    "TabItem",
+                    "CheckBox",
+                    "RadioButton",
+                    "ListItem",
+                    "TreeItem",
+                    "Menu",
+                    "MenuBar",
+                    "ToolBar",
+                    "Hyperlink",
+                    "Text",
+                    "Image",
                 ):
                     rect = self._rect_to_dict(child.rectangle())
-                    controls.append({
-                        "control_type": ctrl_type,
-                        "name": name[:100],  # 긴 텍스트 제한
-                        "automation_id": auto_id,
-                        "class_name": child.class_name(),
-                        "rect": rect,
-                        "depth": depth
-                    })
+                    controls.append(
+                        {
+                            "control_type": ctrl_type,
+                            "name": name[:100],  # 긴 텍스트 제한
+                            "automation_id": auto_id,
+                            "class_name": child.class_name(),
+                            "rect": rect,
+                            "depth": depth,
+                        }
+                    )
 
                 # 하위 탐색
-                self._collect_controls(child, controls, depth + 1,
-                                      max_depth, max_controls)
+                self._collect_controls(child, controls, depth + 1, max_depth, max_controls)
 
             except Exception:
                 continue
@@ -1089,7 +1235,7 @@ class WindowInspector:
                 "right": rect.right,
                 "bottom": rect.bottom,
                 "width": rect.width(),
-                "height": rect.height()
+                "height": rect.height(),
             }
         except Exception:
             return {}

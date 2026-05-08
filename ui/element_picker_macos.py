@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 macOS UI 요소 피커 (Element Picker)
 
@@ -9,15 +10,10 @@ macOS Accessibility API를 사용하여 마우스 아래의 UI 요소를 감지�
 
 import logging
 import subprocess
-from typing import Any
-from PyQt6.QtWidgets import QWidget, QApplication, QLabel
-from PyQt6.QtCore import (
-    Qt, pyqtSignal, QTimer, QPoint, QRect
-)
-from PyQt6.QtGui import (
-    QPainter, QPen, QColor, QFont, QCursor,
-    QScreen, QGuiApplication
-)
+
+from PyQt6.QtCore import QPoint, QRect, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter, QPen
+from PyQt6.QtWidgets import QLabel, QWidget
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +23,23 @@ _AX = None  # ApplicationServices 모듈 참조
 
 try:
     import ApplicationServices as _AX
+
     _accessibility_available = True
 except ImportError:
     pass
 
 # 브라우저 앱 이름 매핑
 BROWSER_APPS = {
-    "Google Chrome", "Google Chrome Canary",
-    "Microsoft Edge", "Firefox", "Safari",
-    "Opera", "Brave Browser", "Arc",
-    "Naver Whale", "Vivaldi",
+    "Google Chrome",
+    "Google Chrome Canary",
+    "Microsoft Edge",
+    "Firefox",
+    "Safari",
+    "Opera",
+    "Brave Browser",
+    "Arc",
+    "Naver Whale",
+    "Vivaldi",
 }
 
 
@@ -47,9 +50,7 @@ def _get_element_at_position(x: float, y: float):
 
     try:
         system_element = _AX.AXUIElementCreateSystemWide()
-        err, element = _AX.AXUIElementCopyElementAtPosition(
-            system_element, x, y, None
-        )
+        err, element = _AX.AXUIElementCopyElementAtPosition(system_element, x, y, None)
         if err == 0 and element:
             return element
     except Exception as e:
@@ -146,9 +147,9 @@ class ElementPickerOverlay(QWidget):
         super().__init__(parent)
 
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
@@ -190,10 +191,14 @@ class ElementPickerOverlay(QWidget):
             trusted = _AX.AXIsProcessTrusted()
             if not trusted:
                 logger.warning("접근성 권한이 필요합니다. 시스템 설정에서 허용해주세요.")
-                subprocess.run([
-                    "osascript", "-e",
-                    'display dialog "접근성 권한이 필요합니다.\\n시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 허용해주세요." buttons {"확인"} default button 1'
-                ], timeout=10)
+                subprocess.run(
+                    [
+                        "osascript",
+                        "-e",
+                        'display dialog "접근성 권한이 필요합니다.\\n시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 이 앱을 허용해주세요." buttons {"확인"} default button 1',
+                    ],
+                    timeout=10,
+                )
                 self.pick_cancelled.emit()
                 return
         except Exception:
@@ -244,9 +249,7 @@ class ElementPickerOverlay(QWidget):
                     if ew > 0 and eh > 0:
                         # 로컬 좌표로 변환
                         local_pos = self.mapFromGlobal(QPoint(ex, ey))
-                        self._highlight_rect = QRect(
-                            local_pos.x(), local_pos.y(), ew, eh
-                        )
+                        self._highlight_rect = QRect(local_pos.x(), local_pos.y(), ew, eh)
 
                         # 요소 정보 수집
                         role = _get_ax_attribute(element, "AXRole", "") or ""
@@ -312,7 +315,7 @@ class ElementPickerOverlay(QWidget):
                                 "right": ex + ew,
                                 "bottom": ey + eh,
                                 "width": ew,
-                                "height": eh
+                                "height": eh,
                             },
                             "parent_window_title": app_name,
                             "parent_window_class": "",
@@ -392,10 +395,7 @@ class ElementPickerOverlay(QWidget):
             painter.setPen(pen)
             painter.drawRect(self._highlight_rect)
 
-            painter.fillRect(
-                self._highlight_rect,
-                QColor(243, 139, 168, 30)
-            )
+            painter.fillRect(self._highlight_rect, QColor(243, 139, 168, 30))
 
         # 상단 안내 문구
         painter.setPen(QColor("#cdd6f4"))
@@ -404,7 +404,7 @@ class ElementPickerOverlay(QWidget):
         painter.drawText(
             self.rect().adjusted(0, 20, 0, 0),
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-            guide_text
+            guide_text,
         )
 
         painter.end()
@@ -442,9 +442,9 @@ class ElementPickerOverlay(QWidget):
             logger.info("  UI 요소 선택 완료 - [macOS 앱] AppleScript 코드 생성")
 
         logger.info(sep)
-        logger.info(f"  [선택된 요소 속성]")
+        logger.info("  [선택된 요소 속성]")
         logger.info(f"    control_type : {element_info.get('control_type', '')}")
-        logger.info(f"    name         : \"{element_info.get('name', '')}\"")
+        logger.info(f'    name         : "{element_info.get("name", "")}"')
         logger.info(f"    class_name   : {element_info.get('class_name', '')}")
         logger.info(f"    subrole      : {element_info.get('subrole', '')}")
         logger.info(f"    automation_id: {element_info.get('automation_id', '') or '(없음)'}")
@@ -457,5 +457,7 @@ class ElementPickerOverlay(QWidget):
                 f"크기:{r.get('width')}×{r.get('height')}"
             )
         logger.info(f"    앱 이름      : {element_info.get('parent_window_title', '')}")
-        logger.info(f"    화면 좌표    : ({element_info.get('screen_x')}, {element_info.get('screen_y')})")
+        logger.info(
+            f"    화면 좌표    : ({element_info.get('screen_x')}, {element_info.get('screen_y')})"
+        )
         logger.info(sep)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 코드 + 캡처 뷰어
 
@@ -6,19 +7,33 @@
 """
 
 import difflib
-from pathlib import Path
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QPushButton, QFrame, QPlainTextEdit, QSizePolicy,
-    QMessageBox, QTabWidget, QSpinBox, QCheckBox,
-)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import (
-    QFont, QPixmap, QSyntaxHighlighter, QTextCharFormat, QColor,
-    QTextCursor, QTextBlockFormat
-)
-
 import re
+from pathlib import Path
+
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QPixmap,
+    QSyntaxHighlighter,
+    QTextBlockFormat,
+    QTextCharFormat,
+    QTextCursor,
+)
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class PythonHighlighter(QSyntaxHighlighter):
@@ -33,36 +48,65 @@ class PythonHighlighter(QSyntaxHighlighter):
         keyword_fmt.setForeground(QColor("#cba6f7"))
         keyword_fmt.setFontWeight(QFont.Weight.Bold)
         keywords = [
-            'and', 'as', 'assert', 'async', 'await', 'break', 'class',
-            'continue', 'def', 'del', 'elif', 'else', 'except', 'finally',
-            'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda',
-            'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield',
-            'True', 'False', 'None'
+            "and",
+            "as",
+            "assert",
+            "async",
+            "await",
+            "break",
+            "class",
+            "continue",
+            "def",
+            "del",
+            "elif",
+            "else",
+            "except",
+            "finally",
+            "for",
+            "from",
+            "global",
+            "if",
+            "import",
+            "in",
+            "is",
+            "lambda",
+            "not",
+            "or",
+            "pass",
+            "raise",
+            "return",
+            "try",
+            "while",
+            "with",
+            "yield",
+            "True",
+            "False",
+            "None",
         ]
         for w in keywords:
-            self.rules.append((re.compile(rf'\b{w}\b'), keyword_fmt))
+            self.rules.append((re.compile(rf"\b{w}\b"), keyword_fmt))
 
         # 문자열
         string_fmt = QTextCharFormat()
         string_fmt.setForeground(QColor("#a6e3a1"))
-        self.rules.append((re.compile(r'\".*?\"'), string_fmt))
+        self.rules.append((re.compile(r"\".*?\""), string_fmt))
         self.rules.append((re.compile(r"\'.*?\'"), string_fmt))
 
         # 숫자
         number_fmt = QTextCharFormat()
         number_fmt.setForeground(QColor("#fab387"))
-        self.rules.append((re.compile(r'\b\d+\.?\d*\b'), number_fmt))
+        self.rules.append((re.compile(r"\b\d+\.?\d*\b"), number_fmt))
 
         # 주석
         comment_fmt = QTextCharFormat()
         comment_fmt.setForeground(QColor("#6c7086"))
         comment_fmt.setFontItalic(True)
-        self.rules.append((re.compile(r'#.*$', re.MULTILINE), comment_fmt))
+        self.rules.append((re.compile(r"#.*$", re.MULTILINE), comment_fmt))
 
         # 함수/메서드 호출
         func_fmt = QTextCharFormat()
         func_fmt.setForeground(QColor("#89b4fa"))
-        self.rules.append((re.compile(r'\b\w+(?=\()'), func_fmt))
+        self.rules.append((re.compile(r"\b\w+(?=\()"), func_fmt))
 
     def highlightBlock(self, text):
         for pattern, fmt in self.rules:
@@ -73,6 +117,7 @@ class PythonHighlighter(QSyntaxHighlighter):
 # ──────────────────────────────────────────────────
 # Diff 뷰어 (코드 변경 색상 표시)
 # ──────────────────────────────────────────────────
+
 
 class DiffCodeViewer(QPlainTextEdit):
     """
@@ -109,19 +154,21 @@ class DiffCodeViewer(QPlainTextEdit):
         diff_entries = []  # (prefix, line_text)
 
         for line in differ:
-            if line.startswith('---') or line.startswith('+++') or line.startswith('@@'):
+            if line.startswith("---") or line.startswith("+++") or line.startswith("@@"):
                 continue
-            elif line.startswith('+'):
-                diff_entries.append(('+', line[1:].rstrip('\n')))
-            elif line.startswith('-'):
-                diff_entries.append(('-', line[1:].rstrip('\n')))
+            elif line.startswith("+"):
+                diff_entries.append(("+", line[1:].rstrip("\n")))
+            elif line.startswith("-"):
+                diff_entries.append(("-", line[1:].rstrip("\n")))
             else:
-                diff_entries.append((' ', line[1:].rstrip('\n') if len(line) > 1 else line.rstrip('\n')))
+                diff_entries.append(
+                    (" ", line[1:].rstrip("\n") if len(line) > 1 else line.rstrip("\n"))
+                )
 
         if not diff_entries:
             # diff가 없으면 전체 코드를 그대로 표시
             for line in new_code.splitlines():
-                diff_entries.append((' ', line))
+                diff_entries.append((" ", line))
 
         # 텍스트와 배경색 설정
         cursor = self.textCursor()
@@ -129,19 +176,19 @@ class DiffCodeViewer(QPlainTextEdit):
 
         for i, (prefix, text) in enumerate(diff_entries):
             if i > 0:
-                cursor.insertText('\n')
+                cursor.insertText("\n")
 
             # 배경색 결정
             block_fmt = QTextBlockFormat()
             char_fmt = QTextCharFormat()
             char_fmt.setFont(QFont("Consolas", 10))
 
-            if prefix == '+':
+            if prefix == "+":
                 # 추가된 줄: 초록 배경
                 block_fmt.setBackground(QColor("#1a3a1a"))
                 char_fmt.setForeground(QColor("#a6e3a1"))
                 display_text = f"+ {text}"
-            elif prefix == '-':
+            elif prefix == "-":
                 # 삭제된 줄: 빨간 배경
                 block_fmt.setBackground(QColor("#3a1a1a"))
                 char_fmt.setForeground(QColor("#f38ba8"))
@@ -162,6 +209,7 @@ class DiffCodeViewer(QPlainTextEdit):
 # 리사이즈 핸들 (드래그로 코드 에디터 높이 조절)
 # ──────────────────────────────────────────────────
 
+
 class ResizeHandle(QWidget):
     """드래그로 StepCard 코드 에디터 높이를 조절하는 핸들 위젯"""
 
@@ -177,12 +225,8 @@ class ResizeHandle(QWidget):
 
         self.setFixedHeight(8)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
-        self._normal_style = (
-            "background: #313244; border-radius: 3px; margin: 2px 30px;"
-        )
-        self._hover_style = (
-            "background: #585b70; border-radius: 3px; margin: 2px 30px;"
-        )
+        self._normal_style = "background: #313244; border-radius: 3px; margin: 2px 30px;"
+        self._hover_style = "background: #585b70; border-radius: 3px; margin: 2px 30px;"
         self.setStyleSheet(self._normal_style)
 
     def mousePressEvent(self, event):
@@ -191,7 +235,7 @@ class ResizeHandle(QWidget):
             # 현재 보이는 위젯의 높이를 기준으로 드래그 시작
             visible = next(
                 (t for t in self._targets if t.isVisible()),
-                self._targets[0] if self._targets else None
+                self._targets[0] if self._targets else None,
             )
             self._drag_start_height = visible.height() if visible else 200
 
@@ -217,18 +261,19 @@ class ResizeHandle(QWidget):
 # 스텝 카드 (액션 버튼 + Diff 포함)
 # ──────────────────────────────────────────────────
 
+
 class StepCard(QFrame):
     """스텝 카드 위젯: 코드 + 캡처 이미지 + 액션 버튼"""
 
-    delete_requested = pyqtSignal(int)      # step_id
-    insert_requested = pyqtSignal(int)      # after_step_id
-    move_up_requested = pyqtSignal(int)     # step_id
-    move_down_requested = pyqtSignal(int)   # step_id
-    code_edited = pyqtSignal(int, str)      # step_id, new_code
+    delete_requested = pyqtSignal(int)  # step_id
+    insert_requested = pyqtSignal(int)  # after_step_id
+    move_up_requested = pyqtSignal(int)  # step_id
+    move_down_requested = pyqtSignal(int)  # step_id
+    code_edited = pyqtSignal(int, str)  # step_id, new_code
 
-    def __init__(self, step_id: int, code: str,
-                 prev_code: str = "", capture_path: str = None,
-                 parent=None):
+    def __init__(
+        self, step_id: int, code: str, prev_code: str = "", capture_path: str = None, parent=None
+    ):
         super().__init__(parent)
         self.step_id = step_id
         self._code = code
@@ -255,7 +300,7 @@ class StepCard(QFrame):
         self.header_frame.setCursor(Qt.CursorShape.PointingHandCursor)
         self.header_frame.setStyleSheet("StepCard QFrame { background: transparent; }")
         self.header_frame.mousePressEvent = self._toggle_expand
-        
+
         header_layout = QHBoxLayout(self.header_frame)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(4)
@@ -323,11 +368,10 @@ class StepCard(QFrame):
         self.edit_btn = QPushButton("✏️ 수정")
         self.edit_btn.setToolTip("코드 직접 수정")
         edit_btn_style = btn_style.replace(
-            "border: 1px solid #45475a;",
-            "border: 1px solid #89b4fa;"
+            "border: 1px solid #45475a;", "border: 1px solid #89b4fa;"
         ).replace(
             "QPushButton:hover {\n                background-color: #313244;\n                border-color: #89b4fa;\n            }",
-            "QPushButton:hover { background-color: #1e3a5f; border-color: #89dceb; }"
+            "QPushButton:hover { background-color: #1e3a5f; border-color: #89dceb; }",
         )
         self.edit_btn.setStyleSheet(edit_btn_style)
         self.edit_btn.clicked.connect(self._toggle_edit)
@@ -337,9 +381,7 @@ class StepCard(QFrame):
         # 🗑️ 삭제
         self.delete_btn = QPushButton("🗑️")
         self.delete_btn.setToolTip("이 스텝 삭제")
-        del_style = btn_style.replace("#45475a", "#45475a").replace(
-            "#89b4fa", "#f38ba8"
-        )
+        del_style = btn_style.replace("#45475a", "#45475a").replace("#89b4fa", "#f38ba8")
         self.delete_btn.setStyleSheet(del_style)
         self.delete_btn.clicked.connect(self._on_delete)
         header_layout.addWidget(self.delete_btn)
@@ -351,15 +393,14 @@ class StepCard(QFrame):
         content_layout = QVBoxLayout(self.content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(4)
-        
+
         # ── 캡처 이미지 (있을 경우) ──
         if capture_path and Path(capture_path).exists():
             img_label = QLabel()
             pixmap = QPixmap(capture_path)
             if not pixmap.isNull():
                 scaled = pixmap.scaledToWidth(
-                    min(400, pixmap.width()),
-                    Qt.TransformationMode.SmoothTransformation
+                    min(400, pixmap.width()), Qt.TransformationMode.SmoothTransformation
                 )
                 img_label.setPixmap(scaled)
                 img_label.setStyleSheet("border: 1px solid #45475a; border-radius: 4px;")
@@ -493,11 +534,11 @@ class StepCard(QFrame):
     def _on_delete(self):
         """삭제 확인 후 시그널 발생"""
         reply = QMessageBox.question(
-            self, "스텝 삭제",
-            f"Step {self.step_id}을(를) 삭제하시겠습니까?\n"
-            "이 작업은 되돌릴 수 없습니다.",
+            self,
+            "스텝 삭제",
+            f"Step {self.step_id}을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.delete_requested.emit(self.step_id)
@@ -510,6 +551,7 @@ class StepCard(QFrame):
 # ──────────────────────────────────────────────────
 # 블럭 뷰 카드 (라이브러리 블럭 / 스텝 블럭 공통)
 # ──────────────────────────────────────────────────
+
 
 class _WaitSpinBox(QSpinBox):
     """Wait 입력 전용 SpinBox - focus 시 숫자 부분만 자동 selectAll.
@@ -591,10 +633,16 @@ class BlockCard(QFrame):
         }
     """
 
-    def __init__(self, step_id: int, title: str, code: str,
-                 status: str = "", parent=None,
-                 wait_after_ms: int | None = None,
-                 default_wait_ms: int = 500):
+    def __init__(
+        self,
+        step_id: int,
+        title: str,
+        code: str,
+        status: str = "",
+        parent=None,
+        wait_after_ms: int | None = None,
+        default_wait_ms: int = 500,
+    ):
         """
         Args:
             step_id: 스텝 ID (0 = 라이브러리 블럭, -1 = initial)
@@ -667,9 +715,7 @@ class BlockCard(QFrame):
         self.edit_btn.setToolTip("코드 직접 수정")
         self.edit_btn.clicked.connect(self._toggle_edit)
         # 헤더 클릭으로 편집 토글 안되도록 클릭 이벤트 차단
-        self.edit_btn.mousePressEvent = lambda e: (
-            QPushButton.mousePressEvent(self.edit_btn, e)
-        )
+        self.edit_btn.mousePressEvent = lambda e: QPushButton.mousePressEvent(self.edit_btn, e)
         h_layout.addWidget(self.edit_btn)
 
         # ── 삭제 버튼 (라이브러리 블럭=0은 제외) ──
@@ -679,8 +725,8 @@ class BlockCard(QFrame):
             self.delete_btn.setStyleSheet(del_style)
             self.delete_btn.setToolTip(f"Step {step_id} 블럭 삭제")
             self.delete_btn.clicked.connect(self._on_delete)
-            self.delete_btn.mousePressEvent = lambda e: (
-                QPushButton.mousePressEvent(self.delete_btn, e)
+            self.delete_btn.mousePressEvent = lambda e: QPushButton.mousePressEvent(
+                self.delete_btn, e
             )
             h_layout.addWidget(self.delete_btn)
 
@@ -688,9 +734,11 @@ class BlockCard(QFrame):
         # Initial 블럭=-1 도 허용 (Phase 2.5) — driver/options 등 변수 재정의 시나리오.
         if step_id > 0 or step_id == -1:
             self.run_single_btn = QPushButton("⏯ 단독")
-            single_style = self._RUN_BTN_STYLE.replace(
-                "#1e3a1e", "#2a2a4a"
-            ).replace("#a6e3a1", "#cba6f7").replace("#2d5a2d", "#3a3a5a")
+            single_style = (
+                self._RUN_BTN_STYLE.replace("#1e3a1e", "#2a2a4a")
+                .replace("#a6e3a1", "#cba6f7")
+                .replace("#2d5a2d", "#3a3a5a")
+            )
             self.run_single_btn.setStyleSheet(single_style)
             if step_id == -1:
                 tooltip = (
@@ -708,8 +756,8 @@ class BlockCard(QFrame):
             self.run_single_btn.clicked.connect(
                 lambda: self.run_single_requested.emit(self.step_id)
             )
-            self.run_single_btn.mousePressEvent = lambda e: (
-                QPushButton.mousePressEvent(self.run_single_btn, e)
+            self.run_single_btn.mousePressEvent = lambda e: QPushButton.mousePressEvent(
+                self.run_single_btn, e
             )
             h_layout.addWidget(self.run_single_btn)
 
@@ -717,13 +765,10 @@ class BlockCard(QFrame):
         self.run_btn = QPushButton("▶ 여기서 실행")
         self.run_btn.setStyleSheet(self._RUN_BTN_STYLE)
         self.run_btn.setToolTip(
-            "라이브러리 블럭 재초기화" if step_id == 0
-            else f"Step {step_id}부터 끝까지 이어서 실행"
+            "라이브러리 블럭 재초기화" if step_id == 0 else f"Step {step_id}부터 끝까지 이어서 실행"
         )
         self.run_btn.clicked.connect(lambda: self.run_from_here_requested.emit(self.step_id))
-        self.run_btn.mousePressEvent = lambda e: (
-            QPushButton.mousePressEvent(self.run_btn, e)
-        )
+        self.run_btn.mousePressEvent = lambda e: QPushButton.mousePressEvent(self.run_btn, e)
         h_layout.addWidget(self.run_btn)
 
         layout.addWidget(header_frame)
@@ -759,9 +804,7 @@ class BlockCard(QFrame):
             wait_layout.setSpacing(6)
 
             wait_label = QLabel("⏱ 대기시간")
-            wait_label.setStyleSheet(
-                "color: #cdd6f4; border: none; font-size: 11px;"
-            )
+            wait_label.setStyleSheet("color: #cdd6f4; border: none; font-size: 11px;")
             wait_layout.addWidget(wait_label)
 
             self.wait_spin = _WaitSpinBox()
@@ -769,9 +812,7 @@ class BlockCard(QFrame):
             self.wait_spin.setSuffix(" ms")
             # 화살표 버튼 제거 — ms 단위라 1씩 증감 불필요, 직접 입력
             self.wait_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-            self.wait_spin.setValue(
-                wait_after_ms if wait_after_ms is not None else default_wait_ms
-            )
+            self.wait_spin.setValue(wait_after_ms if wait_after_ms is not None else default_wait_ms)
             self.wait_spin.setToolTip(
                 "이 step 후 대기시간 (ms). 직접 입력.\n"
                 "오른쪽 '기본값 사용' 체크 시 세션/글로벌 default 사용."
@@ -929,10 +970,11 @@ class BlockCard(QFrame):
     def _on_delete(self):
         """삭제 확인 후 시그널 발생"""
         reply = QMessageBox.question(
-            self, "블럭 삭제",
+            self,
+            "블럭 삭제",
             f"Step {self.step_id} 블럭을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.block_delete_requested.emit(self.step_id)
@@ -941,6 +983,7 @@ class BlockCard(QFrame):
 # ──────────────────────────────────────────────────
 # 블럭 뷰 위젯 (Colab-style 전체 레이아웃)
 # ──────────────────────────────────────────────────
+
 
 class BlockViewWidget(QWidget):
     """
@@ -1004,17 +1047,21 @@ class BlockViewWidget(QWidget):
         """
 
         self.run_all_btn = QPushButton("▶ 처음부터 실행")
-        self.run_all_btn.setStyleSheet(_btn_style.replace("#cba6f7", "#a6e3a1").replace(
-            "color: #cdd6f4;", "color: #a6e3a1; font-weight: bold;"
-        ))
+        self.run_all_btn.setStyleSheet(
+            _btn_style.replace("#cba6f7", "#a6e3a1").replace(
+                "color: #cdd6f4;", "color: #a6e3a1; font-weight: bold;"
+            )
+        )
         self.run_all_btn.setToolTip("라이브러리 블럭부터 모든 스텝 순서대로 실행")
         self.run_all_btn.clicked.connect(lambda: self.run_from_step_requested.emit(1))
         tb_layout.addWidget(self.run_all_btn)
 
         self.stop_btn = QPushButton("■ 중지")
-        self.stop_btn.setStyleSheet(_btn_style.replace("#cba6f7", "#f38ba8").replace(
-            "color: #cdd6f4;", "color: #f38ba8; font-weight: bold;"
-        ))
+        self.stop_btn.setStyleSheet(
+            _btn_style.replace("#cba6f7", "#f38ba8").replace(
+                "color: #cdd6f4;", "color: #f38ba8; font-weight: bold;"
+            )
+        )
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_requested.emit)
         tb_layout.addWidget(self.stop_btn)
@@ -1055,9 +1102,7 @@ class BlockViewWidget(QWidget):
             }
         """)
         # editingFinished — 입력 완료 후에만 emit (포커스 손실 방지)
-        self.session_wait_spin.editingFinished.connect(
-            self._on_session_wait_spin_changed
-        )
+        self.session_wait_spin.editingFinished.connect(self._on_session_wait_spin_changed)
         # 직전 값 추적 (editingFinished 가 unchanged focusOut 도 trigger 하므로)
         self._last_session_wait = 500
         tb_layout.addWidget(self.session_wait_spin)
@@ -1125,7 +1170,7 @@ class BlockViewWidget(QWidget):
                 step_id=0,
                 title="📦 라이브러리 블럭 (imports + 공통 함수)",
                 code=library_code,
-                status=""
+                status="",
             )
             lib_card.run_from_here_requested.connect(self._on_run_from)
             lib_card.block_code_edited.connect(self.block_code_edited)
@@ -1137,10 +1182,7 @@ class BlockViewWidget(QWidget):
         # Initial 블럭 (변수/초기값) — 첫 step 의 setup 변수만 추출 (없으면 skip)
         if initial_code.strip():
             init_card = BlockCard(
-                step_id=-1,
-                title="🎬 Initial 블럭 (변수/초기값)",
-                code=initial_code,
-                status=""
+                step_id=-1, title="🎬 Initial 블럭 (변수/초기값)", code=initial_code, status=""
             )
             init_card.run_from_here_requested.connect(self._on_run_from)
             init_card.run_single_requested.connect(self.run_single_step_requested)
@@ -1276,20 +1318,21 @@ class BlockViewWidget(QWidget):
 # 코드 뷰어 패널
 # ──────────────────────────────────────────────────
 
+
 class CodeViewer(QWidget):
     """코드 + 캡처 뷰어 패널"""
 
-    run_code_requested = pyqtSignal(str)           # 코드 실행 요청 (기존 모드)
-    stop_code_requested = pyqtSignal()             # 코드 중지 요청
-    step_delete_requested = pyqtSignal(int)        # 스텝 삭제 요청
-    step_insert_requested = pyqtSignal(int)        # 스텝 삽입 요청 (after_step_id)
-    step_move_requested = pyqtSignal(int, str)     # 스텝 이동 (step_id, "up"/"down")
-    step_code_edited = pyqtSignal(int, str)        # 사용자가 코드 직접 수정 (step_id, new_code)
+    run_code_requested = pyqtSignal(str)  # 코드 실행 요청 (기존 모드)
+    stop_code_requested = pyqtSignal()  # 코드 중지 요청
+    step_delete_requested = pyqtSignal(int)  # 스텝 삭제 요청
+    step_insert_requested = pyqtSignal(int)  # 스텝 삽입 요청 (after_step_id)
+    step_move_requested = pyqtSignal(int, str)  # 스텝 이동 (step_id, "up"/"down")
+    step_code_edited = pyqtSignal(int, str)  # 사용자가 코드 직접 수정 (step_id, new_code)
     # 블럭 뷰 전용 시그널
-    run_from_step_requested = pyqtSignal(int)      # N번 스텝부터 블럭 실행 요청
-    run_single_step_requested = pyqtSignal(int)    # N번 스텝 단독 실행 (Phase 1)
-    wait_changed = pyqtSignal(int, object)         # wait 변경 (step_id, ms or None)
-    kernel_reset_requested = pyqtSignal()          # 커널 재시작 요청
+    run_from_step_requested = pyqtSignal(int)  # N번 스텝부터 블럭 실행 요청
+    run_single_step_requested = pyqtSignal(int)  # N번 스텝 단독 실행 (Phase 1)
+    wait_changed = pyqtSignal(int, object)  # wait 변경 (step_id, ms or None)
+    kernel_reset_requested = pyqtSignal()  # 커널 재시작 요청
     block_step_code_edited = pyqtSignal(int, str)  # 블럭에서 코드 수정 (step_id, new_code)
     block_step_delete_requested = pyqtSignal(int)  # 블럭 삭제 요청 (step_id)
 
@@ -1401,9 +1444,7 @@ class CodeViewer(QWidget):
         # 스크롤 영역 (스텝 카드들)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
-        )
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         self.cards_container = QWidget()
         self.cards_layout = QVBoxLayout(self.cards_container)
@@ -1466,8 +1507,7 @@ class CodeViewer(QWidget):
         if self._step_cards:
             prev_code = self._step_cards[-1].get_code()
 
-        card = StepCard(step_id, code, prev_code=prev_code,
-                       capture_path=capture_path)
+        card = StepCard(step_id, code, prev_code=prev_code, capture_path=capture_path)
 
         # 시그널 연결
         card.delete_requested.connect(self._on_step_delete)
@@ -1484,9 +1524,12 @@ class CodeViewer(QWidget):
         self._update_move_buttons()
 
         # 자동 스크롤
-        QTimer.singleShot(50, lambda: self.scroll_area.verticalScrollBar().setValue(
-            self.scroll_area.verticalScrollBar().maximum()
-        ))
+        QTimer.singleShot(
+            50,
+            lambda: self.scroll_area.verticalScrollBar().setValue(
+                self.scroll_area.verticalScrollBar().maximum()
+            ),
+        )
 
     def get_latest_code(self) -> str:
         """마지막 스텝의 코드 반환"""

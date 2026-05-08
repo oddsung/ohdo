@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 환경 설정 다이얼로그
 
@@ -5,17 +6,28 @@
 """
 
 import sys
-from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Dict, Optional
 
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QTextEdit, QComboBox, QGroupBox, QFormLayout,
-    QWidget, QStackedWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QFileDialog
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor
 
 
 class ScanWorker(QThread):
@@ -299,7 +311,7 @@ class EnvironmentSetupDialog(QDialog):
                 if is_valid:
                     # 유효한 환경 - 바로 적용
                     self.scan_result = saved_env
-                    self.selected_python = saved_env.get('python_path')
+                    self.selected_python = saved_env.get("python_path")
 
                     # 저장된 환경 사용 확인
                     QTimer.singleShot(100, lambda: self._show_cached_result(saved_env))
@@ -308,7 +320,7 @@ class EnvironmentSetupDialog(QDialog):
             # 새 스캔 필요
             self._start_scan()
 
-        except Exception as e:
+        except Exception:
             self._start_scan()
 
     def _show_cached_result(self, env_data: Dict):
@@ -317,14 +329,15 @@ class EnvironmentSetupDialog(QDialog):
         self._display_result(env_data)
 
         # F.2: 캐시에 Gemini 정보가 없거나 미설치면 자동 적용을 보류 (재검사 권장).
-        gemini_cached = env_data.get('gemini_cli') or {}
-        cache_complete = bool(gemini_cached) and bool(gemini_cached.get('installed'))
+        gemini_cached = env_data.get("gemini_cli") or {}
+        cache_complete = bool(gemini_cached) and bool(gemini_cached.get("installed"))
 
         if not cache_complete:
             # 캐시가 오래되어 Gemini 정보가 없거나 미설치 → 라이브 재스캔 추천
             self._show_buttons()
             QMessageBox.information(
-                self, "환경 재검사 필요",
+                self,
+                "환경 재검사 필요",
                 "저장된 환경에 Gemini CLI 정보가 누락되었거나 미설치 상태입니다.\n"
                 "'재스캔' 버튼으로 최신 상태를 확인하세요.",
             )
@@ -339,7 +352,7 @@ class EnvironmentSetupDialog(QDialog):
             f"버전: {env_data.get('python_version', 'N/A')}\n\n"
             f"이 설정을 사용하시겠습니까?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
+            QMessageBox.StandardButton.Yes,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
@@ -374,13 +387,11 @@ class EnvironmentSetupDialog(QDialog):
         """스캔 완료"""
         self.scan_result = result
 
-        if result.get('success'):
+        if result.get("success"):
             self._display_result(result)
         else:
             QMessageBox.warning(
-                self,
-                "스캔 실패",
-                result.get('error', '알 수 없는 오류가 발생했습니다.')
+                self, "스캔 실패", result.get("error", "알 수 없는 오류가 발생했습니다.")
             )
             self.stack.setCurrentIndex(2)  # 수동 설정 페이지
 
@@ -397,20 +408,20 @@ class EnvironmentSetupDialog(QDialog):
         self.stack.setCurrentIndex(1)
 
         # 시스템 정보
-        sys_info = result.get('system_info', {})
+        sys_info = result.get("system_info", {})
         self.sys_os_label.setText(f"{sys_info.get('os', '')} {sys_info.get('os_release', '')}")
-        self.sys_hostname_label.setText(sys_info.get('hostname', 'N/A'))
-        self.sys_python_label.setText(result.get('python_version', 'N/A'))
+        self.sys_hostname_label.setText(sys_info.get("hostname", "N/A"))
+        self.sys_python_label.setText(result.get("python_version", "N/A"))
 
         # Python 경로 목록
         self.python_combo.clear()
-        available = result.get('available_pythons', [])
+        available = result.get("available_pythons", [])
 
         for py in available:
-            path = py.get('path', '')
-            version = py.get('version', 'unknown')
-            is_current = py.get('is_current', False)
-            is_venv = py.get('is_venv', False)
+            path = py.get("path", "")
+            version = py.get("version", "unknown")
+            is_current = py.get("is_current", False)
+            is_venv = py.get("is_venv", False)
 
             suffix = ""
             if is_current:
@@ -421,7 +432,7 @@ class EnvironmentSetupDialog(QDialog):
             self.python_combo.addItem(f"{path} [v{version}]{suffix}", path)
 
         # 현재 사용 중인 Python 선택
-        current_path = result.get('python_path', sys.executable)
+        current_path = result.get("python_path", sys.executable)
         for i in range(self.python_combo.count()):
             if self.python_combo.itemData(i) == current_path:
                 self.python_combo.setCurrentIndex(i)
@@ -430,9 +441,9 @@ class EnvironmentSetupDialog(QDialog):
         self.selected_python = current_path
 
         # 패키지 상태
-        packages = result.get('packages', {})
-        required = packages.get('required', [])
-        optional = packages.get('optional', [])
+        packages = result.get("packages", {})
+        required = packages.get("required", [])
+        optional = packages.get("optional", [])
 
         self.pkg_table.setRowCount(len(required) + len(optional))
 
@@ -441,7 +452,7 @@ class EnvironmentSetupDialog(QDialog):
 
         for pkg in required:
             self._add_package_row(row, pkg, is_required=True)
-            if not pkg.get('installed'):
+            if not pkg.get("installed"):
                 has_missing = True
             row += 1
 
@@ -452,18 +463,18 @@ class EnvironmentSetupDialog(QDialog):
         self.install_btn.setVisible(has_missing)
 
         # Gemini CLI 상태 표시 (F.2)
-        self._display_gemini(result.get('gemini_cli') or {})
+        self._display_gemini(result.get("gemini_cli") or {})
 
         # Apply 버튼 게이트 갱신
         self._update_apply_gate(result)
 
     def _display_gemini(self, gemini: Dict):
         """Gemini CLI 상태 패널 갱신"""
-        installed = bool(gemini.get('installed'))
-        path = gemini.get('path')
-        version = gemini.get('version')
-        error = gemini.get('error')
-        detail = gemini.get('detail') or ""
+        installed = bool(gemini.get("installed"))
+        path = gemini.get("path")
+        version = gemini.get("version")
+        error = gemini.get("error")
+        detail = gemini.get("detail") or ""
 
         if installed:
             self.gemini_status_label.setText("✅ 설치됨")
@@ -471,17 +482,19 @@ class EnvironmentSetupDialog(QDialog):
             self.gemini_detail_label.setText("")
         else:
             err_label = {
-                'not_found': "❌ 미설치 (PATH 에 없음)",
-                'timeout': "⚠️ 응답 시간 초과",
-                'execution_error': "⚠️ 실행 오류",
-                'non_zero_exit': "⚠️ 비정상 종료",
+                "not_found": "❌ 미설치 (PATH 에 없음)",
+                "timeout": "⚠️ 응답 시간 초과",
+                "execution_error": "⚠️ 실행 오류",
+                "non_zero_exit": "⚠️ 비정상 종료",
             }.get(error, "❌ 사용 불가")
             self.gemini_status_label.setText(err_label)
             self.gemini_status_label.setStyleSheet("color: #f38ba8; font-weight: bold;")
             # 미설치는 가장 흔한 경로 — 추가 안내 1줄
-            if error == 'not_found':
-                detail = (detail + "\n'gemini' 명령이 PATH 에서 동작해야 AI 채팅이 가능합니다. "
-                          "설치 후 '재스캔' 을 눌러주세요.").strip()
+            if error == "not_found":
+                detail = (
+                    detail + "\n'gemini' 명령이 PATH 에서 동작해야 AI 채팅이 가능합니다. "
+                    "설치 후 '재스캔' 을 눌러주세요."
+                ).strip()
             self.gemini_detail_label.setText(detail)
 
         self.gemini_path_label.setText(path or "-")
@@ -495,9 +508,9 @@ class EnvironmentSetupDialog(QDialog):
             2) Gemini CLI installed=True
         둘 다 만족하지 못하면 비활성, tooltip 으로 사유 노출.
         """
-        packages = result.get('packages') or {}
-        all_required = bool(packages.get('all_required_installed'))
-        gemini_ok = bool((result.get('gemini_cli') or {}).get('installed'))
+        packages = result.get("packages") or {}
+        all_required = bool(packages.get("all_required_installed"))
+        gemini_ok = bool((result.get("gemini_cli") or {}).get("installed"))
 
         reasons = []
         if not all_required:
@@ -514,15 +527,15 @@ class EnvironmentSetupDialog(QDialog):
 
     def _add_package_row(self, row: int, pkg: Dict, is_required: bool):
         """패키지 테이블 행 추가"""
-        name_item = QTableWidgetItem(pkg.get('package', ''))
+        name_item = QTableWidgetItem(pkg.get("package", ""))
         self.pkg_table.setItem(row, 0, name_item)
 
-        installed = pkg.get('installed', False)
+        installed = pkg.get("installed", False)
         status_item = QTableWidgetItem("✅ 설치됨" if installed else "❌ 미설치")
         status_item.setForeground(QColor("#a6e3a1" if installed else "#f38ba8"))
         self.pkg_table.setItem(row, 1, status_item)
 
-        version_item = QTableWidgetItem(pkg.get('version', '-') or '-')
+        version_item = QTableWidgetItem(pkg.get("version", "-") or "-")
         self.pkg_table.setItem(row, 2, version_item)
 
         req_item = QTableWidgetItem("필수" if is_required else "선택")
@@ -532,10 +545,7 @@ class EnvironmentSetupDialog(QDialog):
     def _browse_python(self):
         """Python 경로 찾기"""
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Python 실행 파일 선택",
-            "",
-            "Python (python.exe);;모든 파일 (*.*)"
+            self, "Python 실행 파일 선택", "", "Python (python.exe);;모든 파일 (*.*)"
         )
 
         if path:
@@ -547,10 +557,7 @@ class EnvironmentSetupDialog(QDialog):
     def _browse_python_manual(self):
         """수동 설정에서 Python 경로 찾기"""
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Python 실행 파일 선택",
-            "",
-            "Python (python.exe);;모든 파일 (*.*)"
+            self, "Python 실행 파일 선택", "", "Python (python.exe);;모든 파일 (*.*)"
         )
 
         if path:
@@ -565,6 +572,7 @@ class EnvironmentSetupDialog(QDialog):
             return
 
         from pathlib import Path as P
+
         if not P(path).exists():
             QMessageBox.warning(self, "경고", f"파일을 찾을 수 없습니다:\n{path}")
             return
@@ -577,8 +585,8 @@ class EnvironmentSetupDialog(QDialog):
         if not self.scan_result:
             return
 
-        packages = self.scan_result.get('packages', {}).get('required', [])
-        missing = [p for p in packages if not p.get('installed')]
+        packages = self.scan_result.get("packages", {}).get("required", [])
+        missing = [p for p in packages if not p.get("installed")]
 
         if not missing:
             QMessageBox.information(self, "알림", "모든 필수 패키지가 설치되어 있습니다.")
@@ -587,9 +595,9 @@ class EnvironmentSetupDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "패키지 설치",
-            f"다음 패키지를 설치하시겠습니까?\n\n" +
-            "\n".join([f"• {p['package']}" for p in missing]),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            "다음 패키지를 설치하시겠습니까?\n\n"
+            + "\n".join([f"• {p['package']}" for p in missing]),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
@@ -600,14 +608,10 @@ class EnvironmentSetupDialog(QDialog):
 
             for pkg in missing:
                 self.scan_status.setText(f"{pkg['package']} 설치 중...")
-                success, msg = scanner.install_package(python_path, pkg['package'])
+                success, msg = scanner.install_package(python_path, pkg["package"])
 
                 if not success:
-                    QMessageBox.warning(
-                        self,
-                        "설치 실패",
-                        f"{pkg['package']} 설치 실패:\n{msg}"
-                    )
+                    QMessageBox.warning(self, "설치 실패", f"{pkg['package']} 설치 실패:\n{msg}")
 
             # 재스캔
             self._start_scan(python_path)
@@ -636,21 +640,23 @@ class EnvironmentSetupDialog(QDialog):
         if self.stack.currentIndex() == 1:  # 결과 페이지
             self.selected_python = self.python_combo.currentData()
             if self.selected_python:
-                self.scan_result['python_path'] = self.selected_python
+                self.scan_result["python_path"] = self.selected_python
 
         # 최종 게이트 (F.2): 어떻게든 비활성이 풀려도 한 번 더 막는다
-        packages = self.scan_result.get('packages') or {}
-        gemini = self.scan_result.get('gemini_cli') or {}
-        if not packages.get('all_required_installed') or not gemini.get('installed'):
+        packages = self.scan_result.get("packages") or {}
+        gemini = self.scan_result.get("gemini_cli") or {}
+        if not packages.get("all_required_installed") or not gemini.get("installed"):
             problems = []
-            if not packages.get('all_required_installed'):
+            if not packages.get("all_required_installed"):
                 problems.append("• 필수 패키지 일부 미설치")
-            if not gemini.get('installed'):
+            if not gemini.get("installed"):
                 problems.append("• Gemini CLI 미설치 (AI 채팅 불가)")
             reply = QMessageBox.warning(
-                self, "환경 미충족",
-                "다음 문제가 있습니다:\n\n" + "\n".join(problems) +
-                "\n\n그래도 이 설정으로 진행하시겠습니까?\n"
+                self,
+                "환경 미충족",
+                "다음 문제가 있습니다:\n\n"
+                + "\n".join(problems)
+                + "\n\n그래도 이 설정으로 진행하시겠습니까?\n"
                 "(나중에 '재스캔' 으로 다시 검사할 수 있습니다)",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,

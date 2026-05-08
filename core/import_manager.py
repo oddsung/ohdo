@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 Import 관리 모듈
 
@@ -6,26 +7,90 @@ Import 관리 모듈
 """
 
 import re
-from typing import Optional
-
 
 # Python 표준 라이브러리 목록 (import 분류용)
-STDLIB_MODULES = frozenset({
-    'os', 'sys', 'time', 'json', 'pathlib', 'subprocess', 're',
-    'datetime', 'collections', 'functools', 'itertools', 'typing',
-    'dataclasses', 'abc', 'io', 'logging', 'shutil', 'tempfile',
-    'threading', 'queue', 'uuid', 'hashlib', 'base64', 'glob',
-    'math', 'random', 'string', 'traceback', 'copy', 'enum',
-    'csv', 'sqlite3', 'http', 'urllib', 'email', 'html',
-    'xml', 'ctypes', 'struct', 'socket', 'ssl', 'asyncio',
-    'multiprocessing', 'concurrent', 'contextlib', 'inspect',
-    'unittest', 'pprint', 'textwrap', 'warnings', 'signal',
-    'platform', 'getpass', 'configparser', 'argparse', 'pickle',
-    'shelve', 'zipfile', 'tarfile', 'gzip', 'bz2', 'lzma',
-    'webbrowser', 'tkinter', 'codecs', 'locale', 'struct',
-    'operator', 'heapq', 'bisect', 'array', 'decimal', 'fractions',
-    'statistics', 'secrets', 'hmac', 'difflib', 'fileinput',
-})
+STDLIB_MODULES = frozenset(
+    {
+        "os",
+        "sys",
+        "time",
+        "json",
+        "pathlib",
+        "subprocess",
+        "re",
+        "datetime",
+        "collections",
+        "functools",
+        "itertools",
+        "typing",
+        "dataclasses",
+        "abc",
+        "io",
+        "logging",
+        "shutil",
+        "tempfile",
+        "threading",
+        "queue",
+        "uuid",
+        "hashlib",
+        "base64",
+        "glob",
+        "math",
+        "random",
+        "string",
+        "traceback",
+        "copy",
+        "enum",
+        "csv",
+        "sqlite3",
+        "http",
+        "urllib",
+        "email",
+        "html",
+        "xml",
+        "ctypes",
+        "struct",
+        "socket",
+        "ssl",
+        "asyncio",
+        "multiprocessing",
+        "concurrent",
+        "contextlib",
+        "inspect",
+        "unittest",
+        "pprint",
+        "textwrap",
+        "warnings",
+        "signal",
+        "platform",
+        "getpass",
+        "configparser",
+        "argparse",
+        "pickle",
+        "shelve",
+        "zipfile",
+        "tarfile",
+        "gzip",
+        "bz2",
+        "lzma",
+        "webbrowser",
+        "tkinter",
+        "codecs",
+        "locale",
+        "struct",
+        "operator",
+        "heapq",
+        "bisect",
+        "array",
+        "decimal",
+        "fractions",
+        "statistics",
+        "secrets",
+        "hmac",
+        "difflib",
+        "fileinput",
+    }
+)
 
 
 def extract_imports(code: str) -> tuple[list[str], str]:
@@ -46,7 +111,7 @@ def extract_imports(code: str) -> tuple[list[str], str]:
     if not code or not code.strip():
         return [], ""
 
-    lines = code.split('\n')
+    lines = code.split("\n")
     import_lines = []
     body_start = 0
     in_header = True
@@ -56,10 +121,10 @@ def extract_imports(code: str) -> tuple[list[str], str]:
 
         if in_header:
             # 상단 영역: import문, 빈 줄, 주석, docstring 시작/끝 허용
-            if stripped.startswith(('import ', 'from ')):
+            if stripped.startswith(("import ", "from ")):
                 import_lines.append(line.rstrip())
                 body_start = i + 1
-            elif stripped == '' or stripped.startswith('#'):
+            elif stripped == "" or stripped.startswith("#"):
                 # 빈 줄이나 주석은 import 블록 사이에 올 수 있음
                 body_start = i + 1
             elif stripped.startswith(('"""', "'''")):
@@ -86,7 +151,7 @@ def extract_imports(code: str) -> tuple[list[str], str]:
     body_lines = lines[body_start:]
 
     # body 앞뒤 빈 줄 정리
-    body_code = '\n'.join(body_lines).strip()
+    body_code = "\n".join(body_lines).strip()
 
     return import_lines, body_code
 
@@ -115,10 +180,10 @@ def merge_imports(import_lists: list[list[str]]) -> list[str]:
     def sort_key(imp: str):
         # import X → (모듈명, 0)
         # from X import Y → (모듈명, 1)
-        match = re.match(r'^(?:from\s+(\w+)|import\s+(\w+))', imp)
-        module = (match.group(1) or match.group(2)) if match else ''
+        match = re.match(r"^(?:from\s+(\w+)|import\s+(\w+))", imp)
+        module = (match.group(1) or match.group(2)) if match else ""
         is_stdlib = 0 if module.lower() in STDLIB_MODULES else 1
-        is_from = 1 if imp.startswith('from') else 0
+        is_from = 1 if imp.startswith("from") else 0
         return (is_stdlib, module.lower(), is_from)
 
     return sorted(unique_imports, key=sort_key)
@@ -144,8 +209,8 @@ def assemble_script(
 
     # import 헤더
     if imports:
-        parts.append('\n'.join(imports))
-        parts.append('')  # import와 코드 사이 빈 줄
+        parts.append("\n".join(imports))
+        parts.append("")  # import와 코드 사이 빈 줄
 
     # 스텝 코드 순서대로 결합
     for entry in step_entries:
@@ -155,7 +220,7 @@ def assemble_script(
             if not code:
                 continue
             # task_name 정규화: 줄바꿈 → 공백, 50자 제한
-            task_name = ' '.join(task_name.splitlines()).strip()
+            task_name = " ".join(task_name.splitlines()).strip()
             if len(task_name) > 50:
                 task_name = task_name[:47] + "..."
             parts.append(f"# === Step {step_id}: {task_name} (시작) ===")
@@ -166,7 +231,7 @@ def assemble_script(
             if code:
                 parts.append(code)
 
-    return '\n\n'.join(parts)
+    return "\n\n".join(parts)
 
 
 def extract_initial_block(session) -> str:
@@ -193,14 +258,13 @@ def extract_initial_block(session) -> str:
     if not session or not session.steps:
         return ""
     first_step = session.steps[0]
-    generated_code = (
-        first_step.get("generated_code", "") if isinstance(first_step, dict) else ""
-    )
+    generated_code = first_step.get("generated_code", "") if isinstance(first_step, dict) else ""
     if not generated_code or not generated_code.strip():
         return ""
     # def main() 패턴이면 먼저 unwrap (변수가 함수 안에 있을 수 있음)
     code = _unwrap_main_function(generated_code)
     import ast
+
     try:
         tree = ast.parse(code)
     except SyntaxError:
@@ -243,6 +307,7 @@ def _unwrap_main_function(code: str) -> str:
         return code  # 빠른 path — main 함수 없으면 처리 불필요
 
     import ast
+
     try:
         tree = ast.parse(code)
     except SyntaxError:
@@ -258,9 +323,11 @@ def _unwrap_main_function(code: str) -> str:
         # if __name__ == "__main__": 블록 제거 (main() 호출 라인 자동 제거)
         if isinstance(node, ast.If):
             test = node.test
-            if (isinstance(test, ast.Compare)
-                    and isinstance(test.left, ast.Name)
-                    and test.left.id == "__name__"):
+            if (
+                isinstance(test, ast.Compare)
+                and isinstance(test.left, ast.Name)
+                and test.left.id == "__name__"
+            ):
                 continue
         new_body.append(node)
 
@@ -291,11 +358,11 @@ def _smart_dedent(code: str) -> str:
     """
     if not code or not code.strip():
         return code
-    lines = code.split('\n')
-    code_lines = [l for l in lines if l.strip() and not l.lstrip().startswith('#')]
+    lines = code.split("\n")
+    code_lines = [ln for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
     if not code_lines:
         return code
-    common_indent = min(len(l) - len(l.lstrip()) for l in code_lines)
+    common_indent = min(len(ln) - len(ln.lstrip()) for ln in code_lines)
     if common_indent == 0:
         return code
     result = []
@@ -305,7 +372,7 @@ def _smart_dedent(code: str) -> str:
         else:
             # indent 가 common_indent 보다 적은 라인 (boundary 주석 등) — 그대로
             result.append(line)
-    return '\n'.join(result)
+    return "\n".join(result)
 
 
 def extract_code_delta(new_body: str, prev_body: str) -> str:
@@ -330,8 +397,8 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
     if not prev_body or not prev_body.strip():
         return _smart_dedent(_unwrap_main_function(new_body))  # 첫 스텝
 
-    new_lines = new_body.split('\n')
-    prev_lines = prev_body.rstrip().split('\n')
+    new_lines = new_body.split("\n")
+    prev_lines = prev_body.rstrip().split("\n")
 
     # ── 1) prefix 매칭 (빠른 path) ──
     n = len(prev_lines)
@@ -343,7 +410,7 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
             delta_lines = new_lines[n:]
             while delta_lines and not delta_lines[0].strip():
                 delta_lines.pop(0)
-            result = '\n'.join(delta_lines).strip()
+            result = "\n".join(delta_lines).strip()
             if result:
                 return _smart_dedent(_unwrap_main_function(result))
             return _smart_dedent(_unwrap_main_function(new_body))
@@ -352,10 +419,13 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
     # AI 가 이전 코드를 약간 변경해서 prefix 매칭 실패한 경우.
     # opcodes 의 'insert' / 'replace' 의 b 측 (= 새 코드) 만 추출.
     import difflib
+
     prev_stripped = [line.rstrip() for line in prev_lines]
     new_stripped = [line.rstrip() for line in new_lines]
     sm = difflib.SequenceMatcher(
-        a=prev_stripped, b=new_stripped, autojunk=False,
+        a=prev_stripped,
+        b=new_stripped,
+        autojunk=False,
     )
     # ratio 가 너무 낮으면 (거의 다른 코드) diff 의미 없음 → 전체 반환
     if sm.ratio() < 0.3:
@@ -363,7 +433,7 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
 
     delta_lines: list[str] = []
     for tag, _i1, _i2, j1, j2 in sm.get_opcodes():
-        if tag in ('insert', 'replace'):
+        if tag in ("insert", "replace"):
             delta_lines.extend(new_lines[j1:j2])
 
     # 앞뒤 빈 줄 정리
@@ -378,13 +448,13 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
     # 있어도 새 try/if/for 블록의 일부일 수 있음 — 헤더만 제거되면 본문이 module-level
     # 로 평면화되어 try/except 의 의미가 깨지는 버그가 발생 (5/4 발견).
     _control_header_re = re.compile(
-        r'^(try|except|else|elif|finally|if|for|while|with|def|class)\b'
+        r"^(try|except|else|elif|finally|if|for|while|with|def|class)\b"
     )
     prev_set = {ln.strip() for ln in prev_stripped if ln.strip()}
     filtered: list[str] = []
     for line in delta_lines:
         s = line.strip()
-        if not s or s.startswith('#'):
+        if not s or s.startswith("#"):
             filtered.append(line)
             continue
         if s in prev_set and not _control_header_re.match(s):
@@ -396,36 +466,33 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
     # delta 에서 그 변수를 참조하면 NameError. 그 라인 제거.
     # 예: prev 에 `except Exception as e:`, delta 에 `print(f"오류: {e}")` 만 있음.
     import re as _re
-    delta_has_except = any(
-        _re.search(r'\bexcept\b', ln) for ln in delta_lines
-    )
+
+    delta_has_except = any(_re.search(r"\bexcept\b", ln) for ln in delta_lines)
     if not delta_has_except:
         # prev 의 except 캡처 변수명 모두 추출
         captured_vars: set[str] = set()
         for ln in prev_lines:
             for m in _re.finditer(
-                r'\bexcept\s+[\w\s,()]+?\s+as\s+(\w+)\s*:', ln,
+                r"\bexcept\s+[\w\s,()]+?\s+as\s+(\w+)\s*:",
+                ln,
             ):
                 captured_vars.add(m.group(1))
         if captured_vars:
             cleaned: list[str] = []
             for line in delta_lines:
                 s = line.strip()
-                if not s or s.startswith('#'):
+                if not s or s.startswith("#"):
                     cleaned.append(line)
                     continue
                 # 캡처 변수명을 word boundary 로 참조하는 라인이면 제거
-                if any(
-                    _re.search(rf'\b{_re.escape(v)}\b', line)
-                    for v in captured_vars
-                ):
+                if any(_re.search(rf"\b{_re.escape(v)}\b", line) for v in captured_vars):
                     continue
                 cleaned.append(line)
             delta_lines = cleaned
 
     # .strip() 사용 안 함 — 첫 라인의 indent 가 잘리면 _smart_dedent 가 못 풀어줌.
     # 빈 줄 정리는 위 while loop 에서 이미 처리됨.
-    result = '\n'.join(delta_lines)
+    result = "\n".join(delta_lines)
     # diff 결과 비어있거나 거의 전체 (90%+) 면 신뢰 못 함 → 전체 반환 (경계 주석으로 감쌈)
     if not result.strip() or len(result) >= len(new_body) * 0.9:
         return _smart_dedent(_unwrap_main_function(new_body))
@@ -460,7 +527,7 @@ def extract_package_names(imports: list[str]) -> list[str]:
     """
     packages = set()
     for imp in imports:
-        match = re.match(r'^(?:from\s+(\w+)|import\s+(\w+))', imp.strip())
+        match = re.match(r"^(?:from\s+(\w+)|import\s+(\w+))", imp.strip())
         if match:
             pkg = match.group(1) or match.group(2)
             if pkg.lower() not in STDLIB_MODULES:

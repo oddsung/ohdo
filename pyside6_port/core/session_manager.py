@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 세션 매니저
 
@@ -6,13 +7,13 @@
 """
 
 import json
-import uuid
-import shutil
 import logging
-from pathlib import Path
+import shutil
+import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
-from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
 
@@ -21,19 +22,22 @@ logger = logging.getLogger(__name__)
 # 데이터 모델
 # ──────────────────────────────────────────────
 
+
 @dataclass
 class CaptureInfo:
     """캡처 이미지 정보"""
-    type: str = "screen"                      # "screen" | "object"
-    path: str = ""                            # 상대 경로
+
+    type: str = "screen"  # "screen" | "object"
+    path: str = ""  # 상대 경로
     timestamp: str = ""
     resolution: str = ""
-    selector_info: Optional[dict] = None      # 객체 선택 정보
+    selector_info: Optional[dict] = None  # 객체 선택 정보
 
 
 @dataclass
 class PromptLog:
     """AI 프롬프트/응답 로그"""
+
     system_prompt: str = ""
     full_prompt: str = ""
     raw_response: str = ""
@@ -44,6 +48,7 @@ class PromptLog:
 @dataclass
 class ExecutionResult:
     """코드 실행 결과"""
+
     success: bool = False
     output: str = ""
     error: Optional[str] = None
@@ -54,7 +59,8 @@ class ExecutionResult:
 @dataclass
 class ConversationMessage:
     """대화 메시지"""
-    role: str = ""       # "user" | "assistant" | "system"
+
+    role: str = ""  # "user" | "assistant" | "system"
     content: str = ""
     timestamp: str = ""
 
@@ -62,8 +68,9 @@ class ConversationMessage:
 @dataclass
 class Step:
     """워크플로우의 하나의 스텝"""
+
     step_id: int = 0
-    status: str = "pending"                    # "pending" | "completed" | "failed"
+    status: str = "pending"  # "pending" | "completed" | "failed"
     created_at: str = ""
     conversation: list = field(default_factory=list)
     generated_code: str = ""
@@ -72,7 +79,7 @@ class Step:
     prompt_log: Optional[dict] = None
     execution_result: Optional[dict] = None
     # import 분리 필드 (Phase 1)
-    step_code: str = ""                        # 이 스텝만의 로직 (import 제외)
+    step_code: str = ""  # 이 스텝만의 로직 (import 제외)
     step_imports: list = field(default_factory=list)  # 이 스텝이 추가한 import 문
     # Step 후 대기시간 (ms). None 이면 settings.execution.step_delay_ms 사용 (default).
     # 양수면 이 step 만 override.
@@ -87,36 +94,42 @@ class Step:
 @dataclass
 class Session:
     """하나의 RPA 세션 (워크플로우)"""
+
     session_id: str = ""
     version: str = "2.0"
     created_at: str = ""
     updated_at: str = ""
     title: str = ""
     description: str = ""
-    project_type: str = "desktop"              # "desktop" | "web"
+    project_type: str = "desktop"  # "desktop" | "web"
 
-    settings: dict = field(default_factory=lambda: {
-        "ai_engine": "gemini_cli",
-        "image_quality": 60,
-        # step_delay_ms: None = 글로벌 settings.execution.step_delay_ms 사용 (default)
-        # int = 이 세션만의 default (개별 step 의 wait_after_ms 보다 낮은 우선순위)
-        "step_delay_ms": None,
-    })
+    settings: dict = field(
+        default_factory=lambda: {
+            "ai_engine": "gemini_cli",
+            "image_quality": 60,
+            # step_delay_ms: None = 글로벌 settings.execution.step_delay_ms 사용 (default)
+            # int = 이 세션만의 default (개별 step 의 wait_after_ms 보다 낮은 우선순위)
+            "step_delay_ms": None,
+        }
+    )
 
     steps: list = field(default_factory=list)
 
-    workflow_metadata: dict = field(default_factory=lambda: {
-        "total_steps": 0,
-        "completed_steps": 0,
-        "total_execution_time_ms": 0,
-        "ai_total_tokens": 0,
-        "run_count": 0
-    })
+    workflow_metadata: dict = field(
+        default_factory=lambda: {
+            "total_steps": 0,
+            "completed_steps": 0,
+            "total_execution_time_ms": 0,
+            "ai_total_tokens": 0,
+            "run_count": 0,
+        }
+    )
 
 
 @dataclass
 class SessionSummary:
     """세션 목록 표시용 요약 정보"""
+
     session_id: str
     title: str
     description: str
@@ -130,6 +143,7 @@ class SessionSummary:
 # ──────────────────────────────────────────────
 # 세션 매니저
 # ──────────────────────────────────────────────
+
 
 class SessionManager:
     """
@@ -153,10 +167,7 @@ class SessionManager:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
     def create_session(
-        self,
-        title: str,
-        project_type: str = "desktop",
-        description: str = ""
+        self, title: str, project_type: str = "desktop", description: str = ""
     ) -> Session:
         """
         새로운 세션을 생성합니다.
@@ -173,7 +184,7 @@ class SessionManager:
             updated_at=now,
             title=title,
             description=description,
-            project_type=project_type
+            project_type=project_type,
         )
 
         # 세션 폴더 구조 생성
@@ -213,10 +224,7 @@ class SessionManager:
         with open(session_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        session = Session(**{
-            k: v for k, v in data.items()
-            if k in Session.__dataclass_fields__
-        })
+        session = Session(**{k: v for k, v in data.items() if k in Session.__dataclass_fields__})
 
         logger.info(f"세션 로드: {session.title} ({session_id})")
         return session
@@ -237,16 +245,18 @@ class SessionManager:
                     data = json.load(f)
 
                 metadata = data.get("workflow_metadata", {})
-                summaries.append(SessionSummary(
-                    session_id=data.get("session_id", session_dir.name),
-                    title=data.get("title", "제목 없음"),
-                    description=data.get("description", ""),
-                    project_type=data.get("project_type", "desktop"),
-                    created_at=data.get("created_at", ""),
-                    updated_at=data.get("updated_at", ""),
-                    total_steps=metadata.get("total_steps", len(data.get("steps", []))),
-                    completed_steps=metadata.get("completed_steps", 0)
-                ))
+                summaries.append(
+                    SessionSummary(
+                        session_id=data.get("session_id", session_dir.name),
+                        title=data.get("title", "제목 없음"),
+                        description=data.get("description", ""),
+                        project_type=data.get("project_type", "desktop"),
+                        created_at=data.get("created_at", ""),
+                        updated_at=data.get("updated_at", ""),
+                        total_steps=metadata.get("total_steps", len(data.get("steps", []))),
+                        completed_steps=metadata.get("completed_steps", 0),
+                    )
+                )
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"세션 파일 읽기 실패: {session_file} - {e}")
 
@@ -297,7 +307,8 @@ class SessionManager:
 
         # 완료 스텝 수 업데이트
         completed = sum(
-            1 for s in session.steps
+            1
+            for s in session.steps
             if (s.get("status") if isinstance(s, dict) else s.status) == "completed"
         )
         session.workflow_metadata["completed_steps"] = completed
@@ -332,7 +343,8 @@ class SessionManager:
         original_len = len(session.steps)
 
         session.steps = [
-            s for s in session.steps
+            s
+            for s in session.steps
             if (s.get("step_id") if isinstance(s, dict) else s.step_id) != step_id
         ]
 
@@ -348,8 +360,9 @@ class SessionManager:
         logger.info(f"스텝 삭제: #{step_id} ({session.session_id})")
         return True
 
-    def insert_step(self, session: Session, after_step_id: int,
-                   code: str = "", description: str = "삽입된 스텝") -> int:
+    def insert_step(
+        self, session: Session, after_step_id: int, code: str = "", description: str = "삽입된 스텝"
+    ) -> int:
         """
         특정 스텝 뒤에 새 스텝을 삽입합니다.
 
@@ -370,17 +383,21 @@ class SessionManager:
                 insert_idx = i + 1
                 break
 
-        new_step = asdict(Step(
-            step_id=0,  # 재정렬에서 설정됨
-            status="pending",
-            created_at=datetime.now().isoformat(),
-            generated_code=code,
-            conversation=[{
-                "role": "system",
-                "content": description,
-                "timestamp": datetime.now().isoformat()
-            }]
-        ))
+        new_step = asdict(
+            Step(
+                step_id=0,  # 재정렬에서 설정됨
+                status="pending",
+                created_at=datetime.now().isoformat(),
+                generated_code=code,
+                conversation=[
+                    {
+                        "role": "system",
+                        "content": description,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                ],
+            )
+        )
 
         session.steps.insert(insert_idx, new_step)
 
@@ -426,8 +443,10 @@ class SessionManager:
             return False
 
         # 위치 교환
-        session.steps[target_idx], session.steps[swap_idx] = \
-            session.steps[swap_idx], session.steps[target_idx]
+        session.steps[target_idx], session.steps[swap_idx] = (
+            session.steps[swap_idx],
+            session.steps[target_idx],
+        )
 
         # step_id 재정렬
         self._renumber_steps(session)
@@ -448,7 +467,8 @@ class SessionManager:
         """스텝 메타데이터를 업데이트합니다."""
         session.workflow_metadata["total_steps"] = len(session.steps)
         completed = sum(
-            1 for s in session.steps
+            1
+            for s in session.steps
             if (s.get("status") if isinstance(s, dict) else s.status) == "completed"
         )
         session.workflow_metadata["completed_steps"] = completed
@@ -476,14 +496,14 @@ class SessionManager:
         Returns:
             결합된 Python 코드 문자열
         """
-        from core.import_manager import extract_imports, merge_imports, assemble_script
+        from core.import_manager import assemble_script, extract_imports, merge_imports
 
         header = (
             "#!/usr/bin/env python3\n"
             f'"""\n'
-            f'AI RPA 워크플로우: {session.title}\n'
-            f'생성일: {session.created_at}\n'
-            f'스텝 수: {len(session.steps)}\n'
+            f"AI RPA 워크플로우: {session.title}\n"
+            f"생성일: {session.created_at}\n"
+            f"스텝 수: {len(session.steps)}\n"
             f'"""\n'
         )
 
@@ -529,7 +549,7 @@ class SessionManager:
         session: Session,
         output_dir: Path,
         settings: dict = None,
-        ai_generated_readme: str = None
+        ai_generated_readme: str = None,
     ) -> Path:
         """
         세션 워크플로우를 독립 실행 가능한 프로젝트 폴더로 내보냅니다.
@@ -539,7 +559,10 @@ class SessionManager:
             ├── main.py              # 실행 가능한 메인 코드
             ├── requirements.txt     # 필요 패키지 목록
             ├── README.md            # 프로젝트 설명 및 실행 가이드
-            └── run.bat              # 윈도우 실행 스크립트
+            ├── run.bat              # 윈도우 실행 스크립트
+            ├── session.json         # import_session_folder 로 재가져오기 위한 메타
+            ├── captures/            # 스크린샷 (있을 때)
+            └── scripts/             # 원본 스크립트 (있을 때)
 
         Args:
             session: 내보낼 세션
@@ -562,6 +585,7 @@ class SessionManager:
         logger.info(f"main.py 생성 완료: {output_dir / 'main.py'}")
 
         # ── 2. requirements.txt 생성 ──
+        packages = []
         if settings.get("auto_requirements", True):
             packages = self._collect_all_packages(session)
             req_content = self._generate_requirements(packages)
@@ -573,9 +597,7 @@ class SessionManager:
             if ai_generated_readme:
                 readme_content = ai_generated_readme
             else:
-                readme_content = self._generate_default_readme(
-                    session, packages if settings.get("auto_requirements", True) else []
-                )
+                readme_content = self._generate_default_readme(session, packages)
             (output_dir / "README.md").write_text(readme_content, encoding="utf-8")
             logger.info("README.md 생성 완료")
 
@@ -585,8 +607,91 @@ class SessionManager:
             (output_dir / "run.bat").write_text(bat_content, encoding="cp949")
             logger.info("run.bat 생성 완료")
 
+        # ── 5. session.json + captures/ + scripts/ — import_session_folder 재가져오기용 ──
+        # export 폴더가 실행 가능 + 백업/이전 가능 (다른 PC) 둘 다 cover.
+        # session.json 안 절대 경로는 import 시 새 session_id 로 자동 재작성됨.
+        src_dir = self.sessions_dir / session.session_id
+        src_session_json = src_dir / "session.json"
+        if src_session_json.exists():
+            shutil.copy2(src_session_json, output_dir / "session.json")
+            for sub in ("captures", "scripts"):
+                src_sub = src_dir / sub
+                if src_sub.exists() and src_sub.is_dir():
+                    dst_sub = output_dir / sub
+                    if dst_sub.exists():
+                        shutil.rmtree(dst_sub, ignore_errors=True)
+                    shutil.copytree(src_sub, dst_sub)
+            logger.info("session.json + captures/scripts 포함 (import 재가져오기 가능)")
+
         logger.info(f"프로젝트 내보내기 완료: {output_dir}")
         return output_dir
+
+    def import_session_folder(
+        self,
+        source_dir: Path,
+        new_title: Optional[str] = None,
+    ) -> Session:
+        """외부 export 폴더로부터 세션을 임포트합니다.
+
+        ``export_as_project`` 결과 폴더에 포함된 ``session.json`` + ``captures/`` +
+        ``scripts/`` 를 ``data/sessions/<new_uuid>/`` 로 복사. 새 UUID 를 발급해
+        기존 세션과 충돌하지 않게 하고, ``session.json`` 안의 ``session_id`` +
+        ``captures`` 절대 경로의 옛 UUID 를 새 UUID 로 일괄 치환.
+
+        Args:
+            source_dir: ``session.json`` 이 들어있는 폴더 (예: 사용자가 다른 PC 에서
+                내보낸 ``ohdo_export_*`` 폴더).
+            new_title: 임포트 후 세션 제목을 변경할 때 지정. ``None`` 이면 원본 제목 유지.
+
+        Returns:
+            새로 만든 세션 (``Session``).
+
+        Raises:
+            FileNotFoundError: ``source_dir`` 또는 그 안의 ``session.json`` 이 없을 때.
+            ValueError: ``session.json`` 이 손상돼 ``session_id`` 를 못 읽을 때.
+        """
+        source_dir = Path(source_dir)
+        if not source_dir.exists() or not source_dir.is_dir():
+            raise FileNotFoundError(f"임포트 폴더 없음: {source_dir}")
+
+        src_session_json = source_dir / "session.json"
+        if not src_session_json.exists():
+            raise FileNotFoundError(f"session.json 없음 (export 가 아닌 것으로 보임): {source_dir}")
+
+        with open(src_session_json, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        old_id = data.get("session_id")
+        if not old_id:
+            raise ValueError(f"session.json 에 session_id 없음: {src_session_json}")
+
+        # 충돌 방지 — 항상 새 UUID 발급. 옛 UUID 가 이미 data/sessions/ 에 있어도 OK.
+        new_id = str(uuid.uuid4())
+        new_dir = self.sessions_dir / new_id
+        new_dir.mkdir(parents=True, exist_ok=True)
+
+        # 옛 UUID → 새 UUID 일괄 치환 (절대 경로 + session_id 필드 모두 cover).
+        # captures 가 절대 경로 문자열이므로 내용 string replace 가 안전.
+        raw = src_session_json.read_text(encoding="utf-8")
+        raw = raw.replace(old_id, new_id)
+        if new_title:
+            data2 = json.loads(raw)
+            data2["title"] = new_title
+            raw = json.dumps(data2, ensure_ascii=False, indent=2)
+        (new_dir / "session.json").write_text(raw, encoding="utf-8")
+
+        # captures/ + scripts/ 도 함께 복사. 파일명은 그대로 유지 (안의 절대 경로
+        # 문자열은 위 raw replace 로 이미 새 UUID 를 가리킴).
+        for sub in ("captures", "scripts"):
+            src_sub = source_dir / sub
+            if src_sub.exists() and src_sub.is_dir():
+                dst_sub = new_dir / sub
+                if dst_sub.exists():
+                    shutil.rmtree(dst_sub, ignore_errors=True)
+                shutil.copytree(src_sub, dst_sub)
+
+        logger.info(f"세션 임포트: {old_id} → {new_id}")
+        return self.load_session(new_id)
 
     def _collect_all_packages(self, session: Session) -> list[str]:
         """세션의 모든 스텝에서 사용된 외부 패키지를 수집합니다."""
@@ -619,18 +724,18 @@ class SessionManager:
         """requirements.txt 내용을 생성합니다."""
         # 패키지 이름 → pip 설치 이름 매핑
         pip_name_map = {
-            'cv2': 'opencv-python',
-            'PIL': 'Pillow',
-            'pil': 'Pillow',
-            'bs4': 'beautifulsoup4',
-            'yaml': 'PyYAML',
-            'sklearn': 'scikit-learn',
-            'dotenv': 'python-dotenv',
-            'win32com': 'pywin32',
-            'win32api': 'pywin32',
-            'win32gui': 'pywin32',
-            'pythoncom': 'pywin32',
-            'uiautomation': 'uiautomation',
+            "cv2": "opencv-python",
+            "PIL": "Pillow",
+            "pil": "Pillow",
+            "bs4": "beautifulsoup4",
+            "yaml": "PyYAML",
+            "sklearn": "scikit-learn",
+            "dotenv": "python-dotenv",
+            "win32com": "pywin32",
+            "win32api": "pywin32",
+            "win32gui": "pywin32",
+            "pythoncom": "pywin32",
+            "uiautomation": "uiautomation",
         }
 
         lines = [

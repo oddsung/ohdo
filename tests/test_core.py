@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 코어 모듈 단위 테스트
 
@@ -13,17 +14,17 @@ GUI나 Windows 환경 없이도 실행 가능한 순수 로직 테스트:
     python -m tests.test_runner --suite core
 """
 
-import sys
 import json
+import sys
 import tempfile
-from pathlib import Path
 from dataclasses import asdict
+from pathlib import Path
 
 # 프로젝트 루트를 path에 추가
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from tests.test_runner import TestCase, SkipTest
+from tests.test_runner import TestCase
 
 
 class CoreTest(TestCase):
@@ -38,7 +39,7 @@ class CoreTest(TestCase):
 
     def test_01_session_create_and_load(self):
         """세션 생성 → 저장 → 로드 사이클"""
-        from core.session_manager import SessionManager, Session
+        from core.session_manager import SessionManager
 
         self.step("임시 디렉토리에 세션 매니저 생성")
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -46,9 +47,7 @@ class CoreTest(TestCase):
 
             self.step("세션 생성")
             session = manager.create_session(
-                title="테스트 세션",
-                project_type="desktop",
-                description="단위 테스트용"
+                title="테스트 세션", project_type="desktop", description="단위 테스트용"
             )
             self.assert_true(len(session.session_id) > 0, "세션 ID가 생성되어야 합니다")
             self.assert_equal(session.title, "테스트 세션")
@@ -70,15 +69,16 @@ class CoreTest(TestCase):
 
             self.step("스텝 3개 추가")
             for i in range(3):
-                step = Step(generated_code=f"print('step {i+1}')")
+                step = Step(generated_code=f"print('step {i + 1}')")
                 manager.add_step(session, step)
             self.assert_equal(len(session.steps), 3, "3개 스텝이 추가되어야 합니다")
 
             self.step("스텝 업데이트")
-            manager.update_step(session, step_id=2, updates={
-                "status": "completed",
-                "generated_code": "print('updated step 2')"
-            })
+            manager.update_step(
+                session,
+                step_id=2,
+                updates={"status": "completed", "generated_code": "print('updated step 2')"},
+            )
             loaded = manager.load_session(session.session_id)
             step2 = loaded.steps[1]
             self.assert_equal(step2["status"], "completed", "스텝 2 상태가 업데이트되어야 합니다")
@@ -96,7 +96,7 @@ class CoreTest(TestCase):
             self.assert_contains(
                 session.steps[1].get("generated_code", ""),
                 "step 1",
-                "스텝 1이 아래로 이동해야 합니다"
+                "스텝 1이 아래로 이동해야 합니다",
             )
 
     def test_03_session_list_and_delete(self):
@@ -109,7 +109,7 @@ class CoreTest(TestCase):
             self.step("세션 3개 생성")
             ids = []
             for i in range(3):
-                s = manager.create_session(title=f"세션 {i+1}")
+                s = manager.create_session(title=f"세션 {i + 1}")
                 ids.append(s.session_id)
 
             self.step("세션 목록 조회")
@@ -158,7 +158,9 @@ class CoreTest(TestCase):
             result_dir = manager.export_as_project(session, output_dir)
 
             self.assert_true((result_dir / "main.py").exists(), "main.py가 생성되어야 합니다")
-            self.assert_true((result_dir / "requirements.txt").exists(), "requirements.txt가 생성되어야 합니다")
+            self.assert_true(
+                (result_dir / "requirements.txt").exists(), "requirements.txt가 생성되어야 합니다"
+            )
             self.assert_true((result_dir / "README.md").exists(), "README.md가 생성되어야 합니다")
 
             main_code = (result_dir / "main.py").read_text(encoding="utf-8")
@@ -179,11 +181,11 @@ class CoreTest(TestCase):
 
         self.step("스텝 프롬프트 생성")
         prompt = builder.build_step_prompt(
-            session=session,
-            user_request="메모장을 열어줘",
-            project_type="desktop"
+            session=session, user_request="메모장을 열어줘", project_type="desktop"
         )
-        self.assert_contains(prompt, "메모장을 열어줘", "사용자 요청이 프롬프트에 포함되어야 합니다")
+        self.assert_contains(
+            prompt, "메모장을 열어줘", "사용자 요청이 프롬프트에 포함되어야 합니다"
+        )
         self.assert_contains(prompt, "pywinauto", "pywinauto 가이드가 포함되어야 합니다")
         self.assert_contains(prompt, "Selenium", "Selenium 가이드가 포함되어야 합니다")
         self.assert_contains(prompt, "```python", "코드블록 규칙이 포함되어야 합니다")
@@ -201,10 +203,7 @@ class CoreTest(TestCase):
         ]
 
         self.step("이전 코드 포함된 프롬프트")
-        prompt = builder.build_step_prompt(
-            session=session,
-            user_request="다음 작업을 해줘"
-        )
+        prompt = builder.build_step_prompt(session=session, user_request="다음 작업을 해줘")
         self.assert_contains(prompt, "import time", "이전 스텝 코드가 포함되어야 합니다")
         self.assert_contains(prompt, "누적 코드", "누적 코드 안내가 있어야 합니다")
 
@@ -217,7 +216,7 @@ class CoreTest(TestCase):
         self.step("에러 복구 프롬프트")
         prompt = builder.build_error_recovery_prompt(
             error_message="ModuleNotFoundError: No module named 'xxx'",
-            current_code="import xxx\nxxx.do_something()"
+            current_code="import xxx\nxxx.do_something()",
         )
         self.assert_contains(prompt, "ModuleNotFoundError", "에러 메시지가 포함되어야 합니다")
         self.assert_contains(prompt, "import xxx", "현재 코드가 포함되어야 합니다")
@@ -235,7 +234,7 @@ class CoreTest(TestCase):
             session=session,
             user_request="이 버튼을 클릭해줘",
             element_context="## 선택된 UI 요소 (브라우저: Chrome)\nSelenium으로 제어",
-            is_browser_element=True
+            is_browser_element=True,
         )
         self.assert_contains(prompt, "Selenium", "브라우저 요소일 때 Selenium 지시가 있어야 합니다")
 
@@ -286,13 +285,13 @@ class CoreTest(TestCase):
         settings = {
             "ai": {
                 "selected": "gemini_cli",
-                "available_engines": {
-                    "gemini_cli": {"command": "gemini", "timeout_seconds": 30}
-                }
+                "available_engines": {"gemini_cli": {"command": "gemini", "timeout_seconds": 30}},
             }
         }
         manager = AIEngineManager(settings)
-        self.assert_equal(manager.get_current_name(), "gemini_cli", "기본 엔진이 gemini_cli이어야 합니다")
+        self.assert_equal(
+            manager.get_current_name(), "gemini_cli", "기본 엔진이 gemini_cli이어야 합니다"
+        )
 
         self.step("사용 가능한 엔진 목록")
         engines = manager.list_available()
@@ -306,9 +305,7 @@ class CoreTest(TestCase):
         settings = {
             "ai": {
                 "selected": "gemini_cli",
-                "available_engines": {
-                    "gemini_cli": {"command": "gemini"}
-                }
+                "available_engines": {"gemini_cli": {"command": "gemini"}},
             }
         }
         manager = AIEngineManager(settings)
@@ -359,8 +356,8 @@ class CoreTest(TestCase):
         self.step("Owner-drawn 요소 코드 생성")
         element_info = {
             "control_type": "Pane",
-            "name": "",                # 이름 없음
-            "automation_id": "",        # auto_id 없음
+            "name": "",  # 이름 없음
+            "automation_id": "",  # auto_id 없음
             "class_name": "TToolBar",
             "rect": {"left": 10, "top": 50, "width": 30, "height": 30},
             "parent_window_title": "Preview",
@@ -432,7 +429,7 @@ class CoreTest(TestCase):
         element_info = {
             "control_type": "Edit",
             "name": "입력필드",
-            "automation_id": "12345678",   # 순수 숫자 = 동적 ID
+            "automation_id": "12345678",  # 순수 숫자 = 동적 ID
             "class_name": "Edit",
             "rect": {"left": 100, "top": 200, "width": 200, "height": 25},
             "parent_window_title": "앱",
@@ -467,13 +464,7 @@ class CoreTest(TestCase):
         """import_manager: docstring 이후의 import도 추출"""
         from core.import_manager import extract_imports
 
-        code = (
-            '"""모듈 설명"""\n'
-            "import os\n"
-            "import pywinauto\n"
-            "\n"
-            "print('hello')\n"
-        )
+        code = '"""모듈 설명"""\nimport os\nimport pywinauto\n\nprint(\'hello\')\n'
         imports, body = extract_imports(code)
         self.assert_equal(len(imports), 2, "docstring 이후 import 2개 추출")
         self.assert_contains(body, "print('hello')", "body에 코드 포함")
@@ -482,13 +473,7 @@ class CoreTest(TestCase):
         """import_manager: 코드 중간의 import는 body에 유지"""
         from core.import_manager import extract_imports
 
-        code = (
-            "import os\n"
-            "\n"
-            "x = 1\n"
-            "import json  # 중간 import\n"
-            "print(x)\n"
-        )
+        code = "import os\n\nx = 1\nimport json  # 중간 import\nprint(x)\n"
         imports, body = extract_imports(code)
         self.assert_equal(len(imports), 1, "상단 import만 1개 추출")
         self.assert_contains(body, "import json", "중간 import는 body에 남아야 합니다")
@@ -551,7 +536,7 @@ class CoreTest(TestCase):
 
     def test_25_export_workflow_with_step_comments(self):
         """export_workflow가 스텝 경계 주석을 포함하는지"""
-        from core.session_manager import SessionManager, Session, Step
+        from core.session_manager import Session, SessionManager, Step
 
         self.step("스텝 2개로 export (conversation 포함)")
         with tempfile.TemporaryDirectory() as td:
@@ -562,30 +547,39 @@ class CoreTest(TestCase):
                 created_at="2026-01-01",
             )
             session.steps = [
-                asdict(Step(
-                    step_id=1, status="completed",
-                    generated_code="import os\nimport time\n\nprint(os.getcwd())",
-                    conversation=[{"role": "user", "content": "현재 디렉토리 출력"}],
-                )),
-                asdict(Step(
-                    step_id=2, status="completed",
-                    generated_code="import os\nimport pywinauto\n\napp = pywinauto.Application()",
-                    conversation=[{"role": "user", "content": "메모장 연결"}],
-                )),
+                asdict(
+                    Step(
+                        step_id=1,
+                        status="completed",
+                        generated_code="import os\nimport time\n\nprint(os.getcwd())",
+                        conversation=[{"role": "user", "content": "현재 디렉토리 출력"}],
+                    )
+                ),
+                asdict(
+                    Step(
+                        step_id=2,
+                        status="completed",
+                        generated_code="import os\nimport pywinauto\n\napp = pywinauto.Application()",
+                        conversation=[{"role": "user", "content": "메모장 연결"}],
+                    )
+                ),
             ]
             result = sm.export_workflow(session)
             # import 중복 제거
             os_count = result.count("import os")
             self.assert_equal(os_count, 1, "export에서 import os 중복 제거")
             # 경계 주석 확인
-            self.assert_contains(result, "# === Step 1: 현재 디렉토리 출력 (시작) ===", "스텝1 시작 주석")
-            self.assert_contains(result, "# === Step 1: 현재 디렉토리 출력 (끝) ===", "스텝1 끝 주석")
+            self.assert_contains(
+                result, "# === Step 1: 현재 디렉토리 출력 (시작) ===", "스텝1 시작 주석"
+            )
+            self.assert_contains(
+                result, "# === Step 1: 현재 디렉토리 출력 (끝) ===", "스텝1 끝 주석"
+            )
             self.assert_contains(result, "# === Step 2: 메모장 연결 (시작) ===", "스텝2 시작 주석")
             self.assert_contains(result, "# === Step 2: 메모장 연결 (끝) ===", "스텝2 끝 주석")
             # 코드 포함 확인
             self.assert_contains(result, "print(os.getcwd())", "스텝1 코드 포함")
             self.assert_contains(result, "pywinauto.Application()", "스텝2 코드 포함")
-
 
     # ──────────────────────────────────────────
     # EnvironmentScanner 테스트 (F.1)
@@ -611,9 +605,9 @@ class CoreTest(TestCase):
 
             self.step("환경 데이터 저장")
             payload = {
-                'python_path': sys.executable,
-                'python_version': '3.12.0',
-                'packages': {'all_required_installed': True, 'required': [], 'optional': []},
+                "python_path": sys.executable,
+                "python_version": "3.12.0",
+                "packages": {"all_required_installed": True, "required": [], "optional": []},
             }
             ok = scanner.save_environment(payload)
             self.assert_true(ok, "save_environment 는 성공해야 합니다")
@@ -621,9 +615,9 @@ class CoreTest(TestCase):
             self.step("저장된 환경 로드")
             loaded = scanner.load_saved_environment()
             self.assert_not_none(loaded, "저장 직후 로드는 dict 를 반환해야 합니다")
-            self.assert_equal(loaded.get('python_path'), sys.executable)
-            self.assert_true('machine_id' in loaded, "machine_id 가 자동으로 박혀야 합니다")
-            self.assert_true('last_scan' in loaded, "last_scan 타임스탬프가 박혀야 합니다")
+            self.assert_equal(loaded.get("python_path"), sys.executable)
+            self.assert_true("machine_id" in loaded, "machine_id 가 자동으로 박혀야 합니다")
+            self.assert_true("last_scan" in loaded, "last_scan 타임스탬프가 박혀야 합니다")
 
     def test_28_env_load_other_machine_resets(self):
         """다른 컴퓨터의 machine_id 면 None 반환 + 환경 파일 삭제"""
@@ -634,29 +628,31 @@ class CoreTest(TestCase):
 
             self.step("타 컴퓨터의 환경 파일 시뮬레이션")
             fake = {
-                'machine_id': 'deadbeef00000000',  # 절대 매칭되지 않을 hex
-                'hostname': 'other-pc',
-                'python_path': sys.executable,
-                'last_scan': '2020-01-01T00:00:00',
+                "machine_id": "deadbeef00000000",  # 절대 매칭되지 않을 hex
+                "hostname": "other-pc",
+                "python_path": sys.executable,
+                "last_scan": "2020-01-01T00:00:00",
             }
-            scanner.env_file.write_text(json.dumps(fake), encoding='utf-8')
+            scanner.env_file.write_text(json.dumps(fake), encoding="utf-8")
             self.assert_true(scanner.env_file.exists(), "사전 조건: 환경 파일이 존재")
 
             self.step("load_saved_environment 호출")
             loaded = scanner.load_saved_environment()
             self.assert_true(loaded is None, "다른 머신의 설정은 None 을 반환해야 합니다")
-            self.assert_true(not scanner.env_file.exists(), "다른 머신 감지 시 파일이 삭제되어야 합니다")
+            self.assert_true(
+                not scanner.env_file.exists(), "다른 머신 감지 시 파일이 삭제되어야 합니다"
+            )
 
     def test_29_probe_python_version_current(self):
         """_probe_python_version 이 현재 인터프리터 버전을 반환해야 한다"""
-        from core.environment_scanner import EnvironmentScanner
         import platform as _platform
+
+        from core.environment_scanner import EnvironmentScanner
 
         version = EnvironmentScanner._probe_python_version(sys.executable)
         expected = _platform.python_version()
         self.assert_equal(
-            version, expected,
-            f"sys.executable({sys.executable}) 의 버전 = {expected}"
+            version, expected, f"sys.executable({sys.executable}) 의 버전 = {expected}"
         )
 
     def test_30_check_gemini_cli_not_found(self):
@@ -667,10 +663,10 @@ class CoreTest(TestCase):
             scanner = EnvironmentScanner(config_dir=Path(td))
             result = scanner.check_gemini_cli(command="ohdo_nonexistent_cli_xyz_zzz")
 
-            self.assert_equal(result['installed'], False, "없는 명령은 installed=False")
-            self.assert_equal(result['error'], 'not_found')
-            self.assert_true(result['path'] is None, "PATH 에서 못 찾으면 path=None")
-            self.assert_not_none(result['detail'], "사용자에게 보일 detail 메시지가 있어야 함")
+            self.assert_equal(result["installed"], False, "없는 명령은 installed=False")
+            self.assert_equal(result["error"], "not_found")
+            self.assert_true(result["path"] is None, "PATH 에서 못 찾으면 path=None")
+            self.assert_not_none(result["detail"], "사용자에게 보일 detail 메시지가 있어야 함")
 
     def test_31_check_gemini_cli_shape(self):
         """기본 'gemini' 호출의 결과 dict 가 약속된 shape 를 가져야 한다.
@@ -684,15 +680,15 @@ class CoreTest(TestCase):
             scanner = EnvironmentScanner(config_dir=Path(td))
             result = scanner.check_gemini_cli()
 
-            for key in ('installed', 'command', 'path', 'version', 'error', 'detail'):
+            for key in ("installed", "command", "path", "version", "error", "detail"):
                 self.assert_true(key in result, f"결과 dict 에 '{key}' 키가 있어야 합니다")
-            self.assert_equal(result['command'], 'gemini')
-            self.assert_true(isinstance(result['installed'], bool), "installed 는 bool")
-            if result['installed']:
-                self.assert_true(result['error'] is None, "installed=True 면 error=None")
-                self.assert_not_none(result['version'], "installed=True 면 version 존재")
+            self.assert_equal(result["command"], "gemini")
+            self.assert_true(isinstance(result["installed"], bool), "installed 는 bool")
+            if result["installed"]:
+                self.assert_true(result["error"] is None, "installed=True 면 error=None")
+                self.assert_not_none(result["version"], "installed=True 면 version 존재")
             else:
-                self.assert_not_none(result['error'], "installed=False 면 error 존재")
+                self.assert_not_none(result["error"], "installed=False 면 error 존재")
 
     def test_32_full_scan_includes_gemini_section(self):
         """full_scan 결과 dict 에 'gemini_cli' 섹션이 포함되어야 한다"""
@@ -702,12 +698,11 @@ class CoreTest(TestCase):
             scanner = EnvironmentScanner(config_dir=Path(td))
             result = scanner.full_scan(sys.executable)
 
-            self.assert_equal(result.get('success'), True, "full_scan 성공")
-            self.assert_true('gemini_cli' in result, "결과에 gemini_cli 섹션 포함")
-            gemini = result['gemini_cli']
+            self.assert_equal(result.get("success"), True, "full_scan 성공")
+            self.assert_true("gemini_cli" in result, "결과에 gemini_cli 섹션 포함")
+            gemini = result["gemini_cli"]
             self.assert_true(isinstance(gemini, dict), "gemini_cli 는 dict")
-            self.assert_true('installed' in gemini and isinstance(gemini['installed'], bool))
-
+            self.assert_true("installed" in gemini and isinstance(gemini["installed"], bool))
 
     # ──────────────────────────────────────────
     # ExecutionKernel 테스트 (C.x — 라이프사이클/타임아웃/race)
@@ -762,8 +757,9 @@ class CoreTest(TestCase):
 
     def test_35_kernel_stop_terminates_subprocess(self):
         """C.1 게이트: stop() 이 자식 프로세스를 진짜 종료해야 한다."""
-        from core.execution_kernel import ExecutionKernel
         import time
+
+        from core.execution_kernel import ExecutionKernel
 
         kernel = ExecutionKernel(default_timeout=5)
         kernel.start()
@@ -817,7 +813,6 @@ class CoreTest(TestCase):
         finally:
             kernel.stop()
 
-
     # ──────────────────────────────────────────
     # ElementPicker 인프라 회귀 방지 (SetWindowPos / _force_topmost)
     # ──────────────────────────────────────────
@@ -849,6 +844,7 @@ class CoreTest(TestCase):
 
         # start_picking 의 소스에 _force_topmost 호출이 있는지 (정적 검사)
         import inspect
+
         src = inspect.getsource(element_picker.ElementPickerOverlay.start_picking)
         self.assert_true(
             "_force_topmost" in src,
@@ -860,8 +856,9 @@ class CoreTest(TestCase):
 
         Chrome 처럼 sparse children 케이스에서 walker 하나만 빠져도 회귀.
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         self.assert_true(
             hasattr(ElementPickerOverlay, "_detect_in_hwnd"),
@@ -887,8 +884,9 @@ class CoreTest(TestCase):
         탭/URL bar 는 main HWND 트리, HTML 콘텐츠는 child HWND (renderer) 트리.
         한쪽만 빼도 다른 케이스 회귀.
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         src = inspect.getsource(ElementPickerOverlay._detect_element_multi_backend)
         self.assert_true(
@@ -945,8 +943,9 @@ class CoreTest(TestCase):
         이전에는 _keep_submenu_mode 분기로 Shift+F3 일 때만 켰지만 통합으로
         분기 제거. 이 보장이 깨지면 submenu 닫힘 회귀.
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         rsm_src = inspect.getsource(ElementPickerOverlay._resume_after_pause)
         self.assert_true(
@@ -984,12 +983,11 @@ class CoreTest(TestCase):
         - WS_EX_TRANSPARENT 적용 직후 _detect_via_efp 호출
         - finally 에서 ex_style 복원 (GetWindowLongW → SetWindowLongW 둘 다)
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
 
-        mb_src = inspect.getsource(
-            ElementPickerOverlay._detect_element_multi_backend
-        )
+        from ui.element_picker import ElementPickerOverlay
+
+        mb_src = inspect.getsource(ElementPickerOverlay._detect_element_multi_backend)
         # try/finally 로 토글 + 복원 보장
         self.assert_true(
             "try:" in mb_src and "finally:" in mb_src,
@@ -1024,8 +1022,9 @@ class CoreTest(TestCase):
         가 해제 + _on_hook_click 이 element_picked emit + stop_picking +
         hook 콜백이 LBUTTONDOWN 차단 (return 1).
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         # 메서드 존재
         for method_name in (
@@ -1111,8 +1110,9 @@ class CoreTest(TestCase):
         (4) _start_pause 진입 시 timer 정지 (post_pause 중 F3 재진입)
         (5) _exit_post_pause_mode idempotent (timer + user 액션 race 방어)
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         # (1) 상수
         self.assert_true(
@@ -1167,8 +1167,9 @@ class CoreTest(TestCase):
         - _on_hook_f3 가 일반 mode + post_pause 둘 다 처리
         - _resume_after_pause / _exit_post_pause_mode 가 hook 재설치/해제 안 함
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         # start_picking 가 hook 설치
         sp_src = inspect.getsource(ElementPickerOverlay.start_picking)
@@ -1226,8 +1227,9 @@ class CoreTest(TestCase):
         descendants 호출 skip. 매 tick 800-1000ms 절약 → cursor 이동 시
         highlight 추적 지연 감소.
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         self.assert_true(
             hasattr(ElementPickerOverlay, "NEEDS_DESCENDANTS_AREA_THRESHOLD"),
@@ -1249,8 +1251,9 @@ class CoreTest(TestCase):
         사용자가 명시적으로 settings 활성화한 경우에만 _capture_dom_context 가
         실제 CDP 시도. 기본은 즉시 빈 dict 반환.
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         # __init__ 의 default 값
         init_src = inspect.getsource(ElementPickerOverlay.__init__)
@@ -1273,7 +1276,7 @@ class CoreTest(TestCase):
             "[회귀] _capture_dom_context 가 _cdp_enabled 가드 필수 (disabled 시 즉시 반환)",
         )
         self.assert_true(
-            'cdp_available' in cdc_src and 'False' in cdc_src,
+            "cdp_available" in cdc_src and "False" in cdc_src,
             "[회귀] _capture_dom_context 가 disabled 시 cdp_available=False 반환",
         )
 
@@ -1285,8 +1288,9 @@ class CoreTest(TestCase):
         BlockViewWidget run_single_step_requested → CodeViewer 통과 →
         main_window._on_run_single_step → _run_blocks_thread(start=stop=N).
         """
-        from core.workflow_engine import WorkflowEngine
         import inspect
+
+        from core.workflow_engine import WorkflowEngine
 
         sig = inspect.signature(WorkflowEngine.execute_session_blocks)
         self.assert_true(
@@ -1312,9 +1316,10 @@ class CoreTest(TestCase):
         BlockCard.run_single_requested -> BlockViewWidget.run_single_step_requested
         -> CodeViewer.run_single_step_requested -> main_window._on_run_single_step
         """
+        import inspect
+
         from ui.code_viewer import BlockCard, BlockViewWidget, CodeViewer
         from ui.main_window import MainWindow
-        import inspect
 
         # BlockCard signal
         self.assert_true(
@@ -1348,6 +1353,7 @@ class CoreTest(TestCase):
         # main_window 핸들러 (위임 stub) + handler 본문 (실제 호출 검증)
         # 2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler 로 이전.
         from ui.block_execution_handler import BlockExecutionHandler
+
         self.assert_true(
             hasattr(MainWindow, "_on_run_single_step"),
             "[회귀] MainWindow._on_run_single_step 위임 stub 필수",
@@ -1355,8 +1361,7 @@ class CoreTest(TestCase):
         handler_src = inspect.getsource(BlockExecutionHandler.on_run_single_step)
         self.assert_true(
             "stop_after_step_id" in handler_src or "step_id, step_id" in handler_src,
-            "[회귀] BlockExecutionHandler.on_run_single_step 가 start=stop=N "
-            "으로 호출 필수",
+            "[회귀] BlockExecutionHandler.on_run_single_step 가 start=stop=N 으로 호출 필수",
         )
 
     def test_51_extract_code_delta_handles_minor_changes(self):
@@ -1367,8 +1372,9 @@ class CoreTest(TestCase):
         누적되어 매 step 마다 webdriver/Application 새로 생성 (브라우저 N개).
         SequenceMatcher 로 새 라인만 추출.
         """
-        from core.import_manager import extract_code_delta
         import inspect
+
+        from core.import_manager import extract_code_delta
 
         # 본문에 SequenceMatcher 사용 + ratio 검사
         src = inspect.getsource(extract_code_delta)
@@ -1409,9 +1415,10 @@ class CoreTest(TestCase):
         2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler.run_blocks_thread
         로 이전됨. main_window 의 _run_blocks_thread 는 위임 stub.
         """
-        from ui.main_window import MainWindow, AsyncSignals
-        from ui.block_execution_handler import BlockExecutionHandler
         import inspect
+
+        from ui.block_execution_handler import BlockExecutionHandler
+        from ui.main_window import AsyncSignals, MainWindow
 
         # AsyncSignals 에 blocks_finished signal
         self.assert_true(
@@ -1438,11 +1445,11 @@ class CoreTest(TestCase):
         """[회귀] Step.wait_after_ms + workflow_engine 3단계 우선순위 (step >
         session > engine) + BlockCard 인라인 SpinBox + 세션 default SpinBox.
         """
-        from core.session_manager import Step, Session
-        from core.workflow_engine import WorkflowEngine
-        from ui.code_viewer import BlockCard, BlockViewWidget, CodeViewer
-        from ui.main_window import MainWindow
         import inspect
+
+        from core.session_manager import Session, Step
+        from core.workflow_engine import WorkflowEngine
+        from ui.code_viewer import BlockCard, BlockViewWidget
 
         # Step.wait_after_ms 필드 (default None)
         s = Step()
@@ -1501,10 +1508,10 @@ class CoreTest(TestCase):
         # 2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler 로 이전.
         # main_window 의 _on_wait_changed 는 위임 stub. handler.on_wait_changed 본문 검사.
         from ui.block_execution_handler import BlockExecutionHandler
+
         handler_src = inspect.getsource(BlockExecutionHandler.on_wait_changed)
         self.assert_true(
-            "current_session.settings" in handler_src
-            and "step_delay_ms" in handler_src,
+            "current_session.settings" in handler_src and "step_delay_ms" in handler_src,
             "[회귀] BlockExecutionHandler.on_wait_changed 가 "
             "current_session.settings.step_delay_ms 변경 필수 (글로벌 settings 분리)",
         )
@@ -1515,8 +1522,9 @@ class CoreTest(TestCase):
         과거 buggy 동작: closeEvent 가 두 번 정의되어 첫 번째 (커널 정리) 가
         두 번째 (세션 저장) 에 덮어쓰여 커널 좀비 프로세스 발생.
         """
-        from ui.main_window import MainWindow
         import inspect
+
+        from ui.main_window import MainWindow
 
         src = inspect.getsource(MainWindow)
         # closeEvent 정의 횟수
@@ -1547,12 +1555,13 @@ class CoreTest(TestCase):
         from core.import_manager import extract_initial_block
 
         class _Session:
-            def __init__(self, steps): self.steps = steps
+            def __init__(self, steps):
+                self.steps = steps
 
         # 케이스 1: 모듈 레벨 Assign
-        sess1 = _Session([
-            {"step_id": 1, "generated_code": 'URL = "https://example.com"\nCONFIG = {"k": 1}'}
-        ])
+        sess1 = _Session(
+            [{"step_id": 1, "generated_code": 'URL = "https://example.com"\nCONFIG = {"k": 1}'}]
+        )
         result1 = extract_initial_block(sess1)
         self.assert_true(
             "URL" in result1 and "CONFIG" in result1,
@@ -1560,17 +1569,22 @@ class CoreTest(TestCase):
         )
 
         # 케이스 2: 모듈 레벨 try 블록 안의 setup
-        sess2 = _Session([
-            {"step_id": 1, "generated_code": (
-                "import x\n"
-                "try:\n"
-                "    options = Options()\n"
-                "    driver = webdriver.Chrome(options=options)\n"
-                "    driver.get('http://x')\n"
-                "except Exception:\n"
-                "    pass"
-            )}
-        ])
+        sess2 = _Session(
+            [
+                {
+                    "step_id": 1,
+                    "generated_code": (
+                        "import x\n"
+                        "try:\n"
+                        "    options = Options()\n"
+                        "    driver = webdriver.Chrome(options=options)\n"
+                        "    driver.get('http://x')\n"
+                        "except Exception:\n"
+                        "    pass"
+                    ),
+                }
+            ]
+        )
         result2 = extract_initial_block(sess2)
         self.assert_true(
             "options" in result2 and "driver" in result2,
@@ -1578,15 +1592,20 @@ class CoreTest(TestCase):
         )
 
         # 케이스 3: def main() 패턴 unwrap
-        sess3 = _Session([
-            {"step_id": 1, "generated_code": (
-                'def main():\n'
-                '    URL = "https://test.com"\n'
-                '    driver = build()\n'
-                'if __name__ == "__main__":\n'
-                '    main()'
-            )}
-        ])
+        sess3 = _Session(
+            [
+                {
+                    "step_id": 1,
+                    "generated_code": (
+                        "def main():\n"
+                        '    URL = "https://test.com"\n'
+                        "    driver = build()\n"
+                        'if __name__ == "__main__":\n'
+                        "    main()"
+                    ),
+                }
+            ]
+        )
         result3 = extract_initial_block(sess3)
         self.assert_true(
             "URL" in result3 and "driver" in result3,
@@ -1608,9 +1627,10 @@ class CoreTest(TestCase):
         """[회귀] BlockViewWidget.refresh 가 initial_code 인자 받고 step_id=-1
         BlockCard 생성. CodeViewer.refresh_block_view 도 통과.
         """
+        import inspect
+
         from ui.code_viewer import BlockViewWidget, CodeViewer
         from ui.main_window import MainWindow
-        import inspect
 
         # BlockViewWidget.refresh 시그니처
         sig = inspect.signature(BlockViewWidget.refresh)
@@ -1649,8 +1669,9 @@ class CoreTest(TestCase):
         2026-05-04: main_window 분해 Step 3 으로 BlockExecutionHandler 로 이전됨.
         main_window 의 _on_run_code/_execute_code_thread/_on_stop_code 는 위임 stub.
         """
-        from ui.block_execution_handler import BlockExecutionHandler
         import inspect
+
+        from ui.block_execution_handler import BlockExecutionHandler
 
         # on_run_code 가 set_running(True)
         rc_src = inspect.getsource(BlockExecutionHandler.on_run_code)
@@ -1696,9 +1717,10 @@ class CoreTest(TestCase):
         _on_blocks_finished/_on_stop_code 는 위임 stub. main_window 가 self 가
         아니라 mw (handler.mw) 라서 self.lower() → mw.lower() 로 변환됨.
         """
-        from ui.main_window import MainWindow
-        from ui.block_execution_handler import BlockExecutionHandler
         import inspect
+
+        from ui.block_execution_handler import BlockExecutionHandler
+        from ui.main_window import MainWindow
 
         # on_run_from_step
         src1 = inspect.getsource(BlockExecutionHandler.on_run_from_step)
@@ -1727,16 +1749,14 @@ class CoreTest(TestCase):
         rest_src = inspect.getsource(BlockExecutionHandler.restore_main_window)
         self.assert_true(
             "raise_" in rest_src and "activateWindow" in rest_src,
-            "[회귀] BlockExecutionHandler.restore_main_window 가 raise_ + "
-            "activateWindow 호출 필수",
+            "[회귀] BlockExecutionHandler.restore_main_window 가 raise_ + activateWindow 호출 필수",
         )
 
         # on_blocks_finished 가 restore_main_window 호출
         src3 = inspect.getsource(BlockExecutionHandler.on_blocks_finished)
         self.assert_true(
             "restore_main_window" in src3,
-            "[회귀] BlockExecutionHandler.on_blocks_finished 가 restore_main_window "
-            "호출 필수",
+            "[회귀] BlockExecutionHandler.on_blocks_finished 가 restore_main_window 호출 필수",
         )
 
         # on_stop_code 도 restore_main_window 호출 (즉시 복원)
@@ -1752,24 +1772,23 @@ class CoreTest(TestCase):
         module-level 로 unwrap. 변수가 함수 local scope 가 아니라 _globals 에
         들어가 다음 step 에서 사용 가능 (jupyter 모드 호환).
         """
-        from core.import_manager import _unwrap_main_function
         import ast
 
-        code = '''
+        from core.import_manager import _unwrap_main_function
+
+        code = """
 def main():
     driver = "chrome"
     print(driver)
 
 if __name__ == "__main__":
     main()
-'''
+"""
         unwrapped = _unwrap_main_function(code)
         tree = ast.parse(unwrapped)
 
         # def main 제거 + if __name__ 제거 + 본문은 module level
-        has_main = any(
-            isinstance(n, ast.FunctionDef) and n.name == "main" for n in tree.body
-        )
+        has_main = any(isinstance(n, ast.FunctionDef) and n.name == "main" for n in tree.body)
         has_if_main = any(
             isinstance(n, ast.If)
             and isinstance(n.test, ast.Compare)
@@ -1841,7 +1860,7 @@ if __name__ == "__main__":
             syntax_ok = False
         self.assert_true(
             syntax_ok,
-            f"[회귀] 필터링 후 delta 가 module-level 컴파일 가능해야 함",
+            "[회귀] 필터링 후 delta 가 module-level 컴파일 가능해야 함",
         )
 
     def test_65_kernel_worker_yields_foreground_to_parent(self):
@@ -1856,9 +1875,10 @@ if __name__ == "__main__":
         2026-05-04 추가: foreground 복원 보류 이슈 (handoff §6 #3) 의 root cause
         및 해결 검증.
         """
-        from core.execution_kernel import ExecutionKernel
-        from pathlib import Path
         import inspect
+        from pathlib import Path
+
+        from core.execution_kernel import ExecutionKernel
 
         # ExecutionKernel.start 가 OHDO_PARENT_PID 환경변수에 os.getpid() 전달
         start_src = inspect.getsource(ExecutionKernel.start)
@@ -1882,10 +1902,8 @@ if __name__ == "__main__":
         )
         # win32 가드 (다른 플랫폼에서 ctypes.windll 사용 안 하도록)
         self.assert_true(
-            'sys.platform == "win32"' in worker_src
-            or "sys.platform=='win32'" in worker_src,
-            "[회귀] kernel_worker.py 가 Windows 전용 가드 필수 "
-            "(ctypes.windll 사용 분기)",
+            'sys.platform == "win32"' in worker_src or "sys.platform=='win32'" in worker_src,
+            "[회귀] kernel_worker.py 가 Windows 전용 가드 필수 (ctypes.windll 사용 분기)",
         )
 
     def test_66_prompt_contains_jupyter_mode_guidelines(self):
@@ -1899,10 +1917,11 @@ if __name__ == "__main__":
 
         prompt_builder.build_step_prompt 와 prompts.json/system_context 양쪽에서 검증.
         """
-        from core.prompt_builder import PromptBuilder
-        from core.session_manager import Session
         import json
         from pathlib import Path
+
+        from core.prompt_builder import PromptBuilder
+        from core.session_manager import Session
 
         # ── prompt_builder.build_step_prompt 검증 ──
         builder = PromptBuilder(prompts_config={})
@@ -1910,9 +1929,7 @@ if __name__ == "__main__":
         self.step("첫 스텝 (current_code 없음) - def main + except 변수 가이드")
         session = Session(session_id="test", title="테스트")
         prompt_first = builder.build_step_prompt(
-            session=session,
-            user_request="메모장 열어줘",
-            project_type="desktop"
+            session=session, user_request="메모장 열어줘", project_type="desktop"
         )
         self.assert_true(
             "def main" in prompt_first and "모듈 레벨" in prompt_first,
@@ -1928,8 +1945,11 @@ if __name__ == "__main__":
         self.step("후속 스텝 (current_code 있음) - 추가로 변수 재사용 가이드")
         session_with_code = Session(session_id="test2", title="후속")
         session_with_code.steps = [
-            {"step_id": 1, "status": "completed",
-             "generated_code": "from selenium import webdriver\ndriver = webdriver.Chrome()"}
+            {
+                "step_id": 1,
+                "status": "completed",
+                "generated_code": "from selenium import webdriver\ndriver = webdriver.Chrome()",
+            }
         ]
         prompt_second = builder.build_step_prompt(
             session=session_with_code,
@@ -1973,9 +1993,10 @@ if __name__ == "__main__":
         - main_window._on_block_step_code_edited / _on_step_code_edited: 두 필드 동시
           업데이트 + _refresh_code_viewer / _refresh_block_view 호출 (화면 동기화).
         """
-        from core.session_manager import SessionManager, Session, Step
-        from core.workflow_engine import extract_step_delta_code
         import inspect
+
+        from core.session_manager import SessionManager, Step
+        from core.workflow_engine import extract_step_delta_code
         from ui.main_window import MainWindow
 
         # ── (a) extract_step_delta_code 우선순위 0: manually_edited + step_code ──
@@ -2064,6 +2085,7 @@ if __name__ == "__main__":
         new_step_imports, new_step_body = extract_imports(new_block_step_code)
 
         from core.import_manager import merge_imports
+
         merged = merge_imports([prev_imports, old_imports, new_step_imports])
 
         # 핵심 검증: pywinauto.application.Application 과 Keys 가 import 에 보존
@@ -2089,8 +2111,10 @@ if __name__ == "__main__":
             parts.append(new_step_body)
         new_generated = "\n\n".join(parts)
         self.assert_true(
-            "Application" in new_generated and "Keys" in new_generated
-            and "하이닉스" in new_generated and "삼성전자" not in new_generated,
+            "Application" in new_generated
+            and "Keys" in new_generated
+            and "하이닉스" in new_generated
+            and "삼성전자" not in new_generated,
             f"[회귀] 재구성된 generated_code 가 (import 보존 + 사용자 수정값) 둘 다 가져야 함. "
             f"실제: {new_generated!r}",
         )
@@ -2098,6 +2122,7 @@ if __name__ == "__main__":
         # ── (d) 사용자 시나리오 통합: in-memory session 수정 + 디스크 reload ──
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as tmpdir:
             mgr = SessionManager(data_dir=Path(tmpdir))
             sess = mgr.create_session(title="검색 시나리오")
@@ -2107,28 +2132,42 @@ if __name__ == "__main__":
                 "driver = webdriver.Chrome()\n"
                 "driver.get('https://naver.com')"
             )
-            mgr.add_step(sess, Step(
-                step_id=1, generated_code=step1_code, step_code=step1_code,
-                conversation=[{"role": "user", "content": "네이버 접속"}],
-            ))
+            mgr.add_step(
+                sess,
+                Step(
+                    step_id=1,
+                    generated_code=step1_code,
+                    step_code=step1_code,
+                    conversation=[{"role": "user", "content": "네이버 접속"}],
+                ),
+            )
 
             step2_full = step1_code + "\nsearch.send_keys('삼성전자 주가')"
             step2_delta = "search.send_keys('삼성전자 주가')"
-            mgr.add_step(sess, Step(
-                step_id=2, generated_code=step2_full, step_code=step2_delta,
-                conversation=[{"role": "user", "content": "검색어 입력"}],
-            ))
+            mgr.add_step(
+                sess,
+                Step(
+                    step_id=2,
+                    generated_code=step2_full,
+                    step_code=step2_delta,
+                    conversation=[{"role": "user", "content": "검색어 입력"}],
+                ),
+            )
 
             # 블럭 뷰 수정: 삼성전자 → 하이닉스 (handler 핵심 로직 시뮬레이션)
             new_step_code = "search.send_keys('하이닉스 주가')"
             prev_gen = sess.steps[0]["generated_code"]
             new_gen = prev_gen.rstrip() + "\n\n" + new_step_code
-            mgr.update_step(sess, 2, {
-                "step_code": new_step_code,
-                "generated_code": new_gen,
-                "manually_edited": True,
-                "edit_original_code": step2_full,
-            })
+            mgr.update_step(
+                sess,
+                2,
+                {
+                    "step_code": new_step_code,
+                    "generated_code": new_gen,
+                    "manually_edited": True,
+                    "edit_original_code": step2_full,
+                },
+            )
 
             # 디스크 reload 후 extract_step_delta_code 결과
             reloaded = mgr.load_session(sess.session_id)
@@ -2153,9 +2192,10 @@ if __name__ == "__main__":
         main_window 의 위임 stub 은 유지 (signal connect 호환). 본문은 AICallHandler 에서
         검사 (`mw.xxx` 패턴, self.xxx → mw.xxx 변환).
         """
-        from ui.main_window import MainWindow
-        from ui.ai_call_handler import AICallHandler
         import inspect
+
+        from ui.ai_call_handler import AICallHandler
+        from ui.main_window import MainWindow
 
         # __init__ 에 AICallHandler 인스턴스 생성
         init_src = inspect.getsource(MainWindow.__init__)
@@ -2284,9 +2324,9 @@ if __name__ == "__main__":
 
         import json
         from pathlib import Path
+
         cfg = json.loads(
-            (Path(__file__).parent.parent / "config" / "settings.json")
-            .read_text(encoding="utf-8")
+            (Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8")
         )
         gemini_cfg = cfg.get("ai", {}).get("available_engines", {}).get("gemini_cli", {})
         # 가드 의도 (5/4): CLI 의 default preview 자동 매핑 회피 — model 이 명시적으로 지정돼야 함.
@@ -2302,6 +2342,7 @@ if __name__ == "__main__":
         # 실제 subprocess.Popen 호출에서 사용 안 되면 -m 플래그가 안 붙어
         # capacity 회귀 재발. 두 path 모두 _build_args 경유 필수.
         import inspect
+
         gen_src = inspect.getsource(GeminiCLIAdapter.generate)
         self.assert_true(
             "self._build_args(gemini_exec)" in gen_src,
@@ -2310,8 +2351,8 @@ if __name__ == "__main__":
         )
         self.assert_true(
             'self._build_args(gemini_exec, "-p"' in gen_src,
-            "[회귀] -p path Popen 가 self._build_args(gemini_exec, \"-p\", ...) 사용 필수 "
-            "(raw [gemini_exec, \"-p\", ...] 리터럴은 -m 플래그 누락 회귀)",
+            '[회귀] -p path Popen 가 self._build_args(gemini_exec, "-p", ...) 사용 필수 '
+            '(raw [gemini_exec, "-p", ...] 리터럴은 -m 플래그 누락 회귀)',
         )
         # raw 리터럴 패턴이 production path 에 남으면 안 됨
         self.assert_true(
@@ -2332,10 +2373,11 @@ if __name__ == "__main__":
         2. BlockExecutionHandler.on_blocks_finished (블럭 뷰 path) — 명시 update() 추가
         3. (기존) execute_code_thread finally / blocks_finished signal — 유지
         """
+        import inspect
+
         from ui.ai_call_handler import AICallHandler
         from ui.block_execution_handler import BlockExecutionHandler
-        from ui.code_viewer import CodeViewer, BlockViewWidget
-        import inspect
+        from ui.code_viewer import BlockViewWidget, CodeViewer
 
         # AICallHandler.on_step_executed 가 set_running(False) catch-all 호출
         on_step_src = inspect.getsource(AICallHandler.on_step_executed)
@@ -2402,10 +2444,11 @@ if __name__ == "__main__":
           - on_run_single_step 가 step_id == INITIAL_BLOCK_STEP_ID 분기 -> on_run_initial_block
           - on_run_initial_block 가 카드에서 코드 추출 + library 자동 선행 + kernel.execute_block
         """
-        from core.execution_kernel import INITIAL_BLOCK_STEP_ID, LIBRARY_BLOCK_STEP_ID
-        from ui.code_viewer import BlockCard, BlockViewWidget
-        from ui.block_execution_handler import BlockExecutionHandler
         import inspect
+
+        from core.execution_kernel import INITIAL_BLOCK_STEP_ID, LIBRARY_BLOCK_STEP_ID
+        from ui.block_execution_handler import BlockExecutionHandler
+        from ui.code_viewer import BlockCard, BlockViewWidget
 
         # 1. 상수 확정값
         self.assert_true(
@@ -2432,8 +2475,7 @@ if __name__ == "__main__":
         # 3. BlockViewWidget.refresh 가 init_card.run_single_requested 연결
         refresh_src = inspect.getsource(BlockViewWidget.refresh)
         self.assert_true(
-            "init_card.run_single_requested.connect(self.run_single_step_requested)"
-            in refresh_src,
+            "init_card.run_single_requested.connect(self.run_single_step_requested)" in refresh_src,
             "[회귀] BlockViewWidget.refresh 가 init_card.run_single_requested ->"
             " run_single_step_requested 연결 필수 (signal 라우팅)",
         )
@@ -2441,8 +2483,7 @@ if __name__ == "__main__":
         # 4. BlockExecutionHandler.on_run_single_step 가 INITIAL_BLOCK_STEP_ID 분기
         on_single_src = inspect.getsource(BlockExecutionHandler.on_run_single_step)
         self.assert_true(
-            "INITIAL_BLOCK_STEP_ID" in on_single_src
-            and "on_run_initial_block" in on_single_src,
+            "INITIAL_BLOCK_STEP_ID" in on_single_src and "on_run_initial_block" in on_single_src,
             "[회귀] on_run_single_step 가 step_id == INITIAL_BLOCK_STEP_ID 분기 후 "
             "on_run_initial_block() 호출 필수",
         )
@@ -2455,8 +2496,7 @@ if __name__ == "__main__":
         on_init_src = inspect.getsource(BlockExecutionHandler.on_run_initial_block)
         # 카드에서 코드 텍스트 추출 (사용자 편집 반영)
         self.assert_true(
-            "code_edit.toPlainText()" in on_init_src
-            and "INITIAL_BLOCK_STEP_ID" in on_init_src,
+            "code_edit.toPlainText()" in on_init_src and "INITIAL_BLOCK_STEP_ID" in on_init_src,
             "[회귀] on_run_initial_block 가 Initial 카드의 code_edit.toPlainText() "
             "로 사용자 편집 반영 코드 추출 필수",
         )
@@ -2482,8 +2522,7 @@ if __name__ == "__main__":
         self.assert_true(
             "kernel.execute_block(\n                initial_code, step_id=INITIAL_BLOCK_STEP_ID"
             in thread_src
-            or "kernel.execute_block(initial_code, step_id=INITIAL_BLOCK_STEP_ID"
-            in thread_src,
+            or "kernel.execute_block(initial_code, step_id=INITIAL_BLOCK_STEP_ID" in thread_src,
             "[회귀] _run_initial_block_thread 가 kernel.execute_block(initial_code, "
             "step_id=INITIAL_BLOCK_STEP_ID) 호출 필수",
         )
@@ -2500,11 +2539,12 @@ if __name__ == "__main__":
         만으로 OpenAI / DeepSeek / Groq / OpenRouter / Ollama / LM Studio 등
         모두 지원.
         """
-        from core.adapters.openai_compat_adapter import OpenAICompatAdapter, PRESETS
-        from core.adapters.base_adapter import BaseAIAdapter, AIResponse
-        from core.ai_engine import AIEngineManager
         import json
         from pathlib import Path
+
+        from core.adapters.base_adapter import AIResponse, BaseAIAdapter
+        from core.adapters.openai_compat_adapter import PRESETS, OpenAICompatAdapter
+        from core.ai_engine import AIEngineManager
 
         # 1. PRESETS 가 주요 서비스 포함 + base_url + model 쌍
         for required in ["openai", "deepseek", "groq", "openrouter", "ollama"]:
@@ -2567,8 +2607,7 @@ if __name__ == "__main__":
 
         # 8. settings.json default 에 openai_compat 항목 존재 + 필수 키
         cfg = json.loads(
-            (Path(__file__).parent.parent / "config" / "settings.json")
-            .read_text(encoding="utf-8")
+            (Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8")
         )
         oc_cfg = cfg.get("ai", {}).get("available_engines", {}).get("openai_compat", {})
         self.assert_true(
@@ -2583,6 +2622,7 @@ if __name__ == "__main__":
 
         # 9. 메서드 시그니처 — generate 는 async, cancel 은 sync
         import inspect
+
         self.assert_true(
             inspect.iscoroutinefunction(OpenAICompatAdapter.generate),
             "[회귀] OpenAICompatAdapter.generate 는 async 함수 필수 (BaseAIAdapter 호환)",
@@ -2596,6 +2636,504 @@ if __name__ == "__main__":
             f"[회귀] generate 반환 타입 AIResponse 명시 필수. 실제: {return_anno}",
         )
 
+    def test_76_app_service_export_workflow_creates_full_bundle(self):
+        """[D22] AppService.export_workflow 가 실행 가능 + 가져오기 가능 번들 생성.
+
+        결과 폴더 구성: main.py / requirements.txt / README.md / run.bat
+        (실행 가능) + session.json / captures/ (있으면) / scripts/ (있으면)
+        — import_workflow 로 재가져오기 가능. v1 export_as_project 의 v2 façade.
+        """
+        from core.app_service import AppService
+        from core.session_manager import SessionManager, Step
+        from core.storage.local_json import LocalJsonRepository
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir) / "data"
+            manager = SessionManager(data_dir=data_dir)
+            repo = LocalJsonRepository(manager=manager)
+            service = AppService(session_repo=repo)
+
+            self.step("세션 + 스텝 + capture 파일 준비")
+            session = manager.create_session(title="export 테스트", project_type="desktop")
+            manager.add_step(session, Step(generated_code="print('step 1')"))
+            cap_dir = data_dir / "sessions" / session.session_id / "captures"
+            cap_dir.mkdir(parents=True, exist_ok=True)
+            (cap_dir / "screen_001.png").write_bytes(b"fake-png")
+
+            self.step("export_workflow 호출")
+            out_dir = Path(tmpdir) / "exported"
+            result = service.export_workflow(session_id=session.session_id, output_dir=out_dir)
+
+            self.assert_true(result.exists(), "결과 폴더 존재 필수")
+            for required in ("main.py", "requirements.txt", "README.md", "run.bat"):
+                self.assert_true(
+                    (result / required).exists(),
+                    f"[D22] {required} 생성 필수 (실행 가능 번들)",
+                )
+            self.assert_true(
+                (result / "session.json").exists(),
+                "[D22] session.json 포함 필수 (가져오기 가능)",
+            )
+            self.assert_true(
+                (result / "captures" / "screen_001.png").exists(),
+                "[D22] captures/ 사본 포함 필수",
+            )
+
+    def test_77_app_service_import_workflow_new_uuid(self):
+        """[D22] AppService.import_workflow 가 새 UUID 로 가져오기 + 절대 경로 재작성.
+
+        export 결과 폴더를 import 하면 새 UUID 생성, captures 절대 경로의 옛 UUID
+        가 새 UUID 로 교체됨. 같은 export 를 두 번 import 해도 충돌 없음.
+        """
+        from core.app_service import AppService
+        from core.session_manager import SessionManager, Step
+        from core.storage.local_json import LocalJsonRepository
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir) / "data"
+            manager = SessionManager(data_dir=data_dir)
+            repo = LocalJsonRepository(manager=manager)
+            service = AppService(session_repo=repo)
+
+            self.step("export 가능한 세션 준비 (capture 절대 경로 포함)")
+            session = manager.create_session(title="import 테스트")
+            sid = session.session_id
+            cap_path = data_dir / "sessions" / sid / "captures" / "elem_001.png"
+            cap_path.parent.mkdir(parents=True, exist_ok=True)
+            cap_path.write_bytes(b"fake-png")
+            step = Step(
+                generated_code="print('hi')",
+                captures=[str(cap_path)],
+            )
+            manager.add_step(session, step)
+
+            self.step("export → import 두 번 (충돌 검증)")
+            export_dir = Path(tmpdir) / "exported"
+            service.export_workflow(session_id=sid, output_dir=export_dir)
+            imported_a = service.import_workflow(source_dir=export_dir)
+            imported_b = service.import_workflow(source_dir=export_dir)
+
+            self.assert_true(
+                imported_a.session_id != sid,
+                "[D22] import 시 새 UUID 발급 필수 (원본과 다름)",
+            )
+            self.assert_true(
+                imported_a.session_id != imported_b.session_id,
+                "[D22] 같은 export 두 번 import → 각각 다른 UUID 충돌 회피",
+            )
+            self.assert_true(
+                imported_a.title == "import 테스트",
+                f"[D22] 제목 보존. 실제: {imported_a.title!r}",
+            )
+            self.step("captures 절대 경로 재작성 검증")
+            new_caps = imported_a.steps[0].get("captures") or []
+            self.assert_true(
+                len(new_caps) == 1
+                and imported_a.session_id in new_caps[0]
+                and sid not in new_caps[0],
+                f"[D22] captures 절대 경로 옛 UUID → 새 UUID 치환 필수. 실제: {new_caps}",
+            )
+            self.step("new_title 옵션 검증")
+            imported_c = service.import_workflow(source_dir=export_dir, new_title="이름 변경됨")
+            self.assert_true(
+                imported_c.title == "이름 변경됨",
+                f"[D22] new_title 인자 적용 필수. 실제: {imported_c.title!r}",
+            )
+
+    def test_78_in_memory_repo_contract(self):
+        """[Phase 1] InMemoryRepository 가 SessionRepository contract 준수.
+
+        ROADMAP §3 Phase 1 (1) — file IO 없는 인메모리 구현으로 테스트 가속 가능.
+        LocalJsonRepository 와 동일한 동작 (CRUD + 스텝 관리) 보장.
+        """
+        from core.session_manager import Step
+        from core.storage import InMemoryRepository, LocalJsonRepository, SessionRepository
+
+        self.step("InMemoryRepository 가 SessionRepository 상속 + 인스턴스화 가능")
+        self.assert_true(
+            issubclass(InMemoryRepository, SessionRepository),
+            "[Phase 1] InMemoryRepository 가 SessionRepository(ABC) 상속 필수",
+        )
+        repo = InMemoryRepository()  # ABC 미구현이면 TypeError
+
+        self.step("create + load + list + delete 사이클")
+        s = repo.create_session(title="in-memory test", project_type="desktop")
+        self.assert_true(s.session_id and len(s.session_id) > 0, "session_id 발급")
+        loaded = repo.load_session(s.session_id)
+        self.assert_equal(loaded.title, "in-memory test", "load 시 title 유지")
+        summaries = repo.list_sessions()
+        self.assert_true(any(x.session_id == s.session_id for x in summaries), "list 에 포함")
+
+        self.step("스텝 add + update + delete + insert + move")
+        repo.add_step(s, Step(generated_code="print('a')"))
+        repo.add_step(s, Step(generated_code="print('b')"))
+        repo.add_step(s, Step(generated_code="print('c')"))
+        loaded = repo.load_session(s.session_id)
+        self.assert_equal(len(loaded.steps), 3, "3 step 추가")
+
+        repo.update_step(s, step_id=2, updates={"status": "completed"})
+        loaded = repo.load_session(s.session_id)
+        self.assert_equal(loaded.steps[1]["status"], "completed", "update 적용")
+
+        repo.move_step(s, step_id=1, direction="down")
+        loaded = repo.load_session(s.session_id)
+        self.assert_contains(
+            loaded.steps[1].get("generated_code", ""),
+            "print('a')",
+            "step 1 가 아래로 이동",
+        )
+
+        repo.delete_step(s, step_id=2)
+        loaded = repo.load_session(s.session_id)
+        self.assert_equal(len(loaded.steps), 2, "delete 후 2 step")
+
+        self.step("delete_session 후 load 는 FileNotFoundError")
+        repo.delete_session(s.session_id)
+        try:
+            repo.load_session(s.session_id)
+            raise AssertionError("delete 후 load 가 FileNotFoundError 던져야 함")
+        except FileNotFoundError:
+            pass  # expected
+
+        self.step("export/import 는 file IO 미지원이라 NotImplementedError")
+        s2 = repo.create_session(title="x")
+        try:
+            repo.export_session_as_project(s2, Path("/tmp/x"), settings={})
+            raise AssertionError("InMemoryRepo.export 는 NotImplementedError 던져야 함")
+        except NotImplementedError:
+            pass  # expected
+
+        # LocalJsonRepository 와 동일 contract — 동일한 메서드 시그니처 노출
+        for method in (
+            "create_session",
+            "save_session",
+            "load_session",
+            "list_sessions",
+            "delete_session",
+            "add_step",
+            "update_step",
+            "delete_step",
+            "insert_step",
+            "move_step",
+            "export_session_as_project",
+            "import_session_folder",
+        ):
+            self.assert_true(
+                hasattr(InMemoryRepository, method) and hasattr(LocalJsonRepository, method),
+                f"[Phase 1] {method} 양 backend 에 모두 정의 필수",
+            )
+
+    def test_79_app_service_no_storage_leak(self):
+        """[Phase 1] AppService 가 self._repo.manager 로 leak 안 함.
+
+        ROADMAP §3 Phase 1 (1) — AppService 는 SessionRepository 추상 메서드만
+        호출. 5/8 까지의 ``getattr(self._repo, "manager", None)`` 패턴 제거 검증.
+        Phase 2 의 PostgresRepository 가 manager 속성 없이도 작동해야 함.
+        """
+        import inspect
+
+        from core.app_service import AppService
+
+        src = inspect.getsource(AppService)
+        # leak 패턴 — getattr(self._repo, "manager", ...) 부재
+        self.assert_true(
+            'getattr(self._repo, "manager"' not in src,
+            "[Phase 1] AppService 에서 self._repo.manager 우회 패턴 (getattr) 제거 필수",
+        )
+        self.assert_true(
+            "self._repo.export_session_as_project(" in src,
+            "[Phase 1] AppService.export_workflow 가 repo 의 추상 메서드 직접 호출 필수",
+        )
+        self.assert_true(
+            "self._repo.import_session_folder(" in src,
+            "[Phase 1] AppService.import_workflow 가 repo 의 추상 메서드 직접 호출 필수",
+        )
+
+    def test_82_pydantic_models_round_trip(self):
+        """[Phase 1.3] core/models.py 의 Pydantic 모델 ↔ dataclass round-trip.
+
+        ROADMAP §3 Phase 1 (3) — dataclass (Session/Step/Capture 등) 를 Pydantic
+        v2 모델로 승격. 5/8 시점 비파괴 도입 — parallel 모델 + conversion helper.
+        Phase 2 FastAPI ``response_model`` 로 즉시 활용 가능.
+
+        검증:
+        - 매핑 모든 dataclass 가 대응 Pydantic 모델 보유
+        - from_dataclass → to_dataclass round-trip 손실 없음 (모든 필드 보존)
+        - JSON 직렬화 (model_dump) 결과가 asdict 와 동일 구조
+        - extra='allow' — 미정의 필드 forward compat
+        """
+        import json
+        from dataclasses import asdict
+
+        from core.models import (
+            CaptureModel,
+            ConversationMessageModel,
+            ExecutionResultModel,
+            PromptLogModel,
+            SessionModel,
+            SessionSummaryModel,
+            StepModel,
+            from_dataclass,
+            to_dataclass,
+        )
+        from core.session_manager import (
+            CaptureInfo,
+            ConversationMessage,
+            ExecutionResult,
+            PromptLog,
+            Session,
+            SessionSummary,
+            Step,
+        )
+
+        self.step("매핑 7 dataclass <-> 7 Pydantic 모델")
+        pairs = [
+            (CaptureInfo, CaptureModel),
+            (PromptLog, PromptLogModel),
+            (ExecutionResult, ExecutionResultModel),
+            (ConversationMessage, ConversationMessageModel),
+            (Step, StepModel),
+            (Session, SessionModel),
+            (SessionSummary, SessionSummaryModel),
+        ]
+        for dc_cls, model_cls in pairs:
+            self.assert_true(
+                model_cls is not None,
+                f"[Phase 1.3] {dc_cls.__name__} 에 대응 {model_cls.__name__} 정의 필수",
+            )
+
+        self.step("Step round-trip - dataclass -> Pydantic -> dataclass")
+        step = Step(
+            step_id=3,
+            status="completed",
+            generated_code="print('hello')",
+            step_code="print('hello')",
+            user_request="hello 출력",
+            ai_description="간단한 print 문",
+            wait_after_ms=500,
+        )
+        model = from_dataclass(step)
+        self.assert_true(isinstance(model, StepModel), "from_dataclass -> StepModel")
+        back = to_dataclass(model)
+        self.assert_true(isinstance(back, Step), "to_dataclass -> Step")
+        # 모든 필드 보존
+        self.assert_equal(back.step_id, 3, "step_id 보존")
+        self.assert_equal(back.status, "completed", "status 보존")
+        self.assert_equal(back.user_request, "hello 출력", "user_request 보존")
+        self.assert_equal(back.wait_after_ms, 500, "wait_after_ms 보존")
+        # JSON 직렬화 결과가 asdict 와 동일 구조
+        self.assert_equal(
+            model.model_dump(),
+            asdict(step),
+            "model_dump() == asdict() - JSON wire format 동일",
+        )
+
+        self.step("Session round-trip - 중첩 + default factory 보존")
+        s = Session(
+            session_id="abc-123",
+            title="테스트 세션",
+            project_type="web",
+            description="round-trip 검증",
+        )
+        # default factory 값들 (settings, workflow_metadata) 도 round-trip
+        s_model = from_dataclass(s)
+        s_back = to_dataclass(s_model)
+        self.assert_equal(s_back.session_id, "abc-123", "session_id 보존")
+        self.assert_equal(s_back.title, "테스트 세션", "title 보존")
+        self.assert_true("ai_engine" in s_back.settings, "settings.ai_engine default 보존")
+        self.assert_equal(
+            s_back.workflow_metadata.get("total_steps"),
+            0,
+            "workflow_metadata.total_steps default 보존",
+        )
+
+        self.step("SessionSummary - required 필드 검증")
+        summary = SessionSummary(
+            session_id="x",
+            title="T",
+            description="D",
+            project_type="desktop",
+            created_at="2026-05-08",
+            updated_at="2026-05-08",
+            total_steps=5,
+            completed_steps=3,
+        )
+        sm = from_dataclass(summary)
+        self.assert_equal(sm.total_steps, 5, "summary 정수 필드 보존")
+
+        self.step("JSON 직렬화 (model_dump_json) 가능")
+        json_str = s_model.model_dump_json()
+        parsed = json.loads(json_str)
+        self.assert_equal(parsed["session_id"], "abc-123", "JSON 직렬화/파싱 round-trip")
+
+        self.step("extra='allow' - 미정의 필드 forward compat")
+        # JSON 에 미래 필드가 있어도 모델 거부 안 함
+        future_step_data = {"step_id": 1, "future_field": "value"}
+        future_model = StepModel(**future_step_data)
+        self.assert_equal(future_model.step_id, 1, "정의된 필드 정상")
+        # extra='allow' 면 model_dump 시 future_field 도 포함 (보존)
+        self.assert_true(
+            "future_field" in future_model.model_dump(),
+            "extra='allow' 가 미정의 필드 보존",
+        )
+
+        self.step("타입 매핑 안 된 객체는 TypeError")
+        try:
+            from_dataclass(object())
+            raise AssertionError("매핑 없는 타입은 TypeError")
+        except TypeError:
+            pass
+
+    def test_81_settings_layer_pydantic_typed(self):
+        """[Phase 1.4] core/config.py 의 Settings 모델 + JSON load + .env override.
+
+        ROADMAP §3 Phase 1 (4) — config/settings.json 의 dict 기반 설정을
+        Pydantic v2 ``Settings`` 모델로 승격. 환경변수 prefix ``OHDO_`` +
+        nested delimiter ``__`` 로 override 가능.
+
+        비파괴 정책 — 기존 ``_load_settings() -> dict`` 패턴은 유지
+        (load_settings_dict 가 동일한 dict 반환).
+        """
+        import os
+        import tempfile
+
+        from core.config import (
+            ExecutionSettings,
+            Settings,
+            load_settings,
+            load_settings_dict,
+            save_settings,
+        )
+
+        self.step("실제 settings.json 을 Settings 모델로 로드")
+        s = load_settings()
+        self.assert_true(isinstance(s, Settings), "Settings 인스턴스 반환")
+        self.assert_true(
+            isinstance(s.execution, ExecutionSettings),
+            "execution 섹션이 ExecutionSettings 타입",
+        )
+        self.assert_true(
+            isinstance(s.ai.available_engines, dict),
+            "ai.available_engines 가 dict[str, AIEngineConfig]",
+        )
+
+        self.step("load_settings_dict 가 동일한 dict 반환 (비파괴 호환)")
+        d = load_settings_dict()
+        self.assert_true(isinstance(d, dict), "dict 반환")
+        self.assert_true("ai" in d and "execution" in d, "주요 섹션 포함")
+        self.assert_equal(
+            d["execution"]["step_delay_ms"],
+            s.execution.step_delay_ms,
+            "model_dump 가 typed 값과 일치",
+        )
+
+        self.step("환경변수 override — OHDO_EXECUTION__STEP_DELAY_MS=2500")
+        try:
+            os.environ["OHDO_EXECUTION__STEP_DELAY_MS"] = "2500"
+            s_override = load_settings()
+            self.assert_equal(
+                s_override.execution.step_delay_ms,
+                2500,
+                "환경변수가 JSON 값보다 우선",
+            )
+        finally:
+            os.environ.pop("OHDO_EXECUTION__STEP_DELAY_MS", None)
+
+        self.step("save_settings 가 디스크에 영속화")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_settings.json"
+            sample = Settings()
+            sample.ui.theme = "dark"
+            sample.execution.step_delay_ms = 555
+            save_settings(sample, path)
+            self.assert_true(path.exists(), "JSON 파일 생성")
+            reloaded = load_settings(path)
+            self.assert_equal(reloaded.ui.theme, "dark", "save → load 라운드트립")
+            self.assert_equal(reloaded.execution.step_delay_ms, 555, "수치 라운드트립")
+
+        self.step("default 값 — settings.json 없을 때")
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = load_settings(Path(tmp) / "missing.json")
+            self.assert_true(
+                isinstance(empty, Settings),
+                "파일 없어도 default Settings 반환",
+            )
+            self.assert_equal(empty.execution.step_delay_ms, 1000, "default step_delay_ms=1000")
+
+        self.step("extra=allow — 미정의 키도 보존 (forward compat)")
+        with tempfile.TemporaryDirectory() as tmp:
+            unknown_path = Path(tmp) / "unknown.json"
+            unknown_path.write_text(
+                '{"ai":{"selected":"x"},"future_section":{"foo":"bar"}}',
+                encoding="utf-8",
+            )
+            s_extra = load_settings(unknown_path)
+            self.assert_equal(s_extra.ai.selected, "x", "정의된 필드 정상")
+            # extra="allow" 면 future_section 도 모델에 보존됨 (model_dump 시 포함)
+            self.assert_true(
+                "future_section" in s_extra.model_dump(),
+                "extra='allow' 가 미정의 섹션 보존",
+            )
+
+    def test_80_ui_v2_no_direct_core_imports(self):
+        """[Phase 1.2] ui_v2 가 core.* 의 banned 모듈 직접 import 0건.
+
+        ROADMAP §3 Phase 1 (2) KPI: "ui/ 폴더에서 session_manager · workflow_engine
+        · ai_engine 직접 import 0건". ui_v2 는 5/8 시점 Chunk A 적용 완료 — 모든
+        import 가 ``core.app_service`` 경유.
+
+        Banned (UI 가 직접 import 금지):
+        - ``core.session_manager`` — 도메인 클래스 (Session/Step) 는 app_service 에서 re-export
+        - ``core.ai_engine`` — AIEngineManager construction 은 ``AppService.reload_ai`` /
+          ``AppService.create_default`` 사용
+        - ``core.execution_kernel`` — ExecutionKernel 은 app_service 에서 re-export +
+          ``AppService.create_kernel`` factory
+        - ``core.workflow_engine`` — 모든 호출은 AppService.run_blocks / stop_blocks 등
+        - ``core.storage.*`` — repo 생성은 ``AppService.create_default`` 사용
+
+        ui/ legacy 폴더는 Chunk B (추후 별 sub-task) 에서 정리.
+        """
+        from pathlib import Path
+
+        ui_v2_src = (Path(__file__).parent.parent / "ui_v2" / "main_window_v2.py").read_text(
+            encoding="utf-8"
+        )
+
+        banned_modules = [
+            "core.session_manager",
+            "core.ai_engine",
+            "core.execution_kernel",
+            "core.workflow_engine",
+            "core.storage.local_json",
+            "core.storage.base",
+            "core.storage.in_memory",
+        ]
+        for mod in banned_modules:
+            self.assert_true(
+                f"from {mod}" not in ui_v2_src and f"import {mod}" not in ui_v2_src,
+                f"[Phase 1.2 KPI] ui_v2/main_window_v2.py 에서 '{mod}' 직접 import 금지 "
+                "- core.app_service 경유 필수",
+            )
+
+        # AppService re-export 검증 — UI 가 사용하는 도메인 타입이 app_service 에서 노출
+        from core.app_service import AppService, ExecutionKernel, Session, Step, StepResult
+
+        self.assert_true(
+            Session is not None and Step is not None,
+            "[Phase 1.2] AppService 가 Session / Step re-export 필수",
+        )
+        self.assert_true(
+            ExecutionKernel is not None and StepResult is not None,
+            "[Phase 1.2] AppService 가 ExecutionKernel / StepResult re-export 필수",
+        )
+
+        # AppService 의 factory / reload 메서드 존재
+        for method in ("create_default", "reload_ai", "create_kernel"):
+            self.assert_true(
+                hasattr(AppService, method),
+                f"[Phase 1.2] AppService.{method} 필수 (UI 가 core.* 직접 import 안 하게)",
+            )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
@@ -2604,9 +3142,10 @@ if __name__ == "__main__":
         카드가 잔존 → 화면 stale.
         Fix: CodeViewer.clear() 가 block_view.refresh("", [], "", 500) 도 호출.
         """
+        import inspect
+
         from ui.code_viewer import CodeViewer
         from ui.main_window import MainWindow
-        import inspect
 
         clear_src = inspect.getsource(CodeViewer.clear)
         self.assert_true(
@@ -2679,28 +3218,27 @@ if __name__ == "__main__":
         )
         self.assert_true(
             "except" in delta,
-            f"[회귀] 새 except 블록의 except 헤더 보존 필수 "
-            f"(실제 delta: {delta!r})",
+            f"[회귀] 새 except 블록의 except 헤더 보존 필수 (실제 delta: {delta!r})",
         )
 
         # 새 try/except 본문 모두 포함
         self.assert_true(
             "zoom_menu" in delta and "확대/축소 클릭" in delta,
-            f"[회귀] 새 try 본문 (zoom_menu 정의 + 성공 print) 추출 "
-            f"(실제 delta: {delta!r})",
+            f"[회귀] 새 try 본문 (zoom_menu 정의 + 성공 print) 추출 (실제 delta: {delta!r})",
         )
         self.assert_true(
             "확대/축소 오류" in delta,
-            f"[회귀] 새 except 본문 (에러 print) 추출 "
-            f"(실제 delta: {delta!r})",
+            f"[회귀] 새 except 본문 (에러 print) 추출 (실제 delta: {delta!r})",
         )
 
         # AST 분석: 성공 print 가 try 블록 안 / 에러 print 가 except 블록 안 (module-level X)
         import ast
+
         tree = ast.parse(delta)
         # module-level 에 print 가 있으면 안 됨 (try/except 안에 있어야 함)
         module_level_prints = [
-            node for node in tree.body
+            node
+            for node in tree.body
             if isinstance(node, ast.Expr)
             and isinstance(node.value, ast.Call)
             and isinstance(node.value.func, ast.Name)
@@ -2719,7 +3257,7 @@ if __name__ == "__main__":
         과거 버그: SequenceMatcher 가 try 블록 안의 라인만 추출 → indent 4
         그대로 → IndentationError. _smart_dedent 가 공통 indent 제거.
         """
-        from core.import_manager import extract_code_delta, _smart_dedent
+        from core.import_manager import _smart_dedent, extract_code_delta
 
         # _smart_dedent 단독 검증
         code = "    x = 1\n    y = 2"
@@ -2837,15 +3375,14 @@ if __name__ == "__main__":
         # (마커 추출이면 Step 3 본문만 깨끗히 잡혀 ' @06pwd' 라인 자체가 안 들어옴)
         self.assert_true(
             " @06pwd" not in delta,
-            f"[회귀] step2 의 미세 변경된 라인이 step3 delta 에 섞이면 안 됨 "
-            f"(delta: {delta!r})",
+            f"[회귀] step2 의 미세 변경된 라인이 step3 delta 에 섞이면 안 됨 (delta: {delta!r})",
         )
 
     def test_59_extract_step_delta_compile_validation(self):
         """[회귀] 모든 후보가 compile 통과해야 채택. 첫 후보가 SyntaxError 면
         다음 후보로 fallback (마커 → diff → step_code → generated_code 전체).
         """
-        from core.workflow_engine import _is_compilable, _extract_by_step_marker
+        from core.workflow_engine import _extract_by_step_marker, _is_compilable
 
         # _is_compilable 단독 검증
         self.assert_true(
@@ -2863,12 +3400,7 @@ if __name__ == "__main__":
 
         # _extract_by_step_marker 단독 검증
         code = (
-            "x = 1\n"
-            "# === Step 2: foo (시작) ===\n"
-            "y = 2\n"
-            "z = 3\n"
-            "# === Step 2: foo (끝) ===\n"
-            "w = 4\n"
+            "x = 1\n# === Step 2: foo (시작) ===\ny = 2\nz = 3\n# === Step 2: foo (끝) ===\nw = 4\n"
         )
         marker = _extract_by_step_marker(code, 2)
         self.assert_true(
@@ -2887,8 +3419,9 @@ if __name__ == "__main__":
         """[회귀] extract_step_delta_code 가 prev_step 인자로 generated_code diff
         재계산 - 저장된 step_code 가 누적이라도 자동 fix.
         """
-        from core.workflow_engine import extract_step_delta_code
         import inspect
+
+        from core.workflow_engine import extract_step_delta_code
 
         sig = inspect.signature(extract_step_delta_code)
         self.assert_true(
@@ -2929,8 +3462,9 @@ if __name__ == "__main__":
         (MFC+WebView 등) 에서 OS-level path 가 reach 가능. 이 호출이 빠지면
         해당 케이스 회귀.
         """
-        from ui.element_picker import ElementPickerOverlay
         import inspect
+
+        from ui.element_picker import ElementPickerOverlay
 
         efp_src = inspect.getsource(ElementPickerOverlay._detect_via_efp)
         self.assert_true(
@@ -2951,6 +3485,7 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
+
     runner = TestRunner(suite_name="core")
     runner.add_test_class(CoreTest)
     result = runner.run()

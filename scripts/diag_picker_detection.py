@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 독립 picker detection 진단 스크립트
 
@@ -18,7 +19,6 @@ picker GUI 없이 element_picker 의 detection 로직만 단독 실행. 콘솔�
 
 import sys
 import time
-import ctypes
 from pathlib import Path
 
 # 프로젝트 루트를 path 에 추가
@@ -32,6 +32,7 @@ def main():
         return 1
 
     import ctypes.wintypes
+
     user32 = ctypes.windll.user32
 
     print("=" * 70)
@@ -58,7 +59,6 @@ def main():
     # element_picker 의 detection 로직 import
     print("[2] element_picker 모듈 import 중...")
     try:
-        from ui.element_picker import ElementPickerOverlay
         print("    ✅ import OK")
     except Exception as e:
         print(f"    ❌ import 실패: {e}")
@@ -102,18 +102,19 @@ def main():
             if visible and not iconic:
                 rect = ctypes.wintypes.RECT()
                 if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                    inside = (rect.left <= x < rect.right
-                              and rect.top <= y < rect.bottom)
+                    inside = rect.left <= x < rect.right and rect.top <= y < rect.bottom
                     if len(samples) < 5:
                         # 윈도우 title 도 같이
                         buf = ctypes.create_unicode_buffer(256)
                         user32.GetWindowTextW(hwnd, buf, 256)
-                        samples.append({
-                            "hwnd": hwnd,
-                            "title": buf.value[:60],
-                            "rect": (rect.left, rect.top, rect.right, rect.bottom),
-                            "inside": inside,
-                        })
+                        samples.append(
+                            {
+                                "hwnd": hwnd,
+                                "title": buf.value[:60],
+                                "rect": (rect.left, rect.top, rect.right, rect.bottom),
+                                "inside": inside,
+                            }
+                        )
                     if inside:
                         buf = ctypes.create_unicode_buffer(256)
                         user32.GetWindowTextW(hwnd, buf, 256)
@@ -125,7 +126,7 @@ def main():
         hwnd = user32.GetWindow(hwnd, GW_HWNDNEXT)
 
     print(f"    스캔: {scanned} 개 top-level 윈도우")
-    print(f"    상위 5개 샘플:")
+    print("    상위 5개 샘플:")
     for s in samples:
         marker = "  ← MATCH" if s["inside"] else ""
         print(f"      HWND=0x{s['hwnd']:x} '{s['title']}' rect={s['rect']}{marker}")
@@ -160,15 +161,18 @@ def main():
     # pywinauto wrap
     print("[5] pywinauto UIAWrapper 로 wrap")
     try:
-        from pywinauto.uia_element_info import UIAElementInfo
         from pywinauto.controls.uiawrapper import UIAWrapper
+        from pywinauto.uia_element_info import UIAElementInfo
+
         elem_info = UIAElementInfo(target_hwnd)
         window_wrapper = UIAWrapper(elem_info)
         rect = window_wrapper.rectangle()
-        print(f"    ✅ UIA wrap OK")
+        print("    ✅ UIA wrap OK")
         print(f"    Window-level: {window_wrapper!r}")
-        print(f"    rect=({rect.left},{rect.top})~({rect.right},{rect.bottom}) "
-              f"size={rect.width()}x{rect.height()}")
+        print(
+            f"    rect=({rect.left},{rect.top})~({rect.right},{rect.bottom}) "
+            f"size={rect.width()}x{rect.height()}"
+        )
     except Exception as e:
         print(f"    ❌ pywinauto wrap 실패: {e}")
         return 1
@@ -212,9 +216,11 @@ def main():
             current = best_child
         walk_rect = current.rectangle()
         print(f"    walk 결과: {current!r}")
-        print(f"    rect=({walk_rect.left},{walk_rect.top})~"
-              f"({walk_rect.right},{walk_rect.bottom}) "
-              f"size={walk_rect.width()}x{walk_rect.height()}")
+        print(
+            f"    rect=({walk_rect.left},{walk_rect.top})~"
+            f"({walk_rect.right},{walk_rect.bottom}) "
+            f"size={walk_rect.width()}x{walk_rect.height()}"
+        )
     except Exception as e:
         print(f"    ❌ tree walk 실패: {e}")
     print()
@@ -223,6 +229,7 @@ def main():
     print("[7] RawViewWalker 보조 탐색 (tree walk 결과보다 깊은 게 있는지)")
     try:
         from pywinauto.uia_defines import IUIA
+
         iuia = IUIA().iuia
         walker = iuia.RawViewWalker
         deadline = time.time() + 0.15
@@ -275,12 +282,14 @@ def main():
                 deepest_wrap = UIAWrapper(deepest_info)
                 dr = deepest_wrap.rectangle()
                 print(f"    raw walker 결과: {deepest_wrap!r}")
-                print(f"    rect=({dr.left},{dr.top})~({dr.right},{dr.bottom}) "
-                      f"size={dr.width()}x{dr.height()}")
+                print(
+                    f"    rect=({dr.left},{dr.top})~({dr.right},{dr.bottom}) "
+                    f"size={dr.width()}x{dr.height()}"
+                )
             except Exception as e:
                 print(f"    raw walker wrap 실패: {e}")
         else:
-            print(f"    raw walker → None")
+            print("    raw walker → None")
     except Exception as e:
         print(f"    ❌ raw walker 실패: {e}")
     print()

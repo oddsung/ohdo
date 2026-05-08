@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """AI 호출 controller (메인 윈도우 분해 Step 4).
 
 main_window.py 가 1538 줄로 비대해 영역별 분리. 이 모듈은:
@@ -15,8 +16,8 @@ main_window 에 위임 stub 메서드는 유지 (signal connect 호환 + 테스�
 from __future__ import annotations
 
 import asyncio
-import threading
 import logging
+import threading
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -73,11 +74,7 @@ class AICallHandler:
         mw.pending_images.clear()
         mw.chat_panel.clear_capture_status()
 
-        thread = threading.Thread(
-            target=self.call_ai_thread,
-            args=(message, images),
-            daemon=True
-        )
+        thread = threading.Thread(target=self.call_ai_thread, args=(message, images), daemon=True)
         thread.start()
 
     # ── 백그라운드: AI 어댑터 호출 + prompt 구성 ───────────────
@@ -108,9 +105,11 @@ class AICallHandler:
 
             # Selenium DOM 경로는 picker 가 CDP 로 실제 DOM 정보를 수집했을 때만.
             # WinInspector.should_use_selenium 으로 단일 기준 적용 (하드코딩 0).
-            is_browser_elem = any(
-                mw.win_inspector.should_use_selenium(e) for e in pending_elems
-            ) if pending_elems else False
+            is_browser_elem = (
+                any(mw.win_inspector.should_use_selenium(e) for e in pending_elems)
+                if pending_elems
+                else False
+            )
             prompt = mw.prompt_builder.build_step_prompt(
                 session=mw.current_session,
                 user_request=user_message,
@@ -118,7 +117,7 @@ class AICallHandler:
                 window_context=window_ctx,
                 element_context=element_ctx,
                 project_type=mw.current_session.project_type,
-                is_browser_element=is_browser_elem
+                is_browser_element=is_browser_elem,
             )
 
             mw.signals.log_message.emit(f"[PROMPT] 프롬프트 전송 ({len(prompt)}자)")
@@ -126,40 +125,39 @@ class AICallHandler:
             # AI 호출 (비동기를 동기로 래핑)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            response = loop.run_until_complete(
-                mw.ai_engine.generate(prompt, images)
-            )
+            response = loop.run_until_complete(mw.ai_engine.generate(prompt, images))
             loop.close()
 
             mw.signals.log_message.emit(
-                f"[AI] 응답 수신 ({response.response_time_ms}ms, "
-                f"코드 {len(response.code)}자)"
+                f"[AI] 응답 수신 ({response.response_time_ms}ms, 코드 {len(response.code)}자)"
             )
 
             # AI 원본 응답 로깅 (디버깅용)
-            raw_preview = response.raw_response[:300] if response.raw_response else '(응답 없음)'
+            raw_preview = response.raw_response[:300] if response.raw_response else "(응답 없음)"
             mw.signals.log_message.emit(f"[AI] 원본 응답 미리보기: {raw_preview}")
 
             # 결과 전달 (요소 정보 포함)
             display_message = element_summary + user_message if element_summary else user_message
-            mw.signals.ai_response_ready.emit({
-                "user_message": user_message,
-                "display_message": display_message,  # 세션 기록용 (요소 정보 포함)
-                "images": images,
-                "response": {
-                    "text": response.text,
-                    "code": response.code,
-                    "description": response.description,
-                    "packages": response.packages,
-                    "raw_response": response.raw_response,
-                    "tokens_used": response.tokens_used,
-                    "response_time_ms": response.response_time_ms,
-                    "success": response.success,
-                    "error": response.error,
-                    "cancelled": response.cancelled,
-                },
-                "prompt": prompt
-            })
+            mw.signals.ai_response_ready.emit(
+                {
+                    "user_message": user_message,
+                    "display_message": display_message,  # 세션 기록용 (요소 정보 포함)
+                    "images": images,
+                    "response": {
+                        "text": response.text,
+                        "code": response.code,
+                        "description": response.description,
+                        "packages": response.packages,
+                        "raw_response": response.raw_response,
+                        "tokens_used": response.tokens_used,
+                        "response_time_ms": response.response_time_ms,
+                        "success": response.success,
+                        "error": response.error,
+                        "cancelled": response.cancelled,
+                    },
+                    "prompt": prompt,
+                }
+            )
 
         except Exception as e:
             mw.signals.error_occurred.emit(f"AI 호출 실패: {str(e)}")
@@ -186,9 +184,11 @@ class AICallHandler:
             code=response.get("code", ""),
             tokens_used=response.get("tokens_used", 0),
             response_time_ms=response.get("response_time_ms", 0),
-            ai_engine=mw.ai_engine.current_engine if hasattr(mw.ai_engine, 'current_engine') else "",
+            ai_engine=mw.ai_engine.current_engine
+            if hasattr(mw.ai_engine, "current_engine")
+            else "",
             has_images=bool(data.get("images")),
-            element_info=element_info
+            element_info=element_info,
         )
 
         # 취소된 경우: 안내 메시지만 표시하고 세션 기록 없이 종료
@@ -223,20 +223,16 @@ class AICallHandler:
                 mw.console_panel.log(f"코드 추출 완료 ({len(response['code'])}자)", "INFO")
             else:
                 # 코드가 없는 경우 안내 (단, 역질문 등 정상적인 응답일 수도 있음)
-                mw.console_panel.log(
-                    f"[INFO] 코드 추출 없음. 보조 텍스트 출력됨.",
-                    "INFO"
-                )
+                mw.console_panel.log("[INFO] 코드 추출 없음. 보조 텍스트 출력됨.", "INFO")
         else:
-            mw.chat_panel.add_system_message(
-                f"AI 응답 실패: {response['error']}"
-            )
+            mw.chat_panel.add_system_message(f"AI 응답 실패: {response['error']}")
 
         # 세션에 스텝 추가 (요소 정보 포함된 메시지 사용)
         recorded_message = data.get("display_message", data["user_message"])
         # import/코드 분리
         full_code = response.get("code", "")
-        from core.import_manager import extract_imports, extract_code_delta, extract_import_delta
+        from core.import_manager import extract_code_delta, extract_import_delta, extract_imports
+
         separated_imports, separated_body = extract_imports(full_code)
 
         # 이전 스텝의 누적 코드에서 이번 스텝에서 새로 추가된 부분만 추출
@@ -256,10 +252,16 @@ class AICallHandler:
         step = Step(
             status="completed" if response["success"] else "failed",
             conversation=[
-                {"role": "user", "content": recorded_message,
-                 "timestamp": datetime.now().isoformat()},
-                {"role": "assistant", "content": response.get("description", response["text"]),
-                 "timestamp": datetime.now().isoformat()}
+                {
+                    "role": "user",
+                    "content": recorded_message,
+                    "timestamp": datetime.now().isoformat(),
+                },
+                {
+                    "role": "assistant",
+                    "content": response.get("description", response["text"]),
+                    "timestamp": datetime.now().isoformat(),
+                },
             ],
             generated_code=full_code,
             required_packages=response.get("packages", []),
@@ -271,7 +273,7 @@ class AICallHandler:
                 "full_prompt": data.get("prompt", ""),
                 "raw_response": response.get("raw_response", ""),
                 "tokens_used": response.get("tokens_used", 0),
-                "response_time_ms": response.get("response_time_ms", 0)
+                "response_time_ms": response.get("response_time_ms", 0),
             },
             execution_result=None,
             step_code=delta_body,
@@ -301,10 +303,10 @@ class AICallHandler:
         """
         mw = self.mw
         success = data.get("success")
-        step_id = data.get('step_id')
+        step_id = data.get("step_id")
         mw.console_panel.log(
             f"스텝 #{step_id} 실행 완료: {'성공' if success else '실패'}",
-            "INFO" if success else "ERROR"
+            "INFO" if success else "ERROR",
         )
         if success and data.get("output"):
             mw.console_panel.log(f"  출력: {data['output'][:500]}", "DEBUG")
@@ -383,9 +385,7 @@ class AICallHandler:
 
         if prev_code:
             # 패턴: variable.send_keys("value") 또는 variable.send_keys('value')
-            send_keys_pat = _re.compile(
-                r'([ \t]*)(\w+)\.send_keys\((["\'])(.*?)\3\)'
-            )
+            send_keys_pat = _re.compile(r'([ \t]*)(\w+)\.send_keys\((["\'])(.*?)\3\)')
 
             # 이전 코드의 send_keys 값 수집: {변수명: (따옴표, 값)}
             prev_sends: dict[str, tuple[str, str]] = {}
@@ -403,9 +403,9 @@ class AICallHandler:
                         mw.console_panel.log(
                             f"  [AI변조복원] {varname}.send_keys({repr(value)}) "
                             f"→ send_keys({repr(old_value)})",
-                            "DEBUG"
+                            "DEBUG",
                         )
-                        return f'{indent}{varname}.send_keys({old_quote}{old_value}{old_quote})'
+                        return f"{indent}{varname}.send_keys({old_quote}{old_value}{old_quote})"
                 return m.group(0)
 
             code = send_keys_pat.sub(_restore, code)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 윈도우 피커 — 요소 레벨 하이라이트
 
@@ -10,9 +11,10 @@
 
 import ctypes
 import ctypes.wintypes
-from PySide6.QtWidgets import QWidget, QLabel, QApplication
-from PySide6.QtCore import Qt, QRect, QTimer, Signal
-from PySide6.QtGui import QPainter, QColor, QPen, QPaintEvent, QRegion
+
+from PySide6.QtCore import QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QRegion
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 # Win32 상수
 VK_LBUTTON = 0x01
@@ -54,14 +56,15 @@ def _get_window_rect_qrect(hwnd: int) -> QRect:
     """윈도우의 스크린 좌표 영역을 QRect로 반환합니다(물리적 픽셀)."""
     rect = ctypes.wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(rect))
-    return QRect(rect.left, rect.top,
-                 rect.right - rect.left, rect.bottom - rect.top)
+    return QRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
 
 
 # ── 멀티 모니터 DPI 좌표 변환 ──
 
+
 class _MONITORINFOEXW(ctypes.Structure):
     """Win32 MONITORINFOEXW — 디바이스 이름 포함"""
+
     _fields_ = [
         ("cbSize", ctypes.wintypes.DWORD),
         ("rcMonitor", ctypes.wintypes.RECT),
@@ -92,19 +95,19 @@ def _physical_to_logical_rect(phys_rect: QRect) -> QRect:
     phys_mon_y = mi.rcMonitor.top
     phys_mon_w = mi.rcMonitor.right - mi.rcMonitor.left
     phys_mon_h = mi.rcMonitor.bottom - mi.rcMonitor.top
-    device_name = mi.szDevice.rstrip('\x00')
+    device_name = mi.szDevice.rstrip("\x00")
 
     # 2) 매칭되는 Qt 스크린 찾기
     target_screen = None
     for screen in QApplication.screens():
-        qt_name = screen.name().rstrip('\x00')
+        qt_name = screen.name().rstrip("\x00")
         # 디바이스 이름 직접 비교 (\\.\ 접두사 유무 모두 처리)
         if qt_name == device_name:
             target_screen = screen
             break
         # 접두사 제거 후 비교
-        clean_qt = qt_name.replace('\\\\.\\', '')
-        clean_win = device_name.replace('\\\\.\\', '')
+        clean_qt = qt_name.replace("\\\\.\\", "")
+        clean_win = device_name.replace("\\\\.\\", "")
         if clean_qt == clean_win:
             target_screen = screen
             break
@@ -114,8 +117,10 @@ def _physical_to_logical_rect(phys_rect: QRect) -> QRect:
         for screen in QApplication.screens():
             geo = screen.geometry()
             dpr = screen.devicePixelRatio()
-            if (abs(int(geo.width() * dpr) - phys_mon_w) < 10 and
-                    abs(int(geo.height() * dpr) - phys_mon_h) < 10):
+            if (
+                abs(int(geo.width() * dpr) - phys_mon_w) < 10
+                and abs(int(geo.height() * dpr) - phys_mon_h) < 10
+            ):
                 target_screen = screen
                 break
 
@@ -131,8 +136,7 @@ def _physical_to_logical_rect(phys_rect: QRect) -> QRect:
     logical_w = phys_rect.width() / dpr
     logical_h = phys_rect.height() / dpr
 
-    return QRect(int(logical_x), int(logical_y),
-                 int(logical_w), int(logical_h))
+    return QRect(int(logical_x), int(logical_y), int(logical_w), int(logical_h))
 
 
 def _physical_to_logical_point(phys_x: int, phys_y: int):
@@ -220,8 +224,7 @@ class _HighlightFrame(QWidget):
             # WS_EX_TRANSPARENT: 마우스 클릭 통과
             # WS_EX_LAYERED + SetLayeredWindowAttributes 사용하지 않음
             user32.SetWindowLongW(
-                hwnd, GWL_EXSTYLE,
-                ex | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+                hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
             )
         except Exception:
             pass
@@ -289,8 +292,7 @@ class _GuideLabel(QLabel):
             # WS_EX_TRANSPARENT만 추가 — SetLayeredWindowAttributes 호출하지 않음
             # (Qt가 WA_TranslucentBackground로 이미 per-pixel alpha 관리 중)
             user32.SetWindowLongW(
-                hwnd, GWL_EXSTYLE,
-                ex | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+                hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
             )
         except Exception:
             pass
@@ -361,8 +363,7 @@ class _TitleLabel(QLabel):
             # WS_EX_TRANSPARENT만 추가 — SetLayeredWindowAttributes 호출하지 않음
             # (Qt가 WA_TranslucentBackground로 이미 per-pixel alpha 관리 중)
             user32.SetWindowLongW(
-                hwnd, GWL_EXSTYLE,
-                ex | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+                hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
             )
         except Exception:
             pass
@@ -415,7 +416,7 @@ class WindowPickerOverlay(QWidget):
                                →  ESC 시 pick_cancelled 시그널
     """
 
-    window_picked = Signal(int, str)   # (root_hwnd, window_title)
+    window_picked = Signal(int, str)  # (root_hwnd, window_title)
     pick_cancelled = Signal()
 
     def __init__(self, parent=None):
@@ -428,16 +429,16 @@ class WindowPickerOverlay(QWidget):
         self._title_label = _TitleLabel()
 
         # 상태
-        self._hovered_hwnd = 0          # 현재 호버 중인 요소 핸들
-        self._hovered_root_hwnd = 0     # 호버 요소의 최상위 부모 핸들
+        self._hovered_hwnd = 0  # 현재 호버 중인 요소 핸들
+        self._hovered_root_hwnd = 0  # 호버 요소의 최상위 부모 핸들
         self._hovered_rect = QRect()
         self._hovered_title = ""
         self._hovered_class = ""
         self._click_ready = False
         self._active = False
-        self._paused = False            # F3 일시정지 상태
-        self._pause_countdown = 0       # 남은 카운트다운 초
-        self._f3_debounce = False       # F3 키 디바운스
+        self._paused = False  # F3 일시정지 상태
+        self._pause_countdown = 0  # 남은 카운트다운 초
+        self._f3_debounce = False  # F3 키 디바운스
 
         # 자체 위젯 핸들 — 무시 대상
         self._own_hwnds: set[int] = set()
@@ -466,7 +467,9 @@ class WindowPickerOverlay(QWidget):
         self._collect_own_hwnds()
 
         # 가이드 라벨 표시
-        self._guide.setText("  🖱 검사할 윈도우 / 요소를 클릭하세요  |  F3: 일시정지  |  ESC: 취소  ")
+        self._guide.setText(
+            "  🖱 검사할 윈도우 / 요소를 클릭하세요  |  F3: 일시정지  |  ESC: 취소  "
+        )
         self._guide.place_top_center()
         self._guide.show()
 
@@ -566,7 +569,9 @@ class WindowPickerOverlay(QWidget):
         if self._pause_countdown <= 0:
             # 일시정지 종료 - 선택 모드로 복귀
             self._paused = False
-            self._guide.setText("  🖱 검사할 윈도우 / 요소를 클릭하세요  |  F3: 일시정지  |  ESC: 취소  ")
+            self._guide.setText(
+                "  🖱 검사할 윈도우 / 요소를 클릭하세요  |  F3: 일시정지  |  ESC: 취소  "
+            )
             self._guide.place_top_center()
         else:
             # 카운트다운 업데이트
@@ -575,7 +580,9 @@ class WindowPickerOverlay(QWidget):
 
     def _update_pause_guide(self):
         """일시정지 중 가이드 라벨 업데이트"""
-        self._guide.setText(f"  ⏸️ 일시정지 중... {self._pause_countdown}초 후 재개  |  마우스/키보드 자유롭게 조작하세요  ")
+        self._guide.setText(
+            f"  ⏸️ 일시정지 중... {self._pause_countdown}초 후 재개  |  마우스/키보드 자유롭게 조작하세요  "
+        )
         self._guide.place_top_center()
 
     def _is_own_hwnd(self, hwnd: int) -> bool:

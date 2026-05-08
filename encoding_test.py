@@ -1,6 +1,6 @@
+import os
 import subprocess
 import tempfile
-import os
 
 code = """
 print('한글 테스트 중입니다...')

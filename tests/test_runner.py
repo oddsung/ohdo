@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 RPA 테스트 하네스 (Test Harness)
 
@@ -14,16 +15,26 @@ Claude Code가 실행하고 결과를 읽을 수 있는 표준화된 테스트 �
     python -m tests.test_runner --suite all
 """
 
+import argparse
 import json
+import platform
 import sys
 import time
 import traceback
-import argparse
-import platform
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
-from typing import Callable, Optional
+from typing import Optional
+
+# Windows 콘솔 cp949 fallback — AI 응답에 em-dash (U+2014) 등 cp949 미지원 글자가
+# 섞여 있어도 print 가 UnicodeEncodeError 로 죽지 않도록 stdout/stderr 의 errors
+# 정책을 'replace' 로 완화. 미지원 글자는 '?' 로 표시 (테스트 결과 JSON 은 utf-8
+# 로 별도 저장되어 원본 보존). ai_integration suite 의 test_01/test_08 회귀 fix.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 # 결과 저장 경로
 RESULT_DIR = Path(__file__).parent / "results"
@@ -34,11 +45,13 @@ RESULT_DIR.mkdir(exist_ok=True)
 # 데이터 모델
 # ──────────────────────────────────────────────
 
+
 @dataclass
 class TestStep:
     """테스트 내 개별 단계"""
+
     name: str = ""
-    status: str = "unknown"      # pass / fail / error / skip
+    status: str = "unknown"  # pass / fail / error / skip
     message: str = ""
     screenshot: str = ""
     duration_ms: int = 0
@@ -47,9 +60,10 @@ class TestStep:
 @dataclass
 class TestResult:
     """단일 테스트 결과"""
+
     test_name: str = ""
     suite: str = ""
-    status: str = "unknown"      # pass / fail / error / skip
+    status: str = "unknown"  # pass / fail / error / skip
     timestamp: str = ""
     duration_ms: int = 0
     steps: list = field(default_factory=list)
@@ -62,6 +76,7 @@ class TestResult:
 @dataclass
 class SuiteResult:
     """테스트 스위트 전체 결과"""
+
     suite_name: str = ""
     run_time: str = ""
     duration_ms: int = 0
@@ -78,6 +93,7 @@ class SuiteResult:
 # 스크린샷 캡처
 # ──────────────────────────────────────────────
 
+
 def capture_screen(name: str, region: Optional[tuple] = None) -> str:
     """
     스크린샷 캡처 후 파일 경로 반환.
@@ -88,6 +104,7 @@ def capture_screen(name: str, region: Optional[tuple] = None) -> str:
     """
     try:
         import pyautogui
+
         timestamp = datetime.now().strftime("%H%M%S")
         path = str(RESULT_DIR / f"{name}_{timestamp}.png")
         if region:
@@ -106,11 +123,8 @@ def capture_window(title_pattern: str, name: str) -> str:
     """특정 윈도우만 캡처. 실패 시 전체 화면으로 폴백."""
     try:
         import pywinauto
-        import pyautogui
 
-        app = pywinauto.Application(backend='uia').connect(
-            title_re=title_pattern, timeout=3
-        )
+        app = pywinauto.Application(backend="uia").connect(title_re=title_pattern, timeout=3)
         window = app.top_window()
         rect = window.rectangle()
         region = (rect.left, rect.top, rect.width(), rect.height())
@@ -122,6 +136,7 @@ def capture_window(title_pattern: str, name: str) -> str:
 # ──────────────────────────────────────────────
 # 환경 정보 수집
 # ──────────────────────────────────────────────
+
 
 def collect_environment() -> dict:
     """현재 시스템 환경 정보 수집"""
@@ -136,6 +151,7 @@ def collect_environment() -> dict:
     # 화면 해상도
     try:
         import pyautogui
+
         size = pyautogui.size()
         env["screen_width"] = size.width
         env["screen_height"] = size.height
@@ -153,6 +169,7 @@ def collect_environment() -> dict:
     ]:
         try:
             import importlib
+
             mod = importlib.import_module(import_name)
             env[f"pkg_{pkg_name}"] = getattr(mod, "__version__", "installed")
         except ImportError:
@@ -165,8 +182,10 @@ def collect_environment() -> dict:
 # 테스트 케이스 기본 클래스
 # ──────────────────────────────────────────────
 
+
 class SkipTest(Exception):
     """테스트 건너뛰기 예외"""
+
     pass
 
 
@@ -238,17 +257,14 @@ class TestCase:
         """윈도우 존재 여부 검증 (Windows 전용)"""
         try:
             import pywinauto
-            app = pywinauto.Application(backend='uia').connect(
-                title_re=title_pattern, timeout=5
-            )
+
+            app = pywinauto.Application(backend="uia").connect(title_re=title_pattern, timeout=5)
             window = app.top_window()
             assert window.exists(), "윈도우가 존재하지 않음"
             self.log(f"[PASS] 윈도우 발견: {window.window_text()}")
             return window
         except Exception as e:
-            raise AssertionError(
-                f"assert_window_exists 실패: {message or title_pattern}\n  {e}"
-            )
+            raise AssertionError(f"assert_window_exists 실패: {message or title_pattern}\n  {e}")
 
     def assert_element_exists(self, window, **criteria) -> object:
         """윈도우 내 UI 요소 존재 검증 (Windows 전용)"""
@@ -318,6 +334,7 @@ class TestCase:
 # 테스트 러너
 # ──────────────────────────────────────────────
 
+
 class TestRunner:
     """
     테스트 스위트를 실행하고 결과를 수집하는 러너.
@@ -356,13 +373,13 @@ class TestRunner:
         suite = SuiteResult(
             suite_name=self.suite_name,
             run_time=datetime.now().isoformat(),
-            environment=collect_environment()
+            environment=collect_environment(),
         )
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  테스트 스위트: {self.suite_name}")
         print(f"  시작 시간: {suite.run_time}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         for cls in self._test_classes:
             instance = cls()
@@ -388,11 +405,13 @@ class TestRunner:
         suite.duration_ms = int((time.time() - suite_start) * 1000)
 
         # 요약 출력
-        print(f"\n{'='*60}")
-        print(f"  결과: {suite.passed} passed / {suite.failed} failed / "
-              f"{suite.errors} errors / {suite.skipped} skipped")
+        print(f"\n{'=' * 60}")
+        print(
+            f"  결과: {suite.passed} passed / {suite.failed} failed / "
+            f"{suite.errors} errors / {suite.skipped} skipped"
+        )
         print(f"  소요 시간: {suite.duration_ms}ms")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         return suite
 
@@ -402,9 +421,7 @@ class TestRunner:
         print(f"\n▶ {test_name}")
 
         result = TestResult(
-            test_name=test_name,
-            suite=instance.suite,
-            timestamp=datetime.now().isoformat()
+            test_name=test_name, suite=instance.suite, timestamp=datetime.now().isoformat()
         )
         instance._current_result = result
         instance._steps = []
@@ -433,7 +450,7 @@ class TestRunner:
             method = getattr(instance, method_name)
             method()
             result.status = "pass"
-            print(f"  [OK] PASS")
+            print("  [OK] PASS")
         except SkipTest as e:
             result.status = "skip"
             result.error = str(e) if str(e) else "건너뜀"
@@ -471,16 +488,12 @@ class TestRunner:
 
         # 최신 결과
         latest_path = RESULT_DIR / "latest_result.json"
-        latest_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        latest_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
         # 히스토리
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         history_path = RESULT_DIR / f"{suite_result.suite_name}_{timestamp}.json"
-        history_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        history_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
         print(f"RESULT_FILE: {latest_path}")
         print(f"HISTORY_FILE: {history_path}")
@@ -491,26 +504,35 @@ class TestRunner:
 # CLI 엔트리포인트
 # ──────────────────────────────────────────────
 
+
 def main():
     # python -m tests.test_runner 실행 시 이 모듈은 __main__으로 로드되지만,
     # 테스트 파일들은 from tests.test_runner import SkipTest로 별도 로드함.
     # 두 모듈의 SkipTest 클래스가 다른 인스턴스가 되어 except에서 못 잡는 문제 방지.
     this_module = sys.modules[__name__]
-    if 'tests.test_runner' not in sys.modules:
-        sys.modules['tests.test_runner'] = this_module
+    if "tests.test_runner" not in sys.modules:
+        sys.modules["tests.test_runner"] = this_module
 
     parser = argparse.ArgumentParser(description="AI RPA Solution 테스트 하네스")
     parser.add_argument(
-        "--suite", "-s",
-        choices=["notepad", "calculator", "browser", "core", "scenarios",
-                 "prompt_quality", "ai_integration", "macos", "all"],
+        "--suite",
+        "-s",
+        choices=[
+            "notepad",
+            "calculator",
+            "browser",
+            "core",
+            "scenarios",
+            "prompt_quality",
+            "ai_integration",
+            "macos",
+            "all",
+        ],
         default="all",
-        help="실행할 테스트 스위트"
+        help="실행할 테스트 스위트",
     )
     parser.add_argument(
-        "--test", "-t",
-        type=str, default=None,
-        help="특정 테스트 메서드만 실행 (예: test_open)"
+        "--test", "-t", type=str, default=None, help="특정 테스트 메서드만 실행 (예: test_open)"
     )
     args = parser.parse_args()
 
@@ -519,6 +541,7 @@ def main():
     if args.suite in ("notepad", "all"):
         try:
             from tests.test_notepad import NotepadTest
+
             suites_to_run.append(("notepad", [NotepadTest]))
         except ImportError as e:
             print(f"⚠ test_notepad 로드 실패: {e}")
@@ -526,6 +549,7 @@ def main():
     if args.suite in ("calculator", "all"):
         try:
             from tests.test_calculator import CalculatorTest
+
             suites_to_run.append(("calculator", [CalculatorTest]))
         except ImportError as e:
             print(f"⚠ test_calculator 로드 실패: {e}")
@@ -533,6 +557,7 @@ def main():
     if args.suite in ("browser", "all"):
         try:
             from tests.test_browser import BrowserTest
+
             suites_to_run.append(("browser", [BrowserTest]))
         except ImportError as e:
             print(f"⚠ test_browser 로드 실패: {e}")
@@ -540,6 +565,7 @@ def main():
     if args.suite in ("core", "all"):
         try:
             from tests.test_core import CoreTest
+
             suites_to_run.append(("core", [CoreTest]))
         except ImportError as e:
             print(f"⚠ test_core 로드 실패: {e}")
@@ -547,6 +573,7 @@ def main():
     if args.suite in ("scenarios", "all"):
         try:
             from tests.test_scenarios import ScenariosTest
+
             suites_to_run.append(("scenarios", [ScenariosTest]))
         except ImportError as e:
             print(f"⚠ test_scenarios 로드 실패: {e}")
@@ -554,6 +581,7 @@ def main():
     if args.suite in ("prompt_quality", "all"):
         try:
             from tests.test_prompt_quality import PromptQualityTest
+
             suites_to_run.append(("prompt_quality", [PromptQualityTest]))
         except ImportError as e:
             print(f"⚠ test_prompt_quality 로드 실패: {e}")
@@ -561,6 +589,7 @@ def main():
     if args.suite in ("ai_integration", "all"):
         try:
             from tests.test_ai_integration import AIIntegrationTest
+
             suites_to_run.append(("ai_integration", [AIIntegrationTest]))
         except ImportError as e:
             print(f"⚠ test_ai_integration 로드 실패: {e}")
@@ -568,6 +597,7 @@ def main():
     if args.suite in ("macos", "all"):
         try:
             from tests.test_macos import MacOSTest
+
             suites_to_run.append(("macos", [MacOSTest]))
         except ImportError as e:
             print(f"⚠ test_macos 로드 실패: {e}")

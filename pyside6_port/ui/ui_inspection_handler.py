@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """UI 검사 (element picker + window inspector) 동작 핸들러.
 
 main_window.py 가 1700+ 줄로 비대해져 영역별 분리. 이 모듈은:
@@ -13,10 +14,10 @@ import sys
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from core.win_inspector import format_element_label
-
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
+
+from core.win_inspector import format_element_label
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -64,21 +65,23 @@ class UIInspectionHandler:
                 cap_h = h + padding * 2
 
                 with mss.mss() as sct:
-                    sct_img = sct.grab({
-                        "left": cap_left, "top": cap_top,
-                        "width": cap_w, "height": cap_h,
-                    })
-                    img = PilImage.frombytes(
-                        "RGB", sct_img.size, sct_img.bgra, "raw", "BGRX"
+                    sct_img = sct.grab(
+                        {
+                            "left": cap_left,
+                            "top": cap_top,
+                            "width": cap_w,
+                            "height": cap_h,
+                        }
                     )
+                    img = PilImage.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
                 if mw.current_session:
                     captures_dir = mw.session_manager.get_captures_dir(
                         mw.current_session.session_id
                     )
                 else:
-                    from pathlib import Path
                     from ui.main_window import PROJECT_ROOT
+
                     captures_dir = PROJECT_ROOT / "data" / "captures"
                     captures_dir.mkdir(parents=True, exist_ok=True)
 
@@ -86,9 +89,7 @@ class UIInspectionHandler:
                 filepath = captures_dir / filename
                 img.save(str(filepath))
                 mw.pending_images.append(str(filepath))
-                mw.console_panel.log(
-                    f"UI 요소 이미지 저장: {filepath} ({w}x{h})", "INFO"
-                )
+                mw.console_panel.log(f"UI 요소 이미지 저장: {filepath} ({w}x{h})", "INFO")
 
         except Exception as e:
             mw.console_panel.log(f"요소 이미지 캡처 실패: {e}", "WARNING")
@@ -103,12 +104,11 @@ class UIInspectionHandler:
         display = format_element_label(element_info)
         parent = element_info.get("parent_window_title", "")
 
-        mw.statusBar().showMessage(
-            "UI 요소 선택 완료 - 다음 요청에 요소 정보가 자동 포함됩니다"
-        )
+        mw.statusBar().showMessage("UI 요소 선택 완료 - 다음 요청에 요소 정보가 자동 포함됩니다")
         mw.console_panel.log(
             f"요소 선택 완료: {display}"
-            + (f" (창: {parent})" if parent and parent not in display else ""), "INFO"
+            + (f" (창: {parent})" if parent and parent not in display else ""),
+            "INFO",
         )
 
         # CDP 미연결 브라우저 element 감지 시 1회 안내 (suppressible)
@@ -176,9 +176,7 @@ class UIInspectionHandler:
             return
 
         if "error" in window_info:
-            mw.console_panel.log(
-                f"윈도우 검사 실패: {window_info['error']}", "WARNING"
-            )
+            mw.console_panel.log(f"윈도우 검사 실패: {window_info['error']}", "WARNING")
             mw.statusBar().showMessage("윈도우 검사 실패")
             return
 
@@ -189,25 +187,17 @@ class UIInspectionHandler:
         # 로그에 표시
         title = window_info.get("window_title", "?")
         count = window_info.get("control_count", 0)
-        mw.console_panel.log(
-            f"윈도우 검사 완료: '{title}' ({count}개 컨트롤 발견)", "INFO"
-        )
+        mw.console_panel.log(f"윈도우 검사 완료: '{title}' ({count}개 컨트롤 발견)", "INFO")
 
         # 컨트롤 목록을 콘솔에 표시
         for ctrl in window_info.get("controls", [])[:20]:
             indent = "  " * ctrl.get("depth", 0)
             name = ctrl.get("name", "")
             ctype = ctrl.get("control_type", "")
-            mw.console_panel.log(
-                f"  {indent}[{ctype}] {name}", "DEBUG"
-            )
+            mw.console_panel.log(f"  {indent}[{ctype}] {name}", "DEBUG")
 
-        mw.chat_panel.set_capture_status(
-            f"윈도우 검사 완료: {title} ({count}개 컨트롤)"
-        )
-        mw.statusBar().showMessage(
-            "윈도우 검사 완료 - 다음 요청에 컨트롤 정보가 자동 포함됩니다"
-        )
+        mw.chat_panel.set_capture_status(f"윈도우 검사 완료: {title} ({count}개 컨트롤)")
+        mw.statusBar().showMessage("윈도우 검사 완료 - 다음 요청에 컨트롤 정보가 자동 포함됩니다")
 
     def auto_inspect_before_capture(self) -> None:
         """캡처 전에 포그라운드 윈도우 정보를 자동 수집합니다.
@@ -223,6 +213,7 @@ class UIInspectionHandler:
                 return
 
             import ctypes
+
             hwnd = ctypes.windll.user32.GetForegroundWindow()  # type: ignore
             if not hwnd:
                 return
@@ -249,10 +240,13 @@ class UIInspectionHandler:
                 if target_win:
                     window_info = mw.win_inspector.inspect_window(
                         handle=target_win["handle"],
-                        max_depth=2, max_controls=30,
+                        max_depth=2,
+                        max_controls=30,
                     )
                     if "error" not in window_info:
-                        mw.pending_window_context = mw.win_inspector.get_control_info_text(window_info)
+                        mw.pending_window_context = mw.win_inspector.get_control_info_text(
+                            window_info
+                        )
                         mw.console_panel.log(
                             f"대체 윈도우 검사 완료: '{target_win['title']}'",
                             "INFO",
@@ -261,7 +255,9 @@ class UIInspectionHandler:
 
             # 자기 자신이 아닌 경우 정상 검사
             window_info = mw.win_inspector.inspect_window(
-                handle=hwnd, max_depth=2, max_controls=30,
+                handle=hwnd,
+                max_depth=2,
+                max_controls=30,
             )
             if "error" not in window_info:
                 mw.pending_window_context = mw.win_inspector.get_control_info_text(window_info)

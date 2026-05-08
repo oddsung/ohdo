@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 워크플로우 실행 엔진
 
@@ -5,17 +6,17 @@
 코드 샌드박스를 통해 안전하게 실행하며, 에러 처리와 재시도를 지원합니다.
 """
 
-import sys
-import os
-import time
-import logging
-import subprocess
-import tempfile
-import re
 import ctypes
-from pathlib import Path
+import logging
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
 from dataclasses import dataclass, field
-from typing import Optional, Callable
+from pathlib import Path
+from typing import Callable, Optional
 
 # 비주얼 오버레이 스크립트 경로
 _OVERLAY_SCRIPT = Path(__file__).parent / "visual_overlay.py"
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StepResult:
     """단일 스텝 실행 결과"""
+
     step_id: int = 0
     success: bool = False
     output: str = ""
@@ -37,6 +39,7 @@ class StepResult:
 @dataclass
 class ExecutionReport:
     """전체 워크플로우 실행 리포트"""
+
     session_id: str = ""
     total_steps: int = 0
     executed_steps: int = 0
@@ -68,69 +71,123 @@ class CodeSandbox:
 
         # Python 표준 라이브러리 목록 (설치 불필요)
         self._stdlib = {
-            'os', 'sys', 'time', 'json', 'pathlib', 'subprocess', 're',
-            'datetime', 'collections', 'functools', 'itertools', 'typing',
-            'dataclasses', 'abc', 'io', 'logging', 'shutil', 'tempfile',
-            'threading', 'queue', 'uuid', 'hashlib', 'base64', 'glob',
-            'math', 'random', 'string', 'traceback', 'copy', 'enum',
-            'csv', 'sqlite3', 'http', 'urllib', 'email', 'html',
-            'xml', 'ctypes', 'struct', 'socket', 'ssl', 'asyncio',
-            'multiprocessing', 'concurrent', 'contextlib', 'inspect',
-            'unittest', 'pprint', 'textwrap', 'warnings', 'signal',
-            'platform', 'getpass', 'configparser', 'argparse', 'pickle',
-            'shelve', 'zipfile', 'tarfile', 'gzip', 'bz2', 'lzma',
-            'webbrowser', 'tkinter', 'codecs',
+            "os",
+            "sys",
+            "time",
+            "json",
+            "pathlib",
+            "subprocess",
+            "re",
+            "datetime",
+            "collections",
+            "functools",
+            "itertools",
+            "typing",
+            "dataclasses",
+            "abc",
+            "io",
+            "logging",
+            "shutil",
+            "tempfile",
+            "threading",
+            "queue",
+            "uuid",
+            "hashlib",
+            "base64",
+            "glob",
+            "math",
+            "random",
+            "string",
+            "traceback",
+            "copy",
+            "enum",
+            "csv",
+            "sqlite3",
+            "http",
+            "urllib",
+            "email",
+            "html",
+            "xml",
+            "ctypes",
+            "struct",
+            "socket",
+            "ssl",
+            "asyncio",
+            "multiprocessing",
+            "concurrent",
+            "contextlib",
+            "inspect",
+            "unittest",
+            "pprint",
+            "textwrap",
+            "warnings",
+            "signal",
+            "platform",
+            "getpass",
+            "configparser",
+            "argparse",
+            "pickle",
+            "shelve",
+            "zipfile",
+            "tarfile",
+            "gzip",
+            "bz2",
+            "lzma",
+            "webbrowser",
+            "tkinter",
+            "codecs",
         }
-        
+
         # 내부 모듈명 -> pip 설치 패키지명 매핑
         self._pip_name_map = {
-            'cv2': 'opencv-python',
-            'PIL': 'Pillow',
-            'pil': 'Pillow',
-            'bs4': 'beautifulsoup4',
-            'yaml': 'PyYAML',
-            'sklearn': 'scikit-learn',
-            'dotenv': 'python-dotenv',
-            'win32com': 'pywin32',
-            'win32api': 'pywin32',
-            'win32gui': 'pywin32',
-            'pythoncom': 'pywin32',
-            'uiautomation': 'uiautomation',
-            'webdriver_manager': 'webdriver-manager',
-            'playwright': 'playwright'
+            "cv2": "opencv-python",
+            "PIL": "Pillow",
+            "pil": "Pillow",
+            "bs4": "beautifulsoup4",
+            "yaml": "PyYAML",
+            "sklearn": "scikit-learn",
+            "dotenv": "python-dotenv",
+            "win32com": "pywin32",
+            "win32api": "pywin32",
+            "win32gui": "pywin32",
+            "pythoncom": "pywin32",
+            "uiautomation": "uiautomation",
+            "webdriver_manager": "webdriver-manager",
+            "playwright": "playwright",
         }
 
     def _install_missing_packages(self, code: str) -> Optional[str]:
         """
         코드에서 사용된 패키지를 추출하여 설치되지 않은 패키지를 찾아 자동으로 설치합니다.
-        
+
         Returns:
             설치 로그 메시지 (설치된 경우), 패키지가 모두 있거나 실패하면 None 또는 에러 메시지
         """
         # 1. 코드에서 import 모듈 추출
         imports = set()
-        for match in re.finditer(r'^(?:import|from)\s+([a-zA-Z0-9_]+)', code, re.MULTILINE):
+        for match in re.finditer(r"^(?:import|from)\s+([a-zA-Z0-9_]+)", code, re.MULTILINE):
             pkg_name = match.group(1).lower()
             if pkg_name not in self._stdlib:
                 imports.add(pkg_name)
-                
+
         if not imports:
             return None
-            
+
         # 2. 필요한 패키지의 pip 설치 이름 매핑
         required_packages = {self._pip_name_map.get(pkg, pkg) for pkg in imports}
         missing_packages = []
-        
+
         # 3. 설치 여부 확인
         # pkg_resources를 이용해 확인 (경량화된 방법)
         try:
             import pkg_resources
+
             installed_packages = {pkg.key for pkg in pkg_resources.working_set}
-            
+
             for pkg in required_packages:
                 # 패키지 이름은 소문자로 비교 (-와 _ 혼용 주의)
-                canonical_pkg = pkg.lower().replace('_', '-')
-                if not any(inst.replace('_', '-') == canonical_pkg for inst in installed_packages):
+                canonical_pkg = pkg.lower().replace("_", "-")
+                if not any(inst.replace("_", "-") == canonical_pkg for inst in installed_packages):
                     missing_packages.append(pkg)
         except ImportError:
             # pkg_resources를 사용할 수 없는 경우 모두 설치 시도
@@ -142,30 +199,30 @@ class CodeSandbox:
             log_msgs.append("자동 설치를 시작합니다...")
             print("\n".join(log_msgs))  # 터미널 즉시 출력
             logger.info("누락된 패키지 설치 시도: %s", missing_packages)
-            
+
             try:
                 # pip install 실행
                 result = subprocess.run(
                     [self.python_exe, "-m", "pip", "install", *missing_packages],
                     capture_output=True,
                     text=True,
-                    encoding='utf-8',
-                    errors='replace'
+                    encoding="utf-8",
+                    errors="replace",
                 )
-                
+
                 if result.returncode == 0:
                     success_msg = f"패키지 설치 성공: {', '.join(missing_packages)}"
                     print(success_msg)
                     logger.info(success_msg)
-                    
+
                     # Playwright의 경우 브라우저 바이너리 설치가 추가로 필요할 수 있음
-                    if 'playwright' in missing_packages:
+                    if "playwright" in missing_packages:
                         print("Playwright 브라우저 의존성 설치 중...")
                         subprocess.run(
                             [self.python_exe, "-m", "playwright", "install", "chromium"],
-                            capture_output=True
+                            capture_output=True,
                         )
-                    
+
                     return "\n".join(log_msgs) + "\n" + success_msg
                 else:
                     error_msg = f"패키지 설치 실패:\n{result.stderr}"
@@ -177,7 +234,7 @@ class CodeSandbox:
                 print(error_msg)
                 logger.error(error_msg)
                 return error_msg
-                
+
         return None
 
     @staticmethod
@@ -188,9 +245,13 @@ class CodeSandbox:
         except Exception:
             return False
 
-    def execute(self, code: str, cwd: Optional[str] = None,
-                pre_exec_callback: Optional[Callable] = None,
-                post_exec_callback: Optional[Callable] = None) -> StepResult:
+    def execute(
+        self,
+        code: str,
+        cwd: Optional[str] = None,
+        pre_exec_callback: Optional[Callable] = None,
+        post_exec_callback: Optional[Callable] = None,
+    ) -> StepResult:
         """
         코드를 별도 프로세스에서 실행합니다.
 
@@ -223,15 +284,14 @@ class CodeSandbox:
         script_file = None
         try:
             with tempfile.NamedTemporaryFile(
-                mode='w', suffix='.py', delete=False,
-                encoding='utf-8', dir=cwd
+                mode="w", suffix=".py", delete=False, encoding="utf-8", dir=cwd
             ) as f:
                 f.write(code)
                 script_file = f.name
 
             # 별도 프로세스에서 실행 (한글 깨짐 방지를 위해 PYTHONIOENCODING 지정)
             env = os.environ.copy()
-            env['PYTHONIOENCODING'] = 'utf-8'
+            env["PYTHONIOENCODING"] = "utf-8"
 
             # Popen으로 실행 — F9 강제 중지 시 proc.kill() 호출 가능
             self._current_proc = subprocess.Popen(
@@ -239,10 +299,10 @@ class CodeSandbox:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                encoding='utf-8',
-                errors='replace',
+                encoding="utf-8",
+                errors="replace",
                 cwd=cwd,
-                env=env
+                env=env,
             )
             timed_out = False
             try:
@@ -263,7 +323,7 @@ class CodeSandbox:
                 return StepResult(
                     success=False,
                     error=f"실행 시간 초과 ({self.timeout}초)",
-                    duration_ms=elapsed_ms
+                    duration_ms=elapsed_ms,
                 )
 
             # 사용자가 F9로 강제 중지한 경우 (returncode < 0)
@@ -271,7 +331,7 @@ class CodeSandbox:
                 return StepResult(
                     success=False,
                     error="⛔ 사용자에 의해 실행이 강제 중지되었습니다 (F9)",
-                    duration_ms=elapsed_ms
+                    duration_ms=elapsed_ms,
                 )
 
             # 최종 출력물 구성 (설치 로그가 있다면 앞에 붙임)
@@ -280,35 +340,22 @@ class CodeSandbox:
                 final_output = f"[{install_log}]\n\n{final_output}"
 
             if returncode == 0:
-                return StepResult(
-                    success=True,
-                    output=final_output.strip(),
-                    duration_ms=elapsed_ms
-                )
+                return StepResult(success=True, output=final_output.strip(), duration_ms=elapsed_ms)
             else:
                 error_msg = stderr.strip() or stdout.strip()
                 return StepResult(
-                    success=False,
-                    output=stdout.strip(),
-                    error=error_msg,
-                    duration_ms=elapsed_ms
+                    success=False, output=stdout.strip(), error=error_msg, duration_ms=elapsed_ms
                 )
 
         except subprocess.TimeoutExpired:
             elapsed_ms = int((time.time() - start_time) * 1000)
             return StepResult(
-                success=False,
-                error=f"실행 시간 초과 ({self.timeout}초)",
-                duration_ms=elapsed_ms
+                success=False, error=f"실행 시간 초과 ({self.timeout}초)", duration_ms=elapsed_ms
             )
 
         except Exception as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
-            return StepResult(
-                success=False,
-                error=f"실행 오류: {str(e)}",
-                duration_ms=elapsed_ms
-            )
+            return StepResult(success=False, error=f"실행 오류: {str(e)}", duration_ms=elapsed_ms)
 
         finally:
             if script_file:
@@ -380,7 +427,7 @@ class WorkflowEngine:
         on_step_start: Optional[Callable] = None,
         on_step_complete: Optional[Callable] = None,
         on_error: Optional[Callable] = None,
-        on_log: Optional[Callable] = None
+        on_log: Optional[Callable] = None,
     ) -> ExecutionReport:
         """
         세션의 모든 스텝을 순차 실행합니다.
@@ -404,10 +451,7 @@ class WorkflowEngine:
         if self.visual_feedback_enabled:
             self._start_overlay()
 
-        report = ExecutionReport(
-            session_id=session.session_id,
-            total_steps=len(session.steps)
-        )
+        report = ExecutionReport(session_id=session.session_id, total_steps=len(session.steps))
 
         start_time = time.time()
 
@@ -572,7 +616,9 @@ class WorkflowEngine:
             import mss
             from PIL import Image
 
-            captures_dir = Path(__file__).parent.parent / "data" / "sessions" / session_id / "captures"
+            captures_dir = (
+                Path(__file__).parent.parent / "data" / "sessions" / session_id / "captures"
+            )
             captures_dir.mkdir(parents=True, exist_ok=True)
 
             with mss.mss() as sct:
@@ -594,6 +640,7 @@ class WorkflowEngine:
     async def _async_sleep(seconds: float):
         """비동기 sleep (asyncio 호환)"""
         import asyncio
+
         await asyncio.sleep(seconds)
 
     # ── 블럭 기반 실행 (Colab-style) ─────────────────────────────────────────
@@ -635,31 +682,27 @@ class WorkflowEngine:
         self.is_paused = False
         self.should_stop = False
 
-        report = ExecutionReport(
-            session_id=session.session_id,
-            total_steps=len(session.steps)
-        )
+        report = ExecutionReport(session_id=session.session_id, total_steps=len(session.steps))
         start_time = time.time()
 
         # ── 라이브러리 블럭 실행 (커널 미초기화 OR 라이브러리 코드 변경 시) ──
         # 사용자 보고 (5/5): step 1 시점 cached library 가 step 2 의 helper 함수
         # (find_and_click) 누락 → NameError. library_hash 로 변경 감지 → 재실행.
         import hashlib as _hashlib
+
         lib_block = extract_library_block(session)
         new_lib_hash = (
-            _hashlib.md5(lib_block.encode("utf-8")).hexdigest()
-            if lib_block.strip() else None
+            _hashlib.md5(lib_block.encode("utf-8")).hexdigest() if lib_block.strip() else None
         )
         prev_lib_hash = getattr(kernel, "library_hash", None)
         lib_needs_run = (
-            LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps
-            or prev_lib_hash != new_lib_hash
+            LIBRARY_BLOCK_STEP_ID not in kernel.executed_steps or prev_lib_hash != new_lib_hash
         )
         if lib_needs_run and lib_block.strip():
             if on_log:
                 changed = (
-                    "변경 감지" if (prev_lib_hash is not None
-                                  and prev_lib_hash != new_lib_hash)
+                    "변경 감지"
+                    if (prev_lib_hash is not None and prev_lib_hash != new_lib_hash)
                     else "초기화"
                 )
                 on_log(f"📦 라이브러리 블럭 {changed} 중...")
@@ -669,7 +712,7 @@ class WorkflowEngine:
             lib_result = kernel.execute_block(
                 make_browser_init_idempotent(fix_hallucinated_imports(lib_block)),
                 step_id=LIBRARY_BLOCK_STEP_ID,
-                timeout=30
+                timeout=30,
             )
             if not lib_result.success:
                 if on_log:
@@ -777,7 +820,9 @@ class WorkflowEngine:
             step_wait = step.get("wait_after_ms")
             if step_wait is None:
                 # 세션 default (Session.settings.step_delay_ms) — None 이면 engine default
-                session_default = session.settings.get("step_delay_ms") if hasattr(session, "settings") else None
+                session_default = (
+                    session.settings.get("step_delay_ms") if hasattr(session, "settings") else None
+                )
                 step_wait = session_default if session_default is not None else self.step_delay_ms
             if step_wait > 0:
                 if on_log and step.get("wait_after_ms") is not None:
@@ -797,6 +842,7 @@ class WorkflowEngine:
 
 # ── 블럭 추출 헬퍼 함수 ────────────────────────────────────────────────────────
 
+
 def extract_library_block(session) -> str:
     """
     세션의 마지막 스텝 generated_code에서 라이브러리 블럭을 추출합니다.
@@ -810,13 +856,12 @@ def extract_library_block(session) -> str:
     code = last_step.get("generated_code", "") if isinstance(last_step, dict) else ""
     if not code:
         return ""
-    match = re.search(r'^# === Step 1:', code, re.MULTILINE)
+    match = re.search(r"^# === Step 1:", code, re.MULTILINE)
     if match:
-        return code[:match.start()].strip()
+        return code[: match.start()].strip()
     # Step 1 마커가 없으면 imports 라인만 추출
     import_lines = [
-        ln for ln in code.splitlines()
-        if ln.startswith("import ") or ln.startswith("from ")
+        ln for ln in code.splitlines() if ln.startswith("import ") or ln.startswith("from ")
     ]
     return "\n".join(import_lines)
 
@@ -826,7 +871,7 @@ def _is_compilable(code: str) -> bool:
     if not code or not code.strip():
         return False
     try:
-        compile(code, '<delta_check>', 'exec')
+        compile(code, "<delta_check>", "exec")
         return True
     except SyntaxError:
         return False
@@ -845,8 +890,8 @@ def _extract_by_step_marker(code: str, step_id: int) -> str:
     """
     if not code or not step_id:
         return ""
-    start_pattern = rf'# === Step {step_id}:.*?\(시작\) ==='
-    end_pattern = rf'# === Step {step_id}:.*?\(끝\) ==='
+    start_pattern = rf"# === Step {step_id}:.*?\(시작\) ==="
+    end_pattern = rf"# === Step {step_id}:.*?\(끝\) ==="
     starts = [m.end() for m in re.finditer(start_pattern, code)]
     ends = [m.start() for m in re.finditer(end_pattern, code)]
     if not starts or not ends:
@@ -855,10 +900,11 @@ def _extract_by_step_marker(code: str, step_id: int) -> str:
     valid_ends = [e for e in ends if e > content_start]
     if not valid_ends:
         return ""
-    body = code[content_start:valid_ends[0]].strip()
+    body = code[content_start : valid_ends[0]].strip()
     if not body:
         return ""
     from .import_manager import _smart_dedent, _unwrap_main_function
+
     return _smart_dedent(_unwrap_main_function(body))
 
 
@@ -868,31 +914,31 @@ def _find_paren_end(code: str, open_pos: int) -> int:
     Handles nested parens, single/double/triple-quoted strings, and #-comments.
     Returns ``open_pos`` (or `len(code)`) if balancing fails.
     """
-    if open_pos >= len(code) or code[open_pos] != '(':
+    if open_pos >= len(code) or code[open_pos] != "(":
         return open_pos
     depth = 1
     i = open_pos + 1
     n = len(code)
     while i < n and depth > 0:
         ch = code[i]
-        if ch == '#':
-            nl = code.find('\n', i)
+        if ch == "#":
+            nl = code.find("\n", i)
             i = nl if nl >= 0 else n
             continue
         if ch in ('"', "'"):
-            triple = code[i:i + 3]
+            triple = code[i : i + 3]
             if triple == ch * 3:
                 end = code.find(ch * 3, i + 3)
                 i = end + 3 if end >= 0 else n
             else:
                 j = i + 1
                 while j < n and code[j] != ch:
-                    j += 2 if code[j] == '\\' else 1
+                    j += 2 if code[j] == "\\" else 1
                 i = j + 1
             continue
-        if ch == '(':
+        if ch == "(":
             depth += 1
-        elif ch == ')':
+        elif ch == ")":
             depth -= 1
             if depth == 0:
                 return i + 1
@@ -901,8 +947,8 @@ def _find_paren_end(code: str, open_pos: int) -> int:
 
 
 _BROWSER_INIT_RE = re.compile(
-    r'^(?P<indent>[ \t]*)driver\s*=\s*webdriver\.'
-    r'(?:Chrome|Firefox|Edge|Safari|ChromiumEdge|Remote)\b',
+    r"^(?P<indent>[ \t]*)driver\s*=\s*webdriver\."
+    r"(?:Chrome|Firefox|Edge|Safari|ChromiumEdge|Remote)\b",
     re.MULTILINE,
 )
 
@@ -917,7 +963,7 @@ def make_browser_init_idempotent(code: str) -> str:
     이미 try/except 안에 있거나 이전에 본 메서드가 한 번 감싼 코드는 다시 건드리지
     않도록 직전 구간에서 우리 마커 또는 ``driver.window_handles`` 시그니처를 검사.
     """
-    if 'webdriver' not in code:
+    if "webdriver" not in code:
         return code
     matches = list(_BROWSER_INIT_RE.finditer(code))
     if not matches:
@@ -926,9 +972,9 @@ def make_browser_init_idempotent(code: str) -> str:
     out: list[str] = []
     pos = 0
     for m in matches:
-        indent = m.group('indent')
+        indent = m.group("indent")
         start = m.start()
-        open_paren = code.find('(', m.end())
+        open_paren = code.find("(", m.end())
         # webdriver.X 와 '(' 사이에는 공백만 허용 — 멀리 떨어졌으면 패턴 아님
         if open_paren < 0 or open_paren - m.end() > 4:
             continue
@@ -937,14 +983,12 @@ def make_browser_init_idempotent(code: str) -> str:
             continue
 
         # 이미 idempotent 가드 안에 있으면 건너뜀
-        prefix_window = code[max(0, start - 250):start]
-        if '_idem_browser_init' in prefix_window or 'driver.window_handles' in prefix_window:
+        prefix_window = code[max(0, start - 250) : start]
+        if "_idem_browser_init" in prefix_window or "driver.window_handles" in prefix_window:
             continue
         prev_lines = prefix_window.rstrip().splitlines()[-3:] if prefix_window else []
         if any(
-            'try:' in pl
-            or "'driver' not in" in pl
-            or "'driver' in globals" in pl
+            "try:" in pl or "'driver' not in" in pl or "'driver' in globals" in pl
             for pl in prev_lines
         ):
             continue
@@ -961,12 +1005,12 @@ def make_browser_init_idempotent(code: str) -> str:
         out.append(wrapped)
         pos = end
     out.append(code[pos:])
-    return ''.join(out)
+    return "".join(out)
 
 
 _SHOW_WINDOW_RESTORE_RE = re.compile(
-    r'^(?P<indent>[ \t]*)(?P<call>(?:\w+\.)*ShowWindow)\s*\(\s*'
-    r'(?P<hwnd>[\w_.]+)\s*,\s*9\s*\)\s*(?:#[^\n]*)?$',
+    r"^(?P<indent>[ \t]*)(?P<call>(?:\w+\.)*ShowWindow)\s*\(\s*"
+    r"(?P<hwnd>[\w_.]+)\s*,\s*9\s*\)\s*(?:#[^\n]*)?$",
     re.MULTILINE,
 )
 
@@ -981,7 +1025,7 @@ def make_show_window_safe(code: str) -> str:
 
     이미 IsIconic 분기 안에 있는 호출은 재변환하지 않음 (자기 멱등).
     """
-    if 'ShowWindow' not in code:
+    if "ShowWindow" not in code:
         return code
     matches = list(_SHOW_WINDOW_RESTORE_RE.finditer(code))
     if not matches:
@@ -990,22 +1034,22 @@ def make_show_window_safe(code: str) -> str:
     out: list[str] = []
     pos = 0
     for m in matches:
-        indent = m.group('indent')
-        call = m.group('call')
-        hwnd_var = m.group('hwnd')
+        indent = m.group("indent")
+        call = m.group("call")
+        hwnd_var = m.group("hwnd")
         start = m.start()
         end = m.end()
 
         # 이미 IsIconic guard 안이면 skip
-        prefix = code[max(0, start - 250):start]
-        if 'IsIconic' in prefix:
-            iso_pos = prefix.rfind('IsIconic')
+        prefix = code[max(0, start - 250) : start]
+        if "IsIconic" in prefix:
+            iso_pos = prefix.rfind("IsIconic")
             if (len(prefix) - iso_pos) < 200:
                 continue
 
         # ShowWindow 호출의 module prefix (예: user32.) 를 그대로 IsIconic 에 적용
-        if '.' in call:
-            module_prefix = call.rsplit('.', 1)[0]
+        if "." in call:
+            module_prefix = call.rsplit(".", 1)[0]
             isiconic = f"{module_prefix}.IsIconic"
             show_call = call
         else:
@@ -1023,7 +1067,7 @@ def make_show_window_safe(code: str) -> str:
         out.append(wrapped)
         pos = end
     out.append(code[pos:])
-    return ''.join(out)
+    return "".join(out)
 
 
 # 사용자 보고 (5/5, 5/6): AI 가 pywinauto 의 존재하지 않는 exception 클래스명/모듈명을 환각.
@@ -1033,7 +1077,7 @@ def make_show_window_safe(code: str) -> str:
 # → 모든 step 이 NameError cascade. 알려진 환각 → 실제 이름 매핑.
 _HALLUCINATED_PYWINAUTO_NAMES = {
     "FindBestMatchException": "MatchError",
-    "FindBestMatch": "MatchError",   # 5/6 환각 — 단독 / 점 표기 모두 처리 (점 표기는 아래에서 먼저)
+    "FindBestMatch": "MatchError",  # 5/6 환각 — 단독 / 점 표기 모두 처리 (점 표기는 아래에서 먼저)
     # 추후 다른 환각 발견 시 여기 추가
 }
 
@@ -1054,11 +1098,11 @@ def fix_hallucinated_imports(code: str) -> str:
     out = code
     # 1단계: 점 표기 환각 우선 처리 — `FindBestMatch.MatchError` → `MatchError`
     # (`FindBestMatch` 단독 치환 전에 먼저. 안 그러면 `MatchError.MatchError` 같은 잘못된 형태 됨.)
-    out = re.sub(r'\bFindBestMatch\.MatchError\b', 'MatchError', out)
+    out = re.sub(r"\bFindBestMatch\.MatchError\b", "MatchError", out)
     # 2단계: 단독 환각 이름 → 실제 이름 (단어 경계 매칭으로 부분 일치 회피)
     for fake, real in _HALLUCINATED_PYWINAUTO_NAMES.items():
         if fake in out:
-            out = re.sub(rf'\b{re.escape(fake)}\b', real, out)
+            out = re.sub(rf"\b{re.escape(fake)}\b", real, out)
     return out
 
 
@@ -1083,10 +1127,16 @@ def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
             diff 로 delta 재계산해 누적 step_code 도 자동 fix.
     """
     from .import_manager import (
-        extract_imports,
-        extract_code_delta as _ecd,
         _smart_dedent as _sd,
+    )
+    from .import_manager import (
         _unwrap_main_function as _uwm,
+    )
+    from .import_manager import (
+        extract_code_delta as _ecd,
+    )
+    from .import_manager import (
+        extract_imports,
     )
 
     step_code = step.get("step_code", "").strip()
@@ -1117,9 +1167,7 @@ def extract_step_delta_code(step: dict, prev_step: dict | None = None) -> str:
 
     # ── 2) prev_step 기반 diff 재계산 ──
     if prev_step is not None and generated_code:
-        prev_generated = (
-            prev_step.get("generated_code", "") if isinstance(prev_step, dict) else ""
-        )
+        prev_generated = prev_step.get("generated_code", "") if isinstance(prev_step, dict) else ""
         if prev_generated:
             _, prev_body = extract_imports(prev_generated)
             _, curr_body = extract_imports(generated_code)

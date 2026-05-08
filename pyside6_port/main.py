@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 AI RPA Solution - Main Entry Point
 
 AI와 대화하면서 파이썬 RPA 자동화 코드를 단계별로 생성·실행하는 솔루션입니다.
 """
 
-import sys
-import os
 import ctypes
+import os
+import sys
 import warnings
 from pathlib import Path
 
@@ -19,7 +20,9 @@ if sys.platform == "win32":
     # DPI Awareness를 QApplication 생성 전에 미리 설정 (Qt의 중복 설정 오류 방지)
     try:
         _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
-        ctypes.windll.user32.SetProcessDpiAwarenessContext(_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(
+            _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+        )
     except Exception:
         pass  # 이미 설정되어 있거나 OS가 지원하지 않는 경우 무시
 
@@ -55,12 +58,12 @@ def check_environment() -> bool:
 
             # F.2: 캐시에 Gemini CLI 정보가 없거나 미설치면 fast-path 우회 →
             # dialog 가 사용자에게 상태를 보여주고 게이트하도록 한다.
-            gemini_cached = saved_env.get('gemini_cli') or {}
-            cache_has_gemini_ok = bool(gemini_cached) and bool(gemini_cached.get('installed'))
+            gemini_cached = saved_env.get("gemini_cli") or {}
+            cache_has_gemini_ok = bool(gemini_cached) and bool(gemini_cached.get("installed"))
 
             if is_valid and cache_has_gemini_ok:
                 # 유효한 환경 - Python 경로 검증만 추가로 수행
-                python_path = saved_env.get('python_path')
+                python_path = saved_env.get("python_path")
                 if python_path and os.path.exists(python_path):
                     print(f"[INFO] 저장된 환경 사용: {python_path}")
                     return True
@@ -68,7 +71,7 @@ def check_environment() -> bool:
         # 새 환경이거나 유효하지 않은 경우 - 설정 다이얼로그 표시
         print("[INFO] 환경 설정이 필요합니다...")
 
-        from PyQt6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
 
         # 임시 QApplication (다이얼로그 표시용)
         temp_app = QApplication.instance()
@@ -102,6 +105,7 @@ def is_admin() -> bool:
             return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
         else:
             import os
+
             return os.getuid() == 0
     except Exception:
         return False
@@ -126,7 +130,7 @@ def request_admin_and_restart():
 
 
 def main():
-    """메인 진입점 - PyQt6 GUI를 실행합니다.
+    """메인 진입점 - PySide6 GUI를 실행합니다.
 
     `--ui v2` 인수로 redesign PoC 윈도우 (ui_v2) 를 실행할 수 있습니다.
     기본은 v1 (ui.main_window.MainWindow).
@@ -139,16 +143,17 @@ def main():
             use_v2 = True
 
     try:
-        from PyQt6.QtWidgets import QApplication
-        from PyQt6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
         if use_v2:
             from ui_v2 import MainWindowV2 as MainWindow
+
             print("[INFO] UI v2 (redesign PoC) 실행")
         else:
             from ui.main_window import MainWindow
     except ImportError as e:
         print(f"[ERROR] 필수 패키지가 설치되지 않았습니다: {e}")
-        print(f"다음 명령으로 설치해주세요:")
+        print("다음 명령으로 설치해주세요:")
         print(f"  {sys.executable} -m pip install -r requirements.txt")
         sys.exit(1)
 
@@ -199,26 +204,27 @@ def _install_clipboard_fallback(app):
     Qt OLE 클립보드가 실패할 경우를 대비한 Win32 API 직접 복사 폴백.
     QApplication에 전역 이벤트 필터를 설치하여 Ctrl+C를 가로챕니다.
     """
-    from PyQt6.QtCore import QObject, QEvent, Qt
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtCore import QEvent, QObject, Qt
+    from PySide6.QtWidgets import QApplication
 
     class ClipboardFallbackFilter(QObject):
         def eventFilter(self, obj, event):
-            if (event.type() == QEvent.Type.KeyPress and
-                event.key() == Qt.Key.Key_C and
-                event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-
+            if (
+                event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_C
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+            ):
                 widget = QApplication.focusWidget()
                 text = ""
 
                 # QPlainTextEdit / QTextEdit
-                if hasattr(widget, 'textCursor'):
+                if hasattr(widget, "textCursor"):
                     cursor = widget.textCursor()
                     text = cursor.selectedText()
                     # QTextCursor uses \u2029 as paragraph separator
-                    text = text.replace('\u2029', '\n')
+                    text = text.replace("\u2029", "\n")
                 # QLabel
-                elif hasattr(widget, 'selectedText'):
+                elif hasattr(widget, "selectedText"):
                     text = widget.selectedText()
 
                 if text:
@@ -265,7 +271,7 @@ def _win32_copy(text: str):
     try:
         user32.EmptyClipboard()
 
-        encoded = text.encode('utf-16-le') + b'\x00\x00'
+        encoded = text.encode("utf-16-le") + b"\x00\x00"
         h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
         if not h_mem:
             return
