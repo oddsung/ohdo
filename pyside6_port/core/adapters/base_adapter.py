@@ -44,13 +44,21 @@ class BaseAIAdapter(ABC):
         self.config = config
 
     @abstractmethod
-    async def generate(self, prompt: str, images: Optional[list[str]] = None) -> AIResponse:
+    async def generate(
+        self,
+        prompt: str,
+        images: Optional[list[str]] = None,
+        system: Optional[str] = None,
+    ) -> AIResponse:
         """
         AI에게 프롬프트를 전송하고 응답을 받습니다.
 
         Args:
-            prompt: 전송할 프롬프트 텍스트
+            prompt: 전송할 프롬프트 텍스트 (user 메시지)
             images: 첨부할 이미지 파일 경로 목록
+            system: 시스템 가이드 텍스트 (P1b). OpenAI 호환 어댑터는 system role
+                메시지로 분리, Gemini CLI 처럼 role 분리 path 가 없는 어댑터는
+                prompt 앞에 prepend 하여 동일 효과. None 이면 system 메시지 없음.
 
         Returns:
             AIResponse 데이터 객체

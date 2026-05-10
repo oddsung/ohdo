@@ -44,17 +44,25 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 # 시스템 모듈 import
 sys.path.insert(0, str(PROJECT_ROOT))
-from core.ai_engine import AIEngineManager
-from core.execution_kernel import ExecutionKernel
-from core.import_manager import extract_initial_block
-from core.prompt_builder import PromptBuilder
-from core.session_manager import Session, SessionManager
-from core.win_inspector import WindowInspector
-from core.workflow_engine import (
+# UI-Core 분리 (Phase 1.2 Chunk B): 모든 core 의존을 ``core.app_service`` 단일
+# 진입점으로 통일. ROADMAP §3 Phase 1 (2) KPI: "ui/ 폴더에서 session_manager ·
+# workflow_engine · ai_engine 직접 import 0건". 가드는 tests/test_core.py
+# test_84 (KPI 가드).
+from core.app_service import (
+    AppService,
     CodeSandbox,
+    ExecutionKernel,
+    PromptBuilder,
+    Session,
+    WindowInspector,
     WorkflowEngine,
+    extract_code_delta,
+    extract_import_delta,
+    extract_imports,
+    extract_initial_block,
     extract_library_block,
     extract_step_delta_code,
+    merge_imports,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,14 +105,28 @@ class MainWindow(QMainWindow):
         self.settings = self._load_settings()
         self.prompts_config = self._load_prompts()
 
-        # ── 코어 엔진 초기화 ──
-        self.session_manager = SessionManager()
-        self.ai_engine = AIEngineManager(self.settings)
-        self.prompt_builder = PromptBuilder(self.prompts_config)
-        self.workflow_engine = WorkflowEngine(
-            step_delay_ms=self.settings.get("execution", {}).get("step_delay_ms", 500),
-            visual_feedback_enabled=self.settings.get("visual_feedback", {}).get("enabled", True),
+        # ── 코어 엔진 초기화 (AppService 단일 진입점 경유 — Phase 1.2 Chunk B) ──
+        # 외부 settings/prompts_config 반영 인스턴스를 만들어 AppService 에 주입.
+        # 기존 호출 사이트 (self.session_manager.* / self.ai_engine.* / ...) 보존을
+        # 위해 AppService 의 component 들을 그대로 alias 로 노출.
+        self.app_service = AppService.create_default(
+            data_dir=PROJECT_ROOT / "data", settings=self.settings
         )
+        self.app_service.set_workflow_engine(
+            WorkflowEngine(
+                step_delay_ms=self.settings.get("execution", {}).get("step_delay_ms", 500),
+                visual_feedback_enabled=self.settings.get("visual_feedback", {}).get(
+                    "enabled", True
+                ),
+            )
+        )
+        self.app_service.set_prompt_builder(PromptBuilder(self.prompts_config))
+
+        # 기존 호출 사이트 보존을 위한 alias attributes (KPI 영향 X — banned import 만 측정)
+        self.session_manager = self.app_service.repo.manager
+        self.ai_engine = self.app_service.ai_manager
+        self.prompt_builder = self.app_service.prompt_builder
+        self.workflow_engine = self.app_service.workflow_engine
 
         # ── 상태 변수 ──
         self.current_session: Optional[Session] = None
@@ -368,7 +390,9 @@ class MainWindow(QMainWindow):
         f9.activated.connect(self._on_stop_code)
 
     def _apply_theme(self):
-        """테마 적용"""
+        """테마 적용 — settings ``ui.theme`` 기반. 파일 없으면 기본 다크 fallback."""
+        from .themes import get_default_dark_theme
+
         theme = self.settings.get("ui", {}).get("theme", "dark")
         theme_file = PROJECT_ROOT / "ui" / "resources" / "styles" / f"{theme}_theme.qss"
 
@@ -376,164 +400,7 @@ class MainWindow(QMainWindow):
             with open(theme_file, "r", encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
         else:
-            # 기본 다크 테마
-            self.setStyleSheet(self._get_default_dark_theme())
-
-    def _get_default_dark_theme(self) -> str:
-        """기본 다크 테마 스타일시트"""
-        return """
-        QMainWindow {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-        }
-        QWidget {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
-            font-size: 11px;
-        }
-        QMenuBar {
-            background-color: #181825;
-            color: #cdd6f4;
-            border-bottom: 1px solid #313244;
-        }
-        QMenuBar::item:selected {
-            background-color: #45475a;
-        }
-        QMenu {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-            border: 1px solid #313244;
-        }
-        QMenu::item:selected {
-            background-color: #45475a;
-        }
-        QToolBar {
-            background-color: #181825;
-            border-bottom: 1px solid #313244;
-            spacing: 5px;
-            padding: 3px;
-        }
-        QSplitter::handle {
-            background-color: #313244;
-            width: 2px;
-            height: 2px;
-        }
-        QPushButton {
-            background-color: #45475a;
-            color: #cdd6f4;
-            border: 1px solid #585b70;
-            border-radius: 4px;
-            padding: 6px 16px;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: #585b70;
-        }
-        QPushButton:pressed {
-            background-color: #6c7086;
-        }
-        QPushButton:disabled {
-            background-color: #313244;
-            color: #585b70;
-        }
-        QLineEdit, QTextEdit, QPlainTextEdit {
-            background-color: #313244;
-            color: #cdd6f4;
-            border: 1px solid #45475a;
-            border-radius: 4px;
-            padding: 4px;
-            selection-background-color: #585b70;
-        }
-        QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
-            border: 1px solid #89b4fa;
-        }
-        QComboBox {
-            background-color: #313244;
-            color: #cdd6f4;
-            border: 1px solid #45475a;
-            border-radius: 4px;
-            padding: 4px 8px;
-        }
-        QComboBox::drop-down {
-            border: none;
-        }
-        QComboBox QAbstractItemView {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-            border: 1px solid #45475a;
-            selection-background-color: #45475a;
-        }
-        QListWidget {
-            background-color: #181825;
-            color: #cdd6f4;
-            border: 1px solid #313244;
-            border-radius: 4px;
-        }
-        QListWidget::item {
-            padding: 8px;
-            border-bottom: 1px solid #313244;
-        }
-        QListWidget::item:selected {
-            background-color: #45475a;
-            color: #cdd6f4;
-        }
-        QListWidget::item:hover {
-            background-color: #313244;
-        }
-        QTabWidget::pane {
-            border: 1px solid #313244;
-            background-color: #1e1e2e;
-        }
-        QTabBar::tab {
-            background-color: #181825;
-            color: #a6adc8;
-            border: 1px solid #313244;
-            padding: 6px 16px;
-            margin-right: 2px;
-        }
-        QTabBar::tab:selected {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-            border-bottom: 2px solid #89b4fa;
-        }
-        QStatusBar {
-            background-color: #181825;
-            color: #a6adc8;
-            border-top: 1px solid #313244;
-        }
-        QGroupBox {
-            border: 1px solid #313244;
-            border-radius: 4px;
-            margin-top: 10px;
-            padding-top: 10px;
-            color: #cdd6f4;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 5px;
-        }
-        QScrollBar:vertical {
-            background-color: #181825;
-            width: 10px;
-            margin: 0;
-        }
-        QScrollBar::handle:vertical {
-            background-color: #45475a;
-            border-radius: 5px;
-            min-height: 20px;
-        }
-        QScrollBar::handle:vertical:hover {
-            background-color: #585b70;
-        }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-            height: 0;
-        }
-        QLabel {
-            color: #cdd6f4;
-        }
-        """
+            self.setStyleSheet(get_default_dark_theme())
 
     def _setup_logging(self):
         """로깅 설정"""
@@ -579,6 +446,10 @@ class MainWindow(QMainWindow):
         if engine_name:
             try:
                 self.ai_engine.switch_engine(engine_name)
+                # B4: settings.json 영구 저장 — 재시작 시 일관성 유지.
+                # switch_engine 은 메모리 _current_name 만 변경하므로 별도 persist.
+                self.settings.setdefault("ai", {})["selected"] = engine_name
+                self._save_settings()
                 self.console_panel.log(f"AI 엔진 변경: {text}", "INFO")
             except ValueError as e:
                 self.console_panel.log(str(e), "ERROR")
@@ -990,8 +861,7 @@ class MainWindow(QMainWindow):
 
         # 원본 step.generated_code 의 import 보존 — block 카드는 import 표시 안 함
         # → 사용자가 수정할 때 import 안 건드림. 재구성 시 옛 import 그대로 살림.
-        from core.import_manager import extract_imports, merge_imports
-
+        # (extract_imports / merge_imports 는 모듈 상단에서 core.app_service 경유 import.)
         old_imports, _ = extract_imports(old_generated) if old_generated else ([], "")
         prev_imports, prev_body = extract_imports(prev_generated) if prev_generated else ([], "")
         # 새 step_code 도 import 가 들어있을 수 있음 (사용자가 import 라인 추가 가능)
@@ -1048,13 +918,9 @@ class MainWindow(QMainWindow):
             elif sid == step_id:
                 old_code = s.get("generated_code", "")
 
-        # 새 step_code (delta) + step_imports 재계산
-        from core.import_manager import (
-            extract_code_delta,
-            extract_import_delta,
-            extract_imports,
-        )
-
+        # 새 step_code (delta) + step_imports 재계산.
+        # (extract_code_delta / extract_import_delta / extract_imports 는 모듈 상단에서
+        # core.app_service 경유 import.)
         new_imports_all, new_body_all = extract_imports(new_code)
         if prev_generated.strip():
             prev_imports, prev_body = extract_imports(prev_generated)
@@ -1249,6 +1115,11 @@ class MainWindow(QMainWindow):
             self.settings = dialog.get_settings()
             self._save_settings()
             self._apply_theme()
+            # AIEngineManager 재로드 — settings 의 새 api_key/model/selected 즉시 반영.
+            # ai_call_handler 등 모든 핸들러가 mw.ai_engine 을 매 호출마다 lookup 하므로
+            # alias 만 갱신하면 자동 전파.
+            self.app_service.reload_ai(self.settings)
+            self.ai_engine = self.app_service.ai_manager
             self._refresh_ai_combo()
             # 런타임 엔진에 즉시 반영
             self.workflow_engine.visual_feedback_enabled = self.settings.get(

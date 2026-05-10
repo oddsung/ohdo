@@ -87,6 +87,72 @@ class PromptBuilder:
           [2] 이전 컨텍스트 (코드/스텝)
           [3] 코드 생성 규칙 (끝에 배치)
         """
+        # P1b: split 호출자가 system_text 를 별도로 받아 OpenAI 호환 어댑터의
+        # system role 로 분리 가능. 단일 string 호출자는 backward compat 으로
+        # system + user_text 를 합쳐 반환 (P1a 와 동일 결과).
+        system_text, user_text = self._build_step_prompt_parts(
+            session=session,
+            user_request=user_request,
+            image_paths=image_paths,
+            error_context=error_context,
+            window_context=window_context,
+            element_context=element_context,
+            max_history_steps=max_history_steps,
+            project_type=project_type,
+            is_browser_element=is_browser_element,
+        )
+        return (system_text + "\n\n" + user_text) if system_text else user_text
+
+    def build_step_prompt_split(
+        self,
+        session,
+        user_request: str,
+        image_paths: Optional[list[str]] = None,
+        error_context: Optional[str] = None,
+        window_context: Optional[str] = None,
+        element_context: Optional[str] = None,
+        max_history_steps: int = 5,
+        project_type: str = "desktop",
+        is_browser_element: bool = False,
+    ) -> tuple[str, str]:
+        """P1b: build_step_prompt 의 split 버전 — (system_text, user_text) 반환.
+
+        OpenAI 호환 어댑터가 system role 로 분리해서 messages 에 넣을 수 있게.
+        Gemini CLI 어댑터는 자체적으로 prepend 하여 동일 효과.
+
+        - system_text: prompts.json 의 system_context (idempotent driver, jupyter,
+          UWP wait, pyautogui PRIMARY 등 12K+ 가이드). 비어있으면 빈 문자열.
+        - user_text: 사용자 요청 + 누적 코드 + element/window context + 규칙.
+        """
+        return self._build_step_prompt_parts(
+            session=session,
+            user_request=user_request,
+            image_paths=image_paths,
+            error_context=error_context,
+            window_context=window_context,
+            element_context=element_context,
+            max_history_steps=max_history_steps,
+            project_type=project_type,
+            is_browser_element=is_browser_element,
+        )
+
+    def _build_step_prompt_parts(
+        self,
+        session,
+        user_request: str,
+        image_paths: Optional[list[str]] = None,
+        error_context: Optional[str] = None,
+        window_context: Optional[str] = None,
+        element_context: Optional[str] = None,
+        max_history_steps: int = 5,
+        project_type: str = "desktop",
+        is_browser_element: bool = False,
+    ) -> tuple[str, str]:
+        """내부 빌더 — (system_text, user_text) 반환. system 은 self.system_context,
+        user 는 사용자 요청 + 컨텍스트 + 규칙. 두 호출자 (build_step_prompt /
+        build_step_prompt_split) 의 공통 구현."""
+        system_text = self.system_context or ""
+
         parts = []
 
         # ═══════════════════════════════════════════
@@ -252,19 +318,41 @@ class PromptBuilder:
                     "     (off-canvas 요소는 visibility 조건을 영원히 만족하지 못해 TimeoutException 발생)"
                 )
             else:
+                # G2: 가이드 강화 — DeepSeek 등이 ready-to-use 템플릿을 무시하고 짧은
+                # 자체 코드 작성 → element/click_target/pyautogui 누락 회귀 (5/9). 강제력 ↑.
                 parts.append(
-                    "위 선택된 UI 요소 정보를 활용하여 해당 요소를 조작하는 pywinauto 코드를 작성하세요."
+                    "🚨 **위 ## 선택된 UI 요소 섹션의 ```python 코드 템플릿을 그대로 시작 코드로 사용하세요**:"
+                )
+                parts.append(
+                    "  - 템플릿 안에서 `app`, `win`, `element` (= `_resolve_element()` 결과), `click_target` "
+                    "변수가 자동 정의됨. **자체적으로 element 변수를 다시 만들지 마세요** — 5/9 회귀: "
+                    "`name 'click_target' is not defined` / `name 'element' is not defined`."
+                )
+                parts.append(
+                    "  - 템플릿의 DPI Awareness + Application().connect + win + _resolve_element + "
+                    "ShowWindow(IsIconic 분기) + walk-up to clickable parent 단계를 **그대로 유지**하세요. "
+                    "한 줄도 빼지 마세요."
+                )
+                parts.append(
+                    "  - **import 는 코드 안에 작성하지 마세요** — 핵심 패키지 (ctypes / ctypes.wintypes / "
+                    "time / pyautogui / pyperclip / pywinauto.Application) 는 라이브러리 블럭에 이미 자동 "
+                    "prepend 되어 있음. 마커 안에 `import X` 작성 시 P3 #5 (import 위치 강제) 위반 + "
+                    "step_imports 분리 실패."
+                )
+                parts.append(
+                    "  - 사용자 요청 (클릭 / 텍스트 입력 / 키 누름 등) 에 해당하는 **동작 코드만 템플릿 끝에 추가**. "
+                    "예: 클릭만 요청 → `pyautogui.click(center_x, center_y)` 가 이미 템플릿에 있으면 수정 X. "
+                    "텍스트 입력 추가 요청 → 클릭 코드 다음에 `pyautogui.write` 또는 클립보드 paste 추가."
+                )
+                parts.append(
+                    "  - 동작 추가 시 가이드 #13 의 ASCII/CJK 분기 + 가이드 #19 의 표준 키 이름 (`'ctrl'` NOT `'control'`) 준수."
                 )
                 parts.append(
                     "⚠️ pywinauto API 정확한 키워드: `auto_id=` (NOT `automation_id=`), `class_name=`, `control_type=`."
                 )
                 parts.append(
-                    '   - `app.window(title=...).child_window(auto_id="...", control_type="...")` 패턴 사용.'
-                )
-                parts.append(
                     "   - selenium 의 `find_element(By.ID, ...)` 와 혼동 금지 — pywinauto 는 `child_window(auto_id=...)` 만."
                 )
-            parts.append("제공된 예시 코드를 참고하되, 요청 내용에 맞게 수정하세요.")
             parts.append("")
 
         # 에러 복구
@@ -303,9 +391,9 @@ class PromptBuilder:
                 "- [Jupyter 호환] 이전 스텝에서 정의된 변수(driver, app, dlg, options 등)는 재정의하지 말고 그대로 사용하세요. `driver = webdriver.Chrome(...)` 같은 초기화는 첫 스텝에서만 — 이후 스텝은 기존 driver 변수를 그대로 참조합니다."
             )
 
-        full_prompt = "\n".join(parts)
-        logger.debug(f"프롬프트 생성 완료 ({len(full_prompt)}자)")
-        return full_prompt
+        user_text = "\n".join(parts)
+        logger.debug(f"프롬프트 생성 완료 (system {len(system_text)}자, user {len(user_text)}자)")
+        return system_text, user_text
 
     def _build_automation_guide(self, is_macos: bool) -> list[str]:
         """OS별 UI 자동화 가이드를 생성합니다."""

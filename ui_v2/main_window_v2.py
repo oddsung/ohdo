@@ -928,7 +928,15 @@ class MainWindowV2(QMainWindow):
         self.current_session: Optional[Session] = None
         # D4: 세션별 커널 (탭마다 별도 인스턴스)
         self._kernels: dict[str, ExecutionKernel] = {}
-        self._console_visible = False  # D5: default 닫힘
+        # P4: settings.ui.console_visible 값 따름. 사용자가 토글한 상태 유지.
+        # 이전엔 hardcoded False — Ctrl+` 모르면 AI 응답 메타 (엔진/토큰/시간) 못 봄.
+        try:
+            _settings_for_console = self._load_settings()
+        except Exception:  # noqa: BLE001
+            _settings_for_console = {}
+        self._console_visible = bool(
+            _settings_for_console.get("ui", {}).get("console_visible", False)
+        )
         # AI 호출 시 첨부할 pending 데이터 (D6) — 활성 탭의 것만 보유,
         # 탭 전환 시 _save/load_active_tab_state 로 _tabs_state 와 swap
         self._pending_images: list[str] = []
@@ -987,6 +995,9 @@ class MainWindowV2(QMainWindow):
                 if wizard.selected_engine:
                     try:
                         self.app_service.switch_ai_engine(wizard.selected_engine)
+                        # B4: ai.selected 도 settings dict 에 반영 — finally 의
+                        # _save_settings 가 함께 영구 저장 (ai.selected + onboarding_done).
+                        settings.setdefault("ai", {})["selected"] = wizard.selected_engine
                         # 액션바 콤보 갱신
                         self.engine_combo.blockSignals(True)
                         self.engine_combo.setCurrentText(wizard.selected_engine)
@@ -1672,7 +1683,8 @@ class MainWindowV2(QMainWindow):
         self.console_panel.setReadOnly(True)
         self.console_panel.setFont(QFont("Consolas", 9))
         self.console_panel.setMaximumHeight(220)
-        self.console_panel.hide()
+        # P4: __init__ 의 _console_visible (settings.ui.console_visible 반영) 따름
+        self.console_panel.setVisible(self._console_visible)
         outer_layout.addWidget(self.console_panel)
 
     def _install_shortcuts(self) -> None:
@@ -2025,9 +2037,22 @@ class MainWindowV2(QMainWindow):
     def _on_engine_changed(self, name: str) -> None:
         try:
             self.app_service.switch_ai_engine(name)
+            # B4: settings.json 영구 저장 — switch_ai_engine 은 메모리 _current_name
+            # 만 변경. 재시작 시 일관성 유지를 위해 ai.selected 도 persist.
+            self._persist_engine_choice(name)
             self._log(f"AI 엔진 전환: {name}")
         except Exception as e:
             self._log(f"엔진 전환 실패: {e}")
+
+    def _persist_engine_choice(self, name: str) -> None:
+        """settings.json 의 ai.selected 를 영구 저장. switch_ai_engine 호출
+        사이트 (헤더 콤보 / 명령 팔레트 / onboarding) 공통 헬퍼."""
+        try:
+            s = self._load_settings()
+            s.setdefault("ai", {})["selected"] = name
+            self._save_settings(s)
+        except Exception as e:  # noqa: BLE001
+            self._log(f"settings.ai.selected 저장 실패: {e}")
 
     def _on_send_message(self) -> None:
         """사용자 메시지 → AppService.generate_step 호출 → Step 추가 → 카드 갱신.
@@ -2161,20 +2186,26 @@ class MainWindowV2(QMainWindow):
 
                 # 세션 다시 로드 (add_step 가 repo 에 저장했으므로)
                 self.current_session = self.app_service.get_session(session_id)
+                # B2: 어느 엔진이 답했는지 화면에 명시 — 헤더 콤보 변경 후
+                # 사용자가 실제 호출된 엔진을 콘솔에서 즉시 확인 가능.
+                engine_name = self.app_service.get_ai_engine_name() or "?"
                 # partial response 경고 — 응답이 도중에 잘렸음 (사용자 보고 5/5)
                 if getattr(response, "partial", False):
                     self.signals.step_done.emit(
                         step.step_id,
                         True,
-                        f"⚠ AI 응답 잘림: Step {step.step_id} 코드 불완전 — "
+                        f"⚠ AI 응답 잘림 (엔진: {engine_name}): "
+                        f"Step {step.step_id} 코드 불완전 — "
                         f"카드의 ✏️ 수정으로 보완하거나 사용자 요청 클릭으로 재생성",
                     )
                 else:
                     self.signals.step_done.emit(
                         step.step_id,
                         True,
-                        f"Step {step.step_id} 생성 (코드 {len(response.code)}자, "
-                        f"{response.tokens_used} tokens, {response.response_time_ms}ms)",
+                        f"Step {step.step_id} 생성 (엔진: {engine_name}, "
+                        f"코드 {len(response.code)}자, "
+                        f"{response.tokens_used} tokens, "
+                        f"{response.response_time_ms}ms)",
                     )
             except Exception as e:
                 self.signals.step_done.emit(0, False, f"AI 호출 예외: {e}")
@@ -2464,6 +2495,7 @@ class MainWindowV2(QMainWindow):
         """Palette → 엔진 변경 + 액션바 콤보 갱신."""
         try:
             self.app_service.switch_ai_engine(name)
+            self._persist_engine_choice(name)  # B4
             self.engine_combo.blockSignals(True)
             self.engine_combo.setCurrentText(name)
             self.engine_combo.blockSignals(False)
@@ -2488,6 +2520,13 @@ class MainWindowV2(QMainWindow):
     def _toggle_console(self) -> None:
         self._console_visible = not self._console_visible
         self.console_panel.setVisible(self._console_visible)
+        # P4: settings.json 영구 저장 — 재시작 시 마지막 상태 유지
+        try:
+            s = self._load_settings()
+            s.setdefault("ui", {})["console_visible"] = self._console_visible
+            self._save_settings(s)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ── D9 토스트 헬퍼 + D20 사이드바 + D17 재생성 ─────────────────
 

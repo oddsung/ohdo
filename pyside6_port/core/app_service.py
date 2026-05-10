@@ -20,19 +20,40 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
-from core.execution_kernel import ExecutionKernel, StepResult
+from core.ai_engine import AIEngineManager
+from core.execution_kernel import (
+    INITIAL_BLOCK_STEP_ID,
+    LIBRARY_BLOCK_STEP_ID,
+    ExecutionKernel,
+    StepResult,
+)
+from core.import_manager import (
+    extract_code_delta,
+    extract_import_delta,
+    extract_imports,
+    extract_initial_block,
+    merge_imports,
+)
+from core.prompt_builder import PromptBuilder
 from core.session_manager import Session, SessionSummary, Step
+from core.win_inspector import WindowInspector, format_element_label
+from core.workflow_engine import (
+    CodeSandbox,
+    WorkflowEngine,
+    extract_library_block,
+    extract_step_delta_code,
+)
 
 from .storage.base import SessionRepository
 
 if TYPE_CHECKING:
     from core.adapters.base_adapter import AIResponse
-    from core.ai_engine import AIEngineManager
-    from core.workflow_engine import WorkflowEngine
 
-# UI 가 직접 ``core.session_manager`` / ``core.execution_kernel`` 를 import 하지
-# 않도록 도메인 타입을 AppService 모듈에서 re-export. ROADMAP §3 Phase 1 (2)
-# KPI: "ui/ 폴더에서 session_manager·workflow_engine·ai_engine 직접 import 0건".
+# UI 가 직접 ``core.session_manager`` / ``core.execution_kernel`` 등을 import 하지
+# 않도록 도메인 타입 + 코드 추출 pure 함수 + 핵심 클래스를 AppService 모듈에서
+# re-export. ROADMAP §3 Phase 1 (2) KPI: "ui/ 폴더에서 session_manager·
+# workflow_engine·ai_engine 직접 import 0건". ui/ legacy (Chunk B) 는
+# `from core.app_service import ...` 단일 진입점만 사용.
 __all__ = [
     "AppService",
     "Session",
@@ -40,6 +61,23 @@ __all__ = [
     "Step",
     "ExecutionKernel",
     "StepResult",
+    "INITIAL_BLOCK_STEP_ID",
+    "LIBRARY_BLOCK_STEP_ID",
+    # 핵심 클래스 re-export — UI 가 인스턴스 보유 / type hint 에 사용
+    "AIEngineManager",
+    "WorkflowEngine",
+    "PromptBuilder",
+    "WindowInspector",
+    "CodeSandbox",
+    # pure 함수 re-export — UI 가 함수 직접 호출 (manager-less)
+    "extract_imports",
+    "merge_imports",
+    "extract_code_delta",
+    "extract_import_delta",
+    "extract_initial_block",
+    "extract_library_block",
+    "extract_step_delta_code",
+    "format_element_label",
 ]
 
 
@@ -57,10 +95,12 @@ class AppService:
         session_repo: SessionRepository,
         ai_manager: Optional["AIEngineManager"] = None,
         workflow_engine: Optional["WorkflowEngine"] = None,
+        prompt_builder: Optional["PromptBuilder"] = None,
     ) -> None:
         self._repo = session_repo
         self._ai = ai_manager
         self._engine = workflow_engine
+        self._prompt_builder = prompt_builder
 
     @classmethod
     def create_default(
@@ -109,6 +149,40 @@ class AppService:
     def ai_manager(self) -> Optional["AIEngineManager"]:
         """AI 엔진 매니저 — UI 가 가끔 직접 호출 필요한 경우 (예: chat panel)."""
         return self._ai
+
+    @property
+    def workflow_engine(self) -> "WorkflowEngine":
+        """``WorkflowEngine`` 인스턴스 — 미주입 시 lazy 생성.
+
+        UI 가 직접 ``core.workflow_engine.WorkflowEngine`` 을 import / 보유 안 해도
+        되도록 façade. 외부에서 settings 기반 인스턴스를 ``set_workflow_engine`` 으로
+        주입하면 그것을 그대로 사용.
+        """
+        return self._get_or_create_engine()
+
+    def set_workflow_engine(self, engine: "WorkflowEngine") -> None:
+        """외부에서 settings 반영해 만든 ``WorkflowEngine`` 인스턴스를 주입.
+
+        예: UI 가 ``execution.step_delay_ms`` / ``visual_feedback.enabled`` 를
+        반영한 ``WorkflowEngine(...)`` 를 만들어 set 호출. 이후 ``run_blocks`` /
+        ``stop_blocks`` 모두 그 인스턴스 경유.
+        """
+        self._engine = engine
+
+    @property
+    def prompt_builder(self) -> "PromptBuilder":
+        """``PromptBuilder`` 인스턴스 — 미주입 시 lazy 생성 (default config).
+
+        UI 가 ``prompts.json`` 로딩 + 인스턴스 생성 + 주입 패턴이면
+        ``set_prompt_builder`` 로 미리 주입. 그렇지 않으면 빈 config 로 lazy 생성.
+        """
+        if self._prompt_builder is None:
+            self._prompt_builder = PromptBuilder()
+        return self._prompt_builder
+
+    def set_prompt_builder(self, builder: "PromptBuilder") -> None:
+        """외부에서 ``prompts.json`` 등 config 와 함께 만든 ``PromptBuilder`` 주입."""
+        self._prompt_builder = builder
 
     # ── 세션 ───────────────────────────────────────────
 
@@ -545,7 +619,9 @@ class AppService:
         # - element_context (control_type/name/auto_id/parent_title 등) 가 이미 풍부 → 이미지 가치 marginal
         # - vision 처리 latency 5-15s + Gemini context 부담 → corrupt 응답 risk
         # - session 에는 image path keep (UI 표시 + 미래 image-based matching 기능 시 활용)
-        prompt = prompt_builder.build_step_prompt(
+        # P1b: system_context 와 user 영역을 split — OpenAI 호환 어댑터가 system role
+        # 로 분리해서 messages 에 넣을 수 있도록. Gemini CLI 는 자체 prepend.
+        system_text, user_text = prompt_builder.build_step_prompt_split(
             session=session,
             user_request=user_request,
             image_paths=None,
@@ -554,10 +630,12 @@ class AppService:
             window_context=window_context,
             is_browser_element=is_browser_element,
         )
+        # 로깅용 합본 (대화 로그 저장 + on_progress 메시지) — 어댑터엔 split 전달
+        prompt = (system_text + "\n\n" + user_text) if system_text else user_text
 
         if on_progress:
             on_progress(f"AI 호출 중 (프롬프트 {len(prompt)}자)...")
-        response = await self._ai.generate(prompt, None)
+        response = await self._ai.generate(user_text, None, system=system_text or None)
 
         # AI 대화 로그 저장 (성공/실패 모두) — 추후 디버깅·재현용.
         # 백업 [ohdo_20260505_backup/.../step0_prompt.txt + step0_generated_code.py] 처럼

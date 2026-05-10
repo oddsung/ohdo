@@ -108,20 +108,27 @@ class AIEngineManager:
         except Exception:
             pass
 
-    async def generate(self, prompt: str, images: Optional[list[str]] = None) -> AIResponse:
+    async def generate(
+        self,
+        prompt: str,
+        images: Optional[list[str]] = None,
+        system: Optional[str] = None,
+    ) -> AIResponse:
         """
         현재 선택된 AI 엔진으로 코드를 생성합니다.
 
         Args:
-            prompt: 프롬프트 텍스트
+            prompt: 프롬프트 텍스트 (user 메시지)
             images: 이미지 파일 경로 목록
+            system: 시스템 가이드 (P1b). OpenAI 호환 어댑터는 system role 로
+                분리, Gemini CLI 는 prompt 앞에 prepend.
 
         Returns:
             AIResponse
         """
         adapter = self.get_adapter()
         logger.debug(f"AI 요청 전송 ({adapter.get_name()}): {prompt[:100]}...")
-        response = await adapter.generate(prompt, images)
+        response = await adapter.generate(prompt, images, system=system)
 
         if response.success:
             logger.info(

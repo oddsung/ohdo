@@ -851,11 +851,13 @@ class WindowInspector:
             window_line = "app.top_window()"
 
         lines.append("```python")
-        lines.append("import ctypes")
-        lines.append("import ctypes.wintypes")
-        lines.append("import time")
-        lines.append("import pyautogui")
-        lines.append("from pywinauto import Application")
+        # G2.5: import 라인 제거 — 라이브러리 블럭 (workflow_engine._ensure_essential_imports)
+        # 이 ctypes / ctypes.wintypes / time / pyautogui / pywinauto.Application 등을
+        # 자동 prepend. 마커 안에 import 작성하면 step_imports 분리 실패 + P3 #5 위반.
+        lines.append(
+            "# 필요한 import (ctypes / ctypes.wintypes / time / pyautogui / Application 등) 는"
+        )
+        lines.append("# 라이브러리 블럭에 이미 prepend 되어 있음 — 코드 안에 import 다시 작성 X")
         lines.append("")
         lines.append("# ★ DPI Awareness 설정 (pywinauto 좌표와 pyautogui 좌표 일치 보장)")
         lines.append("# 이 스크립트를 호출한 프로세스와 동일한 DPI 모드로 맞춤")
@@ -1103,11 +1105,12 @@ class WindowInspector:
 
         # 코드 예시 — 부모 윈도우를 전면으로 가져오고 좌표 클릭
         lines.append("```python")
-        lines.append("import ctypes")
-        lines.append("import ctypes.wintypes")
-        lines.append("import time")
-        lines.append("import pyautogui")
-        lines.append("from pywinauto.findwindows import find_windows")
+        # G2.5: import 라인 제거 — 라이브러리 블럭 자동 prepend. 마커 안 import 금지 (P3 #5).
+        lines.append("# 필요한 import (ctypes / ctypes.wintypes / time / pyautogui 등) 는")
+        lines.append("# 라이브러리 블럭에 이미 prepend 되어 있음 — 코드 안에 import 다시 작성 X")
+        lines.append(
+            "# Owner-drawn 케이스는 find_windows 추가 필요 시 'from pywinauto.findwindows import find_windows' 별도"
+        )
         lines.append("")
         lines.append("# ★ DPI Awareness 설정")
         lines.append("try:")

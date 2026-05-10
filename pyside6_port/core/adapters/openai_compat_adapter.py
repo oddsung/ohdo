@@ -132,12 +132,27 @@ class OpenAICompatAdapter(BaseAIAdapter):
                 return name
         return None
 
-    async def generate(self, prompt: str, images: Optional[list[str]] = None) -> AIResponse:
+    async def generate(
+        self,
+        prompt: str,
+        images: Optional[list[str]] = None,
+        system: Optional[str] = None,
+    ) -> AIResponse:
         """asyncio.to_thread 로 blocking 호출 wrap."""
-        return await asyncio.to_thread(self._generate_sync, prompt, images)
+        return await asyncio.to_thread(self._generate_sync, prompt, images, system)
 
-    def _generate_sync(self, prompt: str, images: Optional[list[str]] = None) -> AIResponse:
-        """동기 HTTP 호출 — POST {base_url}/chat/completions."""
+    def _generate_sync(
+        self,
+        prompt: str,
+        images: Optional[list[str]] = None,
+        system: Optional[str] = None,
+    ) -> AIResponse:
+        """동기 HTTP 호출 — POST {base_url}/chat/completions.
+
+        P1b: system 인자 있으면 messages 의 첫 항목에 system role 분리. OpenAI
+        호환 모델 (DeepSeek/Groq/OpenRouter/Mistral 등) 이 system 토큰을 user 와
+        다르게 처리 — attention 강화로 가이드를 더 강하게 따름.
+        """
         self._cancelled = False
         start = time.time()
 
@@ -153,9 +168,15 @@ class OpenAICompatAdapter(BaseAIAdapter):
         else:
             content = prompt
 
+        # P1b: system role 분리. system 있으면 messages 의 첫 항목.
+        messages: list[dict] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": content})
+
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": content}],
+            "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }

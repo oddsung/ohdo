@@ -27,12 +27,14 @@ from typing import TYPE_CHECKING, Optional
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
-from core.execution_kernel import (
+# UI-Core 분리 (Phase 1.2 Chunk B): core.app_service 단일 진입점 경유.
+from core.app_service import (
     INITIAL_BLOCK_STEP_ID,
     LIBRARY_BLOCK_STEP_ID,
+    CodeSandbox,
     ExecutionKernel,
+    extract_library_block,
 )
-from core.workflow_engine import CodeSandbox, extract_library_block
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow

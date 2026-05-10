@@ -208,9 +208,90 @@ class SettingsDialog(QDialog):
         )
         oc_form.addRow("temperature:", self.openai_temperature_edit)
 
+        # 연결 테스트 — 현재 dialog 입력값으로 임시 어댑터 생성 후 짧은 ping 호출.
+        # Save 안 한 입력값으로 즉시 검증 가능. timeout 15s + max_tokens 32 강제.
+        self.openai_test_btn = QPushButton("Test connection")
+        self.openai_test_btn.setToolTip(
+            "현재 입력한 base_url + api_key + model 로 짧은 ping 호출 (timeout 15s).\n"
+            "Save 안 한 값으로 즉시 검증 — DeepSeek/OpenAI/Groq 등 모든 OpenAI 호환 LLM 지원."
+        )
+        self.openai_test_btn.clicked.connect(self._test_openai_connection)
+        oc_form.addRow("연결 테스트:", self.openai_test_btn)
+
+        self.openai_test_result_label = QLabel("")
+        self.openai_test_result_label.setWordWrap(True)
+        self.openai_test_result_label.setStyleSheet("padding: 4px 0; color: #6c7086;")
+        oc_form.addRow("", self.openai_test_result_label)
+
         form.addRow(oc_group)
 
         return widget
+
+    def _test_openai_connection(self) -> None:
+        """현재 dialog 입력값으로 OpenAI 호환 API 짧은 ping 호출.
+
+        Save 안 한 입력값으로 즉시 검증 (api_key 정확도, base_url 도달성, model 존재).
+        timeout 15s + max_tokens 32 + temperature 0 강제 — 비용/시간 최소화.
+        UI thread 에서 동기 호출 — 버튼 disable + label "확인 중..." + processEvents.
+        """
+        from PyQt6.QtWidgets import QApplication
+
+        from core.adapters.openai_compat_adapter import OpenAICompatAdapter
+
+        # 임시 config — dialog 입력값 그대로 (저장 X).
+        try:
+            temperature = float(self.openai_temperature_edit.text() or "0.3")
+        except ValueError:
+            temperature = 0.3
+
+        config = {
+            "base_url": self.openai_base_url_edit.text().strip(),
+            "api_key": self.openai_api_key_edit.text(),
+            "api_key_env": "OPENAI_API_KEY",
+            "model": self.openai_model_edit.text().strip(),
+            "timeout_seconds": 15,  # ping 용 짧은 timeout 강제
+            "max_tokens": 32,  # 응답 비용 최소화 — "OK" 한 단어면 충분
+            "temperature": temperature,
+        }
+
+        if not config["base_url"]:
+            self.openai_test_result_label.setText(
+                "❌ base_url 비어있음 — 프리셋 선택 또는 직접 입력 필요"
+            )
+            self.openai_test_result_label.setStyleSheet("padding: 4px 0; color: #f38ba8;")
+            return
+        if not config["model"]:
+            self.openai_test_result_label.setText("❌ model 비어있음")
+            self.openai_test_result_label.setStyleSheet("padding: 4px 0; color: #f38ba8;")
+            return
+
+        # UI 락 + 진행 표시
+        self.openai_test_btn.setEnabled(False)
+        self.openai_test_result_label.setText("⏳ 확인 중...")
+        self.openai_test_result_label.setStyleSheet("padding: 4px 0; color: #f9e2af;")
+        QApplication.processEvents()
+
+        try:
+            adapter = OpenAICompatAdapter(config)
+            response = adapter._generate_sync("Reply with OK only.")
+        except Exception as e:
+            self.openai_test_result_label.setText(f"❌ 어댑터 호출 예외: {e}")
+            self.openai_test_result_label.setStyleSheet("padding: 4px 0; color: #f38ba8;")
+            self.openai_test_btn.setEnabled(True)
+            return
+        finally:
+            self.openai_test_btn.setEnabled(True)
+
+        if response.success:
+            preview = (response.text or "").strip().replace("\n", " ")[:80]
+            self.openai_test_result_label.setText(
+                f"✅ 연결 성공 ({response.response_time_ms}ms, "
+                f"tokens {response.tokens_used}) — 응답: {preview!r}"
+            )
+            self.openai_test_result_label.setStyleSheet("padding: 4px 0; color: #a6e3a1;")
+        else:
+            self.openai_test_result_label.setText(f"❌ 연결 실패: {response.error}")
+            self.openai_test_result_label.setStyleSheet("padding: 4px 0; color: #f38ba8;")
 
     def _on_openai_preset_changed(self, presets: dict) -> None:
         """프리셋 선택 시 base_url + model 자동 채움."""

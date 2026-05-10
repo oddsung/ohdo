@@ -3134,6 +3134,741 @@ if __name__ == "__main__":
                 f"[Phase 1.2] AppService.{method} 필수 (UI 가 core.* 직접 import 안 하게)",
             )
 
+    def test_83_appservice_chunk_b_facades(self):
+        """[Phase 1.2 Chunk B] AppService 가 ui/ legacy 정리에 필요한 façade 노출.
+
+        ui/main_window.py + handler 들이 ``core.workflow_engine`` /
+        ``core.import_manager`` / ``core.prompt_builder`` / ``core.win_inspector``
+        를 직접 import 하지 않게 하기 위해 다음을 ``core.app_service`` 모듈에서
+        re-export + property/setter 로 노출.
+
+        - 핵심 클래스 re-export: AIEngineManager / WorkflowEngine / PromptBuilder
+          / WindowInspector / CodeSandbox
+        - pure 함수 re-export: extract_imports / merge_imports / extract_code_delta
+          / extract_import_delta / extract_initial_block / extract_library_block
+          / extract_step_delta_code
+        - workflow_engine property + set_workflow_engine setter (외부 settings 반영
+          인스턴스 주입)
+        - prompt_builder property + set_prompt_builder setter (외부 prompts.json
+          반영 인스턴스 주입)
+        """
+        from core import app_service as svc
+
+        # 클래스 re-export
+        for name in (
+            "AIEngineManager",
+            "WorkflowEngine",
+            "PromptBuilder",
+            "WindowInspector",
+            "CodeSandbox",
+        ):
+            self.assert_true(
+                hasattr(svc, name) and getattr(svc, name) is not None,
+                f"[Phase 1.2 Chunk B] core.app_service.{name} re-export 필수",
+            )
+
+        # pure 함수 re-export
+        for name in (
+            "extract_imports",
+            "merge_imports",
+            "extract_code_delta",
+            "extract_import_delta",
+            "extract_initial_block",
+            "extract_library_block",
+            "extract_step_delta_code",
+        ):
+            self.assert_true(
+                hasattr(svc, name) and callable(getattr(svc, name)),
+                f"[Phase 1.2 Chunk B] core.app_service.{name} (pure 함수) re-export 필수",
+            )
+
+        # __all__ 에 모두 포함
+        for name in (
+            "AIEngineManager",
+            "WorkflowEngine",
+            "PromptBuilder",
+            "WindowInspector",
+            "CodeSandbox",
+            "extract_imports",
+            "merge_imports",
+            "extract_code_delta",
+            "extract_import_delta",
+            "extract_initial_block",
+            "extract_library_block",
+            "extract_step_delta_code",
+        ):
+            self.assert_true(
+                name in svc.__all__,
+                f"[Phase 1.2 Chunk B] '{name}' 가 core.app_service.__all__ 에 포함 필수",
+            )
+
+        # workflow_engine property + setter
+        from core.app_service import AppService, WorkflowEngine
+        from core.storage.in_memory import InMemoryRepository
+
+        app = AppService(session_repo=InMemoryRepository())
+        engine = app.workflow_engine
+        self.assert_true(
+            isinstance(engine, WorkflowEngine),
+            "[Phase 1.2 Chunk B] AppService.workflow_engine 이 WorkflowEngine 인스턴스 반환",
+        )
+        self.assert_true(
+            app.workflow_engine is engine,
+            "[Phase 1.2 Chunk B] workflow_engine 은 같은 인스턴스 캐싱",
+        )
+        custom = WorkflowEngine(step_delay_ms=999)
+        app.set_workflow_engine(custom)
+        self.assert_true(
+            app.workflow_engine is custom,
+            "[Phase 1.2 Chunk B] set_workflow_engine 으로 외부 인스턴스 주입 가능",
+        )
+
+        # prompt_builder property + setter
+        from core.app_service import PromptBuilder
+
+        app2 = AppService(session_repo=InMemoryRepository())
+        pb = app2.prompt_builder
+        self.assert_true(
+            isinstance(pb, PromptBuilder),
+            "[Phase 1.2 Chunk B] AppService.prompt_builder 가 PromptBuilder 반환",
+        )
+        self.assert_true(
+            app2.prompt_builder is pb,
+            "[Phase 1.2 Chunk B] prompt_builder 은 같은 인스턴스 캐싱",
+        )
+        custom_pb = PromptBuilder()
+        app2.set_prompt_builder(custom_pb)
+        self.assert_true(
+            app2.prompt_builder is custom_pb,
+            "[Phase 1.2 Chunk B] set_prompt_builder 로 외부 인스턴스 주입 가능",
+        )
+
+        # 생성자에서 prompt_builder 직접 주입
+        app3 = AppService(session_repo=InMemoryRepository(), prompt_builder=custom_pb)
+        self.assert_true(
+            app3.prompt_builder is custom_pb,
+            "[Phase 1.2 Chunk B] AppService.__init__ 에 prompt_builder 인자로 주입 가능",
+        )
+
+    def test_84_main_window_no_direct_core_imports(self):
+        """[Phase 1.2 Chunk B] ui/main_window.py 가 core.* banned 모듈 직접 import 0건.
+
+        ROADMAP §3 Phase 1 (2) KPI: "ui/ 폴더에서 session_manager · workflow_engine ·
+        ai_engine 직접 import 0건". main_window.py 는 5/9 시점 Chunk B 적용 완료 —
+        모든 import 가 ``core.app_service`` 경유 (모듈 상단 + 함수 내부 모두).
+
+        Banned (UI 가 직접 import 금지):
+        - core.session_manager, core.ai_engine, core.execution_kernel,
+          core.workflow_engine, core.import_manager, core.prompt_builder,
+          core.win_inspector
+        - core.storage.* — repo 생성은 ``AppService.create_default``
+
+        ui/ 의 다른 파일 (ai_call_handler / block_execution_handler / chat_panel 등) 은
+        Chunk B 의 sub-step 3 에서 정리.
+        """
+        from pathlib import Path
+
+        src = (Path(__file__).parent.parent / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+        banned_modules = [
+            "core.session_manager",
+            "core.ai_engine",
+            "core.execution_kernel",
+            "core.workflow_engine",
+            "core.import_manager",
+            "core.prompt_builder",
+            "core.win_inspector",
+            "core.storage.local_json",
+            "core.storage.base",
+            "core.storage.in_memory",
+        ]
+        for mod in banned_modules:
+            self.assert_true(
+                f"from {mod}" not in src and f"import {mod}" not in src,
+                f"[Phase 1.2 Chunk B KPI] ui/main_window.py 에서 '{mod}' 직접 import 금지 "
+                "- core.app_service 경유 필수",
+            )
+
+        # 단일 진입점 확인 — 'from core.app_service import' 가 존재
+        self.assert_true(
+            "from core.app_service import" in src,
+            "[Phase 1.2 Chunk B] main_window 가 core.app_service 단일 진입점 사용",
+        )
+
+    def test_85_ui_folder_no_direct_core_imports(self):
+        """[Phase 1.2 Chunk B 완결] ui/ 폴더 전체에서 core.* banned 모듈 직접 import 0건.
+
+        ROADMAP §3 Phase 1 (2) KPI 의 최종 가드. test_80 (ui_v2) + test_84 (main_window)
+        의 영역을 ui/ 폴더 전체 .py 로 확장. handler / chat_panel / ui_inspection_handler /
+        code_viewer / element_picker / settings_dialog 등 모든 파일이 ``core.app_service``
+        단일 진입점만 사용해야 한다.
+
+        예외: ``core.environment_scanner`` / ``core.adapters.*`` 는 banned 목록에 없음
+        (UI-Core 핵심 KPI 도메인 외). 추후 정리는 별 sub-task.
+        """
+        from pathlib import Path
+
+        ui_dir = Path(__file__).parent.parent / "ui"
+        banned_modules = [
+            "core.session_manager",
+            "core.ai_engine",
+            "core.execution_kernel",
+            "core.workflow_engine",
+            "core.import_manager",
+            "core.prompt_builder",
+            "core.win_inspector",
+            "core.storage.local_json",
+            "core.storage.base",
+            "core.storage.in_memory",
+        ]
+
+        violations: list[str] = []
+        for py_file in ui_dir.glob("*.py"):
+            src = py_file.read_text(encoding="utf-8")
+            for mod in banned_modules:
+                if f"from {mod}" in src or f"import {mod}" in src:
+                    violations.append(f"{py_file.name}: '{mod}' 직접 import")
+
+        msg = (
+            "[Phase 1.2 Chunk B KPI] ui/ 폴더에 banned core import 잔존:\n  - "
+            + "\n  - ".join(violations)
+            if violations
+            else "ok"
+        )
+        self.assert_true(not violations, msg)
+
+    def test_86_settings_dialog_has_openai_test_connection(self):
+        """[Phase 1.8] SettingsDialog 에 OpenAI 호환 연결 테스트 기능 존재.
+
+        DeepSeek / OpenAI / Groq 등 OpenAI 호환 LLM 의 api_key 등록 후
+        Save 안 한 입력값으로 즉시 연결 검증이 가능해야 한다 (UX + 비용 회피).
+
+        가드 항목:
+        1. SettingsDialog._test_openai_connection 메서드 존재
+        2. _create_ai_tab 소스에 'Test connection' 또는 '연결 테스트' 라벨/버튼 존재
+        3. 콜백이 dialog 입력값(base_url/api_key/model/temperature)으로 임시 config 생성
+        4. timeout 15s + max_tokens 32 강제 (ping 비용 최소화)
+        5. OpenAICompatAdapter._generate_sync 직접 호출 (UI thread 동기)
+        """
+        import inspect
+
+        from ui.settings_dialog import SettingsDialog
+
+        self.assert_true(
+            hasattr(SettingsDialog, "_test_openai_connection"),
+            "[Phase 1.8] SettingsDialog._test_openai_connection 메서드 필수",
+        )
+
+        ai_tab_src = inspect.getsource(SettingsDialog._create_ai_tab)
+        self.assert_true(
+            "openai_test_btn" in ai_tab_src and "_test_openai_connection" in ai_tab_src,
+            "[Phase 1.8] _create_ai_tab 에 openai_test_btn 위젯 + _test_openai_connection 콜백 연결 필수",
+        )
+        self.assert_true(
+            "연결 테스트" in ai_tab_src
+            or "Test connection" in ai_tab_src.lower().replace(" ", " "),
+            "[Phase 1.8] AI 탭에 '연결 테스트' / 'Test connection' 라벨 필수",
+        )
+
+        cb_src = inspect.getsource(SettingsDialog._test_openai_connection)
+        self.assert_true(
+            "openai_base_url_edit" in cb_src
+            and "openai_api_key_edit" in cb_src
+            and "openai_model_edit" in cb_src,
+            "[Phase 1.8] 콜백이 dialog 입력값(base_url/api_key/model)으로 config 생성 필수",
+        )
+        self.assert_true(
+            "timeout_seconds" in cb_src and "15" in cb_src,
+            "[Phase 1.8] ping timeout 15s 강제 필수 (비용/시간 최소화)",
+        )
+        self.assert_true(
+            "max_tokens" in cb_src and "32" in cb_src,
+            "[Phase 1.8] ping max_tokens 32 강제 필수 (응답 비용 최소화)",
+        )
+        self.assert_true(
+            "OpenAICompatAdapter" in cb_src and "_generate_sync" in cb_src,
+            "[Phase 1.8] OpenAICompatAdapter._generate_sync 직접 호출 필수",
+        )
+
+    def test_87_open_settings_reloads_ai_engine(self):
+        """[Phase 1.8] _open_settings 가 AIEngineManager 를 재로드한다.
+
+        settings dialog 에서 OpenAI 호환 엔진 선택 + api_key/model 변경 + Apply
+        시 메모리상의 self.ai_engine 이 새 settings 기준으로 재생성되어야 한다.
+        없으면 next AI 호출이 stale config 사용 (init 시점 settings 그대로 → 빈
+        api_key 로 401, 또는 모델 변경 무시).
+
+        가드: _open_settings 소스에 app_service.reload_ai(settings) 호출 +
+        self.ai_engine alias 재할당 패턴 존재.
+        """
+        import inspect
+
+        from ui.main_window import MainWindow
+
+        src = inspect.getsource(MainWindow._open_settings)
+        self.assert_true(
+            "reload_ai" in src and "self.settings" in src,
+            "[Phase 1.8] _open_settings 가 app_service.reload_ai(self.settings) 호출 필수",
+        )
+        self.assert_true(
+            "self.ai_engine" in src and "ai_manager" in src,
+            "[Phase 1.8] _open_settings 가 self.ai_engine = self.app_service.ai_manager alias 갱신 필수",
+        )
+
+    def test_88_engine_choice_persists_and_displays(self):
+        """[Phase 1.8] AI 엔진 선택의 즉시 표시 + settings.json 영구 저장.
+
+        직전 세션 (5/9) 에서 발견된 갭들을 한 unit 으로 fix:
+        - B1: ai_call_handler 가 console_panel 에 넘기는 ai_engine 속성명이
+              잘못되어 (current_engine — 미존재) 화면에 항상 빈 칸 표시되던 버그.
+              get_current_name() 으로 정정.
+        - B2: ui_v2 의 step_done 메시지에 어느 엔진이 답했는지 명시 누락.
+              엔진명 prefix 추가.
+        - B4: switch_engine / switch_ai_engine 호출이 메모리 _current_name 만
+              변경하고 settings.json 영구 저장 X — 재시작 시 gemini_cli 로 회귀.
+              호출 사이트 4곳 (legacy main_window 콤보 / ui_v2 헤더 콤보 /
+              명령 팔레트 / onboarding wizard) 모두 ai.selected 를 persist.
+        """
+        import inspect
+
+        # ── B1 ─────────────────────────────────────────────────────────
+        from ui import ai_call_handler
+
+        ach_src = inspect.getsource(ai_call_handler)
+        self.assert_true(
+            "current_engine" not in ach_src,
+            "[B1] ai_call_handler 에 'current_engine' 잔존 — get_current_name() 으로 정정 필요",
+        )
+        self.assert_true(
+            "get_current_name" in ach_src,
+            "[B1] ai_call_handler 가 mw.ai_engine.get_current_name() 으로 엔진명 조회 필수",
+        )
+
+        # ── B2 ─────────────────────────────────────────────────────────
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        send_src = inspect.getsource(MainWindowV2._send_request)
+        self.assert_true(
+            "get_ai_engine_name" in send_src and "엔진:" in send_src,
+            "[B2] ui_v2 _send_request 의 step_done 메시지에 엔진명 prefix 필수",
+        )
+
+        # ── B4 — legacy main_window ───────────────────────────────────
+        from ui.main_window import MainWindow
+
+        legacy_src = inspect.getsource(MainWindow._on_ai_engine_changed)
+        self.assert_true(
+            'setdefault("ai"' in legacy_src and "_save_settings" in legacy_src,
+            "[B4-a] legacy _on_ai_engine_changed 가 settings['ai']['selected'] 저장 + _save_settings 호출 필수",
+        )
+
+        # ── B4 — ui_v2 헤더 콤보 / 팔레트 / onboarding ─────────────────
+        self.assert_true(
+            hasattr(MainWindowV2, "_persist_engine_choice"),
+            "[B4-b] ui_v2 에 _persist_engine_choice 헬퍼 메서드 필수",
+        )
+
+        helper_src = inspect.getsource(MainWindowV2._persist_engine_choice)
+        self.assert_true(
+            'setdefault("ai"' in helper_src and "_save_settings" in helper_src,
+            "[B4-b] _persist_engine_choice 가 settings.ai.selected 영구 저장 필수",
+        )
+
+        on_changed_src = inspect.getsource(MainWindowV2._on_engine_changed)
+        self.assert_true(
+            "_persist_engine_choice" in on_changed_src,
+            "[B4-b] ui_v2 _on_engine_changed (헤더 콤보) 가 _persist_engine_choice 호출 필수",
+        )
+
+        palette_src = inspect.getsource(MainWindowV2._switch_ai_engine_from_palette)
+        self.assert_true(
+            "_persist_engine_choice" in palette_src,
+            "[B4-c] ui_v2 _switch_ai_engine_from_palette (명령 팔레트) 가 _persist_engine_choice 호출 필수",
+        )
+
+        # onboarding path — _maybe_show_onboarding 안에 ai.selected 영구 저장 패턴
+        onboard_src = inspect.getsource(MainWindowV2._maybe_show_onboarding)
+        self.assert_true(
+            'setdefault("ai"' in onboard_src and "selected_engine" in onboard_src,
+            "[B4-d] ui_v2 onboarding wizard 적용 시 settings['ai']['selected'] 도 함께 저장 필수",
+        )
+
+    def test_89_ui_v2_console_visibility_from_settings(self):
+        """[Phase 1.8 P4] ui_v2 콘솔 패널이 settings.ui.console_visible 값 따름.
+
+        이전엔 hardcoded hide() — 사용자가 Ctrl+` 모르면 AI 응답 메타
+        (엔진/토큰/시간) 를 화면에서 볼 수 없었음. settings 의 console_visible
+        값을 초기 상태로 반영 + _toggle_console 시 settings.json 영구 저장.
+
+        가드:
+        1. __init__ 가 self._load_settings() 후 ui.console_visible 로 _console_visible 초기화
+        2. _build_console_panel 이 setVisible(self._console_visible) 호출 (hardcoded hide() 금지)
+        3. _toggle_console 가 settings.json 에 영구 저장
+        """
+        import inspect
+
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        init_src = inspect.getsource(MainWindowV2.__init__)
+        self.assert_true(
+            "console_visible" in init_src and "_load_settings" in init_src,
+            "[P4] __init__ 가 settings.ui.console_visible 로 _console_visible 초기화 필수",
+        )
+
+        build_src = inspect.getsource(MainWindowV2._build_console_panel)
+        self.assert_true(
+            "self._console_visible" in build_src and "setVisible" in build_src,
+            "[P4] _build_console_panel 이 setVisible(self._console_visible) 호출 필수",
+        )
+        self.assert_true(
+            ".hide()" not in build_src,
+            "[P4] _build_console_panel 에서 hardcoded .hide() 금지 — setVisible 만 사용",
+        )
+
+        toggle_src = inspect.getsource(MainWindowV2._toggle_console)
+        self.assert_true(
+            "_save_settings" in toggle_src and "console_visible" in toggle_src,
+            "[P4] _toggle_console 가 settings.console_visible 영구 저장 필수",
+        )
+
+    def test_90_prompt_builder_injects_system_context(self):
+        """[Phase 1.8 P1a] build_step_prompt 출력에 system_context 가 inject 되어야 한다.
+
+        이전 갭: prompt_builder 가 self.system_context 보유만 하고 build_step_prompt
+        의 출력 (parts join) 에 append 하지 않음 — prompts.json 의 12K+ chars
+        모든 RPA 가이드 (idempotent driver, jupyter, UWP wait, pyautogui PRIMARY,
+        title_re, Text→부모 promote 등) 가 어떤 모델에도 도달조차 안 함.
+
+        P1a fix: parts 의 [0] 위치에 self.system_context prepend. 사용자 요청 [1]
+        보다 더 앞. 단일 string 유지 (어댑터 변경 X).
+
+        가드:
+        1. system_context 보유 시 prompt 출력에 그 텍스트 포함
+        2. 빈 system_context (template 미설정) 면 inject X — fail-safe
+        3. inject 위치가 사용자 요청보다 앞 (최상단)
+        """
+        from core.prompt_builder import PromptBuilder
+
+        # 보유 시 inject 검증
+        builder = PromptBuilder(
+            prompts_config={
+                "system_context": "## 핵심 시스템 가이드 SENTINEL_X9Q\n반드시 try/except 사용",
+            }
+        )
+
+        class _DummySession:
+            steps: list = []
+            project_type = "desktop"
+
+        prompt = builder.build_step_prompt(
+            session=_DummySession(),
+            user_request="메모장 실행",
+        )
+        self.assert_true(
+            "SENTINEL_X9Q" in prompt,
+            "[P1a] build_step_prompt 출력에 system_context 의 본문 포함 필수",
+        )
+
+        # 위치 검증 — system_context 가 사용자 요청보다 앞
+        sc_pos = prompt.find("SENTINEL_X9Q")
+        ur_pos = prompt.find("메모장 실행")
+        self.assert_true(
+            sc_pos >= 0 and ur_pos >= 0 and sc_pos < ur_pos,
+            f"[P1a] system_context 는 사용자 요청보다 앞에 위치 필수 (sc={sc_pos}, ur={ur_pos})",
+        )
+
+        # 빈 system_context fail-safe
+        empty_builder = PromptBuilder(prompts_config={"system_context": ""})
+        empty_prompt = empty_builder.build_step_prompt(
+            session=_DummySession(), user_request="테스트"
+        )
+        self.assert_true(
+            "테스트" in empty_prompt,
+            "[P1a] 빈 system_context 일 때도 prompt 정상 생성",
+        )
+
+    def test_91_system_role_split_through_stack(self):
+        """[Phase 1.8 P1b] system role 분리가 stack 전체를 통과한다.
+
+        OpenAI 호환 어댑터 (DeepSeek/Groq 등) 가 system role 메시지를 user 와
+        분리해서 받으면 attention 강화로 가이드를 더 강하게 따른다. P1a 의
+        단일 string prepend 보다 best practice. Gemini CLI 는 system role path
+        없으니 prompt 앞에 prepend (P1a 와 동일 결과).
+
+        가드:
+        1. PromptBuilder.build_step_prompt_split 가 (system_text, user_text) 튜플 반환
+        2. system_text 에 prompts.json 의 system_context 본문 (sentinel) 포함
+        3. user_text 에 system_context sentinel 미포함 (분리 검증)
+        4. BaseAIAdapter.generate 시그니처에 system 인자 존재
+        5. OpenAICompatAdapter._generate_sync 가 system 있으면 messages 첫 항목에
+           system role 로 추가
+        6. AIEngineManager.generate 가 system 인자 통과
+        7. AppService.generate_step 가 split 호출 후 어댑터에 system 전달
+        """
+        import inspect
+
+        from core.adapters.base_adapter import BaseAIAdapter
+        from core.adapters.openai_compat_adapter import OpenAICompatAdapter
+        from core.ai_engine import AIEngineManager
+        from core.app_service import AppService
+        from core.prompt_builder import PromptBuilder
+
+        # 1~3: split 메서드 + system_text/user_text 분리
+        builder = PromptBuilder(
+            prompts_config={
+                "system_context": "## SENTINEL_SPLIT_X9Q 가이드 본문",
+            }
+        )
+
+        class _DummySession:
+            steps: list = []
+            project_type = "desktop"
+
+        result = builder.build_step_prompt_split(
+            session=_DummySession(), user_request="테스트 요청"
+        )
+        self.assert_true(
+            isinstance(result, tuple) and len(result) == 2,
+            "[P1b] build_step_prompt_split 가 (system, user) 튜플 반환 필수",
+        )
+        system_text, user_text = result
+        self.assert_true(
+            "SENTINEL_SPLIT_X9Q" in system_text,
+            "[P1b] system_text 에 system_context 본문 포함 필수",
+        )
+        self.assert_true(
+            "SENTINEL_SPLIT_X9Q" not in user_text,
+            "[P1b] user_text 에서 system_context 분리 필수 (중복 inject 방지)",
+        )
+        self.assert_true(
+            "테스트 요청" in user_text,
+            "[P1b] user_text 에 사용자 요청 포함 필수",
+        )
+
+        # 4: base_adapter 시그니처
+        sig = inspect.signature(BaseAIAdapter.generate)
+        self.assert_true(
+            "system" in sig.parameters,
+            "[P1b] BaseAIAdapter.generate 시그니처에 system 인자 필수",
+        )
+
+        # 5: OpenAI compat 의 messages 분리
+        oc_sync_src = inspect.getsource(OpenAICompatAdapter._generate_sync)
+        self.assert_true(
+            '"role": "system"' in oc_sync_src,
+            "[P1b] OpenAICompatAdapter._generate_sync 가 system role messages 분리 필수",
+        )
+
+        # 6: AIEngineManager 통과
+        mgr_src = inspect.getsource(AIEngineManager.generate)
+        self.assert_true(
+            "system=system" in mgr_src or "system=" in mgr_src,
+            "[P1b] AIEngineManager.generate 가 system 인자를 어댑터에 통과 필수",
+        )
+
+        # 7: AppService.generate_step 가 split 호출
+        gs_src = inspect.getsource(AppService.generate_step)
+        self.assert_true(
+            "build_step_prompt_split" in gs_src and "system=" in gs_src,
+            "[P1b] AppService.generate_step 가 split 호출 + 어댑터에 system 전달 필수",
+        )
+
+    def test_92_prompts_system_context_hardened(self):
+        """[Phase 1.8 P3] prompts.json system_context 의 try/except 강제 + import
+        위치 강제 가이드 강화.
+
+        P1a + P1b 로 system_context 가 모델에 정상 도달하게 된 후, 본문 자체의
+        가이드를 강화하여 DeepSeek 등 OpenAI 호환 모델에서 step 본문 안 import
+        + try/except 누락 회귀 방지.
+
+        가드:
+        1. system_context 에 'try/except 강제' 어휘 + '예외 없음' 강조 존재
+        2. system_context 에 'import 위치 강제' + '코드의 가장 최상단' 표현 존재
+        3. system_context 에 'step 본문 안에 import' 금지 어휘 존재
+        """
+        import json
+        from pathlib import Path
+
+        prompts_path = Path(__file__).parent.parent / "config" / "prompts.json"
+        prompts = json.loads(prompts_path.read_text(encoding="utf-8"))
+        sys_ctx = prompts.get("system_context", "")
+
+        self.assert_true(
+            "try/except 강제" in sys_ctx and "예외 없음" in sys_ctx,
+            "[P3] system_context 에 'try/except 강제 (예외 없음)' 어휘 필수",
+        )
+        self.assert_true(
+            "import 위치 강제" in sys_ctx and "가장 최상단" in sys_ctx,
+            "[P3] system_context 에 'import 위치 강제' + '가장 최상단' 표현 필수",
+        )
+        self.assert_true(
+            "step 본문" in sys_ctx and "import" in sys_ctx,
+            "[P3] system_context 에 'step 본문 안에 import 금지' 가이드 필수",
+        )
+
+    def test_93_system_context_element_promote_explicit(self):
+        """[Phase 1.8 G1] system_context #17 가 element 를 직접 찾는 단계를 명시.
+
+        직전 세션 (5/9) Step 3 회귀: DeepSeek 가 system_context #17 의 walk-up
+        예제만 복사 → `click_target = element` 단계에서 NameError 발생.
+        Root cause: 기존 #17 예제는 `element` 변수가 자동 주입된다는 잘못된 가정.
+        ohdo 의 흐름은 element 정보를 prompt 의 element_context 에 텍스트로만
+        전달하고 코드는 `win.child_window(...)` 로 직접 찾아야 함.
+
+        G1 fix: #17 본문에 다음 명시:
+        1. "변수 자동 주입 X" / "element 를 코드 안에서 직접 찾으세요"
+        2. element_context 의 auto_id / control_type 으로 win.child_window 호출 예제
+        3. NameError: name 'element' is not defined 회귀 사례 인용
+        """
+        import json
+        from pathlib import Path
+
+        prompts_path = Path(__file__).parent.parent / "config" / "prompts.json"
+        prompts = json.loads(prompts_path.read_text(encoding="utf-8"))
+        sys_ctx = prompts.get("system_context", "")
+
+        self.assert_true(
+            "변수 자동 주입 X" in sys_ctx,
+            "[G1] system_context 에 'element 변수 자동 주입 X' 명시 필수",
+        )
+        self.assert_true(
+            "element 를 코드 안에서 직접 찾으세요" in sys_ctx,
+            "[G1] system_context 에 'element 를 직접 찾으세요' 어휘 필수",
+        )
+        self.assert_true(
+            "element_context 의 auto_id" in sys_ctx and "win.child_window" in sys_ctx,
+            "[G1] system_context 에 'win.child_window 로 element_context 의 auto_id 사용' 패턴 필수",
+        )
+        # 회귀 사례 인용 — DeepSeek 의 NameError 패턴
+        self.assert_true(
+            "NameError" in sys_ctx and ("'element'" in sys_ctx or "'click_target'" in sys_ctx),
+            "[G1] system_context 에 NameError 회귀 사례 (element/click_target) 인용 필수",
+        )
+
+    def test_94_library_block_essential_imports_prepended(self):
+        """[Phase 1.8 G5] extract_library_block 이 핵심 패키지 자동 prepend.
+
+        DeepSeek 등이 step_imports 에 pyautogui / pyperclip 누락 시 step 본문에서
+        NameError 회귀 (5/9 v2-새세션-150447 step 2/3). 핵심 패키지를 library
+        block 에 강제 inject — step 본문 안 import 없어도 사용 가능.
+        """
+        from core.workflow_engine import _ensure_essential_imports
+
+        # 빈 block — 핵심 5개 import 가 모두 들어감
+        result = _ensure_essential_imports("")
+        for mod in ("pyautogui", "pyperclip", "ctypes", "time", "subprocess"):
+            self.assert_true(
+                f"import {mod}" in result,
+                f"[G5] 빈 library block 에 'import {mod}' prepend 필수",
+            )
+
+        # 일부만 있는 block — 누락된 것만 prepend
+        partial = "import time\nfrom pywinauto import Application"
+        merged = _ensure_essential_imports(partial)
+        self.assert_true(
+            "import pyautogui" in merged and "import pyperclip" in merged,
+            "[G5] 누락된 핵심 import 만 prepend",
+        )
+        self.assert_true(
+            merged.count("import time") == 1,
+            "[G5] 이미 있는 'import time' 중복 prepend 금지",
+        )
+
+        # from-style 도 인식 — 'from pyautogui import X' 있으면 'import pyautogui' 안 prepend
+        from_style = "from pyautogui import click\nimport time"
+        merged2 = _ensure_essential_imports(from_style)
+        self.assert_true(
+            "import pyautogui" not in merged2,
+            "[G5] 'from pyautogui import ...' 이미 있으면 'import pyautogui' 중복 prepend 금지",
+        )
+
+    def test_95_element_context_guide_enforces_template(self):
+        """[Phase 1.8 G2] prompt_builder 의 element_context 가이드가 템플릿
+        강제 사용 어휘 포함.
+
+        이전 가이드: "참고하되 ... 수정하세요" — 너무 약해서 DeepSeek 가 무시
+        하고 짧은 자체 코드 작성 → element/click_target/pyautogui 누락 회귀.
+        G2 fix: "그대로 시작 코드로 사용" + "자체적으로 element 변수 다시 만들지
+        마세요" + 회귀 사례 인용으로 강제력 ↑.
+        """
+        import inspect
+
+        from core.prompt_builder import PromptBuilder
+
+        src = inspect.getsource(PromptBuilder._build_step_prompt_parts)
+        self.assert_true(
+            "그대로 시작 코드로 사용" in src,
+            "[G2] element_context 가이드에 '그대로 시작 코드로 사용' 강제 어휘 필수",
+        )
+        self.assert_true(
+            "자체적으로 element 변수를 다시 만들지 마세요" in src,
+            "[G2] element_context 가이드에 'element 변수 자체 정의 금지' 명시 필수",
+        )
+        self.assert_true(
+            "click_target' is not defined" in src,
+            "[G2] 회귀 사례 (click_target NameError) 인용 필수",
+        )
+
+    def test_96_element_template_no_import_lines(self):
+        """[Phase 1.8 G2.5] win_inspector 의 element_context 코드 템플릿이
+        import 라인을 포함하지 않는다.
+
+        이전 갭: AI 가 element_context 의 ready-to-use 템플릿을 그대로 사용
+        하면서 마커 안에 `import ctypes` / `import pyautogui` 등이 들어감 →
+        extract_imports 가 step 1 의 상단 import 만 추출 → step 2/3 의
+        step_imports = []. P3 #5 (import 위치 강제) 위반.
+
+        G2.5 fix: win_inspector 의 desktop / owner-drawn 템플릿에서 import
+        라인 제거. G5 의 _ENSENTIAL_LIBRARY_IMPORTS 가 라이브러리 블럭에 핵심
+        패키지 자동 prepend.
+
+        가드:
+        1. desktop element 템플릿 (_get_desktop_element_info_text) 에 'import
+           ctypes' / 'import pyautogui' / 'from pywinauto import Application'
+           lines.append 호출 0건
+        2. owner-drawn 템플릿 (_get_owner_drawn_element_info_text) 동일
+        3. _ESSENTIAL_LIBRARY_IMPORTS 에 ctypes.wintypes + Application 포함
+        """
+        import inspect
+
+        from core.win_inspector import WindowInspector
+        from core.workflow_engine import _ESSENTIAL_LIBRARY_IMPORTS
+
+        # 1) desktop 템플릿 — import 5종 제거 검증
+        desktop_src = inspect.getsource(WindowInspector._get_desktop_element_info_text)
+        for forbidden in (
+            'lines.append("import ctypes")',
+            'lines.append("import ctypes.wintypes")',
+            'lines.append("import time")',
+            'lines.append("import pyautogui")',
+            'lines.append("from pywinauto import Application")',
+        ):
+            self.assert_true(
+                forbidden not in desktop_src,
+                f"[G2.5] desktop 템플릿에서 '{forbidden}' 제거 필수 (라이브러리 블럭이 처리)",
+            )
+
+        # 2) owner-drawn 템플릿
+        ownerdrawn_src = inspect.getsource(WindowInspector._get_owner_drawn_element_info_text)
+        for forbidden in (
+            'lines.append("import ctypes")',
+            'lines.append("import pyautogui")',
+        ):
+            self.assert_true(
+                forbidden not in ownerdrawn_src,
+                f"[G2.5] owner-drawn 템플릿에서 '{forbidden}' 제거 필수",
+            )
+
+        # 3) library 블럭 essential imports 보강
+        self.assert_true(
+            "import ctypes.wintypes" in _ESSENTIAL_LIBRARY_IMPORTS,
+            "[G2.5] _ESSENTIAL_LIBRARY_IMPORTS 에 'import ctypes.wintypes' 필수",
+        )
+        self.assert_true(
+            "from pywinauto import Application" in _ESSENTIAL_LIBRARY_IMPORTS,
+            "[G2.5] _ESSENTIAL_LIBRARY_IMPORTS 에 'from pywinauto import Application' 필수",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 

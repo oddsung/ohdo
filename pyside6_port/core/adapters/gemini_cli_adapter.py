@@ -64,12 +64,24 @@ class GeminiCLIAdapter(BaseAIAdapter):
         """gemini 명령어가 시스템 PATH에 존재하는지 확인합니다."""
         return shutil.which(self.command) is not None
 
-    async def generate(self, prompt: str, images: Optional[list[str]] = None) -> AIResponse:
+    async def generate(
+        self,
+        prompt: str,
+        images: Optional[list[str]] = None,
+        system: Optional[str] = None,
+    ) -> AIResponse:
         """
         Gemini CLI를 통해 프롬프트를 전송하고 응답을 받습니다.
+
+        P1b: Gemini CLI 는 system role 분리 path 가 없음 (stdin 단일 입력).
+        system 있으면 prompt 앞에 prepend 하여 동일 효과 — P1a 의 prompt_builder
+        prepend 와 결과 동일.
         """
         self._cancelled = False
         start_time = time.time()
+        # P1b: system 있으면 prompt 앞에 prepend (CLI 가 role 분리 미지원)
+        if system:
+            prompt = system + "\n\n" + prompt
 
         gemini_exec = shutil.which(self.command)
         if not gemini_exec:

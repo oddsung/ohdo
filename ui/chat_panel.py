@@ -19,7 +19,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.win_inspector import format_element_label
+# UI-Core 분리 (Phase 1.2 Chunk B): core.app_service 단일 진입점 경유.
+from core.app_service import format_element_label
 
 
 class ElementChip(QFrame):

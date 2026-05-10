@@ -1024,7 +1024,7 @@ class ScenariosTest(TestCase):
                     )
                 )
 
-            async def generate(self, prompt, images=None):
+            async def generate(self, prompt, images=None, system=None):
                 return self._responses.pop(0)
 
             def cancel(self):
@@ -1142,7 +1142,7 @@ class ScenariosTest(TestCase):
                     )
                 )
 
-            async def generate(self, prompt, images=None):
+            async def generate(self, prompt, images=None, system=None):
                 return self._r.pop(0)
 
             def cancel(self):
@@ -1547,7 +1547,7 @@ class ScenariosTest(TestCase):
                     )
                 )
 
-            async def generate(self, prompt, images=None):
+            async def generate(self, prompt, images=None, system=None):
                 return self._r.pop(0)
 
             def cancel(self):
@@ -2119,8 +2119,13 @@ class ScenariosTest(TestCase):
                 captured.update(kwargs)
                 return "mock prompt"
 
+            def build_step_prompt_split(self, **kwargs):
+                # P1b: app_service 가 split 호출 — mock 도 동일 시그니처 필요
+                captured.update(kwargs)
+                return ("", "mock prompt")
+
         class MockAI:
-            async def generate(self, prompt, images=None):
+            async def generate(self, prompt, images=None, system=None):
                 return AIResponse(
                     text="ok",
                     code="print('hi')",
@@ -2499,9 +2504,13 @@ class ScenariosTest(TestCase):
                     else ""
                 )
                 if new_step1_sc.strip():
+                    # G5 (5/9): library_block 이 핵심 import (pyautogui/pyperclip 등) 를
+                    # 자동 prepend 하므로 generated_code 시작이 library_block. step1 의
+                    # step_code 첫 라인은 그 다음에 위치 — startswith 대신 포함 검증.
+                    first_line = new_step1_sc.split("\n")[0]
                     self.assert_true(
-                        gc.startswith(new_step1_sc.split("\n")[0]),
-                        f"누적 chain: 새 step {i + 1}.generated_code 가 새 step1 으로 시작 필수",
+                        first_line in gc,
+                        f"누적 chain: 새 step {i + 1}.generated_code 에 새 step1 첫 라인 포함 필수",
                     )
 
             # 같은 위치 이동 시 no-op
@@ -3074,7 +3083,7 @@ class ScenariosTest(TestCase):
             def __init__(self):
                 self.calls = []
 
-            async def generate(self, prompt, images=None):
+            async def generate(self, prompt, images=None, system=None):
                 self.calls.append({"prompt": prompt, "images": images})
                 return AIResponse(
                     text="간단한 print 문 만들기",
@@ -3131,7 +3140,7 @@ class ScenariosTest(TestCase):
         from core.storage.local_json import LocalJsonRepository
 
         class FailingAIManager:
-            async def generate(self, prompt, images=None):
+            async def generate(self, prompt, images=None, system=None):
                 return AIResponse(
                     success=False,
                     error="rate limit exceeded",

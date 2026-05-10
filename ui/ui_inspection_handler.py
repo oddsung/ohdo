@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMessageBox
 
-from core.win_inspector import format_element_label
+# UI-Core 분리 (Phase 1.2 Chunk B): core.app_service 단일 진입점 경유.
+from core.app_service import format_element_label
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow

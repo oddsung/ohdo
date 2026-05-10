@@ -849,21 +849,66 @@ def extract_library_block(session) -> str:
 
     라이브러리 블럭 = '# === Step 1:' 마커 이전의 모든 코드
     (imports + DPI 설정 + 헬퍼 함수 등)
+
+    G5 (5/9): AI 가 step_imports 에 핵심 패키지 (pyautogui / pyperclip / ctypes /
+    time / subprocess) 누락 시 step 본문 안에서 NameError. extract 후 누락된
+    핵심 import 를 자동 prepend — 모든 step 이 step_imports 비어있어도 사용 가능.
     """
     if not session.steps:
         return ""
     last_step = session.steps[-1]
     code = last_step.get("generated_code", "") if isinstance(last_step, dict) else ""
     if not code:
-        return ""
-    match = re.search(r"^# === Step 1:", code, re.MULTILINE)
-    if match:
-        return code[: match.start()].strip()
-    # Step 1 마커가 없으면 imports 라인만 추출
-    import_lines = [
-        ln for ln in code.splitlines() if ln.startswith("import ") or ln.startswith("from ")
-    ]
-    return "\n".join(import_lines)
+        block = ""
+    else:
+        match = re.search(r"^# === Step 1:", code, re.MULTILINE)
+        if match:
+            block = code[: match.start()].strip()
+        else:
+            # Step 1 마커가 없으면 imports 라인만 추출
+            import_lines = [
+                ln for ln in code.splitlines() if ln.startswith("import ") or ln.startswith("from ")
+            ]
+            block = "\n".join(import_lines)
+    return _ensure_essential_imports(block)
+
+
+# G5: 모든 step 이 사용할 수 있어야 하는 핵심 패키지. AI 가 누락해도 library
+# 블럭에서 미리 import 되어 step 본문 안에서 NameError 회피. 5/9 회귀:
+# DeepSeek 가 step_code 안에 pyautogui.click 호출 + step_imports [] → NameError.
+# G2.5 (5/9): ctypes.wintypes + pywinauto.Application 추가 — element_context
+# 코드 템플릿에서 import 라인 제거 후 누락 회피.
+_ESSENTIAL_LIBRARY_IMPORTS = (
+    "import time",
+    "import subprocess",
+    "import ctypes",
+    "import ctypes.wintypes",
+    "import pyautogui",
+    "import pyperclip",
+    "from pywinauto import Application",
+)
+
+
+def _ensure_essential_imports(library_block: str) -> str:
+    """library_block 에 핵심 패키지가 없으면 prepend."""
+    missing = []
+    for imp in _ESSENTIAL_LIBRARY_IMPORTS:
+        # 모듈명 추출 (예: 'import pyautogui' → 'pyautogui')
+        mod = imp.split()[-1]
+        # 이미 'import pyautogui' 또는 'from pyautogui ...' 가 있으면 skip
+        if re.search(
+            rf"^\s*(?:import\s+{re.escape(mod)}\b|from\s+{re.escape(mod)}\b)",
+            library_block,
+            re.MULTILINE,
+        ):
+            continue
+        missing.append(imp)
+    if not missing:
+        return library_block
+    prefix = "\n".join(missing)
+    if not library_block.strip():
+        return prefix
+    return prefix + "\n" + library_block
 
 
 def _is_compilable(code: str) -> bool:

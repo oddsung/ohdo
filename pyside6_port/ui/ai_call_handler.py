@@ -23,8 +23,14 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QMessageBox
 
-from core.session_manager import Step
-from core.win_inspector import format_element_label
+# UI-Core 분리 (Phase 1.2 Chunk B): core.app_service 단일 진입점 경유.
+from core.app_service import (
+    Step,
+    extract_code_delta,
+    extract_import_delta,
+    extract_imports,
+    format_element_label,
+)
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -184,8 +190,8 @@ class AICallHandler:
             code=response.get("code", ""),
             tokens_used=response.get("tokens_used", 0),
             response_time_ms=response.get("response_time_ms", 0),
-            ai_engine=mw.ai_engine.current_engine
-            if hasattr(mw.ai_engine, "current_engine")
+            ai_engine=mw.ai_engine.get_current_name()
+            if hasattr(mw.ai_engine, "get_current_name")
             else "",
             has_images=bool(data.get("images")),
             element_info=element_info,
@@ -231,8 +237,8 @@ class AICallHandler:
         recorded_message = data.get("display_message", data["user_message"])
         # import/코드 분리
         full_code = response.get("code", "")
-        from core.import_manager import extract_code_delta, extract_import_delta, extract_imports
-
+        # extract_code_delta / extract_import_delta / extract_imports 는 모듈 상단에서
+        # core.app_service 경유 import.
         separated_imports, separated_body = extract_imports(full_code)
 
         # 이전 스텝의 누적 코드에서 이번 스텝에서 새로 추가된 부분만 추출

@@ -70,6 +70,17 @@ step?_*.txt
 *.tmp
 *.temp
 .cache/
+
+# Secrets / credentials (broad guard — 공개 직전 추가, 5/9)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+*.pfx
+*credentials*
+*secret*
 # 디버깅·대화 로그 (ohdo 가 generate_step 마다 prompt+code 를 tmp/conversations/ 에 저장)
 tmp/
 

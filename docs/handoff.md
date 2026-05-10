@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-08 (5/4~5/8 작업 — 자세한 변경은 §5 변경 이력 + §11/§12/§13 인계 노트 참조). baseline: **core 77/77 + scenarios 72/72 그린**. **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer.
+> 마지막 업데이트: 2026-05-10 (5/4~5/10 작업 — 자세한 변경은 §5 변경 이력 + §11/§12/§13/§14/§15/§16 인계 노트 참조). baseline: **core 96/96 + scenarios 73/73 그린**. **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B (settings dialog Test connection + reload_ai), B1+B2+B4 (current_engine 속성명 fix + ui_v2 step_done 메타 + ai.selected persist), P4 (콘솔 가시성 settings 따름), P1a/P1b/P3 (system_context 가 prompt 에 inject + system role 분리 + 가이드 #3/#5 강화), G1/G2/G2.5 (element_context 템플릿 + element 변수 자동 정의 명시 + import 라인 제거), G5 (library 블럭 essential imports prepend) — 11 unit, test_86~96 회귀 가드. baseline 85→96 (+11 guards). 자세한 §16.
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -708,21 +708,240 @@ async def get_session(sid: str):
 ### Phase 1 진행 체크리스트 (ROADMAP §3 Phase 1)
 
 - [x] (1) 저장소 추상화 `core/storage/` — 5/8 완료
-- [ ] (2) UI-Core 완전 분리 — **Chunk A 완료** (ui_v2). Chunk B (ui/ legacy) 만 남음
+- [x] (2) UI-Core 완전 분리 — **Chunk A (5/8 ui_v2) + Chunk B (5/9 ui/ legacy) 모두 완료**
 - [x] (3) Pydantic 모델 승격 — 5/8 완료 (parallel 모델 + 변환 helper)
 - [x] (4) 설정 레이어 분리 — 5/8 완료
 - [x] (5) Agent 브리지 스켈레톤 — 5/8 완료
 
-**Phase 1 진행률: 4/5 + Chunk A 부분** — Chunk B (ui/ legacy 정리) 만 남으면 Phase 1 완료. Phase 2 진입 직전 [docs/commercial_review.md](commercial_review.md) 재독 필수.
+**Phase 1 진행률: 5/5 (100% 완료)** — Phase 2 진입 직전 [docs/commercial_review.md](commercial_review.md) 재독 필수. 자세한 Chunk B 변경 내역은 §14 참조.
 
 ### 다음 작업 후보
-- **Phase 1 sub-task 2 Chunk B (ui/ legacy 정리)** — Phase 1 의 마지막 핵심. ui/main_window.py 7 import + handler 들 정리 → main_window.py 1649 → 600줄 축소가 stretch goal. multi-step 분할 권장.
+- **main_window.py 줄수 축소 (stretch)** — 1304 → 600줄대. handler 추가 분해 (Step 5+). KPI 무관, 별도 결정.
 - **structlog + Sentry SDK** (ROADMAP Phase 0 후반) — observability layer
 - **§7-10**: AI 자동 에러 복구 — 사용자 보류 중
+- **Phase 2 진입** — commercial_review.md 재독 + GO/NO-GO 게이트 통과 후 결정
 
 ### ⚠️ Phase 2 (SaaS 백엔드) 진입 직전 필독 문서
 
 [docs/commercial_review.md](commercial_review.md) — 5/8 작성. ohdo 의 상업적 경쟁력 정직 진단 + Computer Use / UiPath / 기타 RPA 와의 비교 + GO/NO-GO 게이트 제안. **Phase 1 완료 직후 / Phase 2 진입 결정 전 반드시 재독.** Phase 1 까지는 어느 시나리오든 가치 있어 진행 OK.
+
+## 14. 5/9 Phase 1 sub-task 2 Chunk B — UI-Core 완전 분리 (ui/ legacy)
+
+**컨텍스트**: ROADMAP §3 Phase 1 (2) KPI: "ui/ 폴더에서 session_manager · workflow_engine · ai_engine 직접 import 0건" 의 Chunk B (ui/ legacy 정리). 5/8 의 Chunk A (ui_v2) 와 합쳐 KPI 100% 충족. 3 sub-step 으로 분할 진행 — AppService 보강 → main_window 정리 → handler/panel 정리.
+
+### Sub-step 1 (5/9) — AppService 인터페이스 보강
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| 클래스 re-export 추가: `AIEngineManager / WorkflowEngine / PromptBuilder / WindowInspector / CodeSandbox` | [core/app_service.py](../core/app_service.py) `__all__` + 모듈 상단 eager import | UI 가 type hint / 인스턴스 보유 / 생성 시 모두 `from core.app_service import` 만 |
+| 상수 re-export 추가: `INITIAL_BLOCK_STEP_ID / LIBRARY_BLOCK_STEP_ID` | (위 파일) | block_execution_handler 에서 사용 |
+| pure 함수 re-export 추가: `extract_imports / merge_imports / extract_code_delta / extract_import_delta / extract_initial_block / extract_library_block / extract_step_delta_code / format_element_label` | (위 파일) | UI 가 pure 함수 직접 호출하는 사이트 모두 cover |
+| `workflow_engine` property + `set_workflow_engine(engine)` setter | (위 파일) | 외부에서 settings (`step_delay_ms` / `visual_feedback_enabled`) 반영 인스턴스 주입 가능 |
+| `prompt_builder` property + `set_prompt_builder(builder)` setter + `__init__(prompt_builder=)` 인자 | (위 파일) | 외부 prompts.json 주입 + lazy 생성 fallback |
+| test_83 (Chunk B 인터페이스 가드 — 클래스/상수/함수 re-export + property/setter contract) 추가 | [tests/test_core.py](../tests/test_core.py) | 회귀 가드 |
+
+**검증**: core 83/83 ✅ + scenarios 73/73 ✅ + ruff 0 issue + format 0 diff + PySide6 sync.
+
+### Sub-step 2 (5/9) — ui/main_window.py banned import 정리
+
+**Option A (보수)** 채택: import 만 정리하고 `self.session_manager / self.ai_engine / self.prompt_builder / self.workflow_engine` alias attributes 보존 (handler / code_viewer 등 산재된 호출 사이트 보호). KPI 는 import 만 측정하므로 충족.
+
+| 변경 | 위치 |
+|---|---|
+| 모듈 상단 7 banned `from core.* import` (ai_engine / execution_kernel / import_manager / prompt_builder / session_manager / win_inspector / workflow_engine) → `from core.app_service import (...)` 단일 진입점 | [ui/main_window.py:47-66](../ui/main_window.py#L47-L66) |
+| 함수 내부 `from core.import_manager import` 2 곳 (line 993 / 1052) 제거 — 모듈 상단에서 이미 import | (위 파일) |
+| `__init__` 의 `self.session_manager = SessionManager()` / `self.ai_engine = AIEngineManager(...)` / `self.prompt_builder = PromptBuilder(...)` / `self.workflow_engine = WorkflowEngine(...)` 4개 인스턴스화 → `self.app_service = AppService.create_default(data_dir=..., settings=...)` + `set_workflow_engine(...)` + `set_prompt_builder(...)` 후 alias 4개 (`self.session_manager = self.app_service.repo.manager` 등) | (위 파일 line 100-123) |
+| test_84 (main_window 의 banned core import 0건 + `from core.app_service import` 단일 진입점 가드) 추가 | [tests/test_core.py](../tests/test_core.py) |
+
+**검증**: core 84/84 ✅.
+
+### Sub-step 3 (5/9) — handler / chat_panel / ui_inspection_handler 정리
+
+| 변경 | 위치 |
+|---|---|
+| `ui/ai_call_handler.py` — 모듈 상단 2 banned (`session_manager.Step` + `win_inspector.format_element_label`) + 함수 내부 1 (`import_manager.*` 3 함수) → `from core.app_service import (Step, extract_code_delta, extract_import_delta, extract_imports, format_element_label)` 단일 진입점 | [ui/ai_call_handler.py](../ui/ai_call_handler.py) |
+| `ui/block_execution_handler.py` — 모듈 상단 2 banned (`execution_kernel.{INITIAL_BLOCK_STEP_ID, LIBRARY_BLOCK_STEP_ID, ExecutionKernel}` + `workflow_engine.{CodeSandbox, extract_library_block}`) → 단일 진입점 | [ui/block_execution_handler.py](../ui/block_execution_handler.py) |
+| `ui/chat_panel.py` + `ui/ui_inspection_handler.py` — `win_inspector.format_element_label` → app_service 경유 | [ui/chat_panel.py](../ui/chat_panel.py), [ui/ui_inspection_handler.py](../ui/ui_inspection_handler.py) |
+| test_85 (ui/ 폴더 전체 banned core import 0건 가드) 추가 — test_80 (ui_v2) + test_84 (main_window) 의 영역을 ui/*.py 전체로 확장 | [tests/test_core.py](../tests/test_core.py) |
+
+**검증**: core 85/85 ✅ + scenarios 73/73 ✅ + ruff 0 issue + format 0 diff (`tests/test_core.py` 두 개 reformat 적용 후) + PySide6 port 7 파일 sync (cp + sed `PyQt6→PySide6, pyqtSignal→Signal`).
+
+### Sub-step 4a (5/9, stretch — partial) — 기본 다크 테마 stylesheet 분리
+
+**컨텍스트**: KPI 와 무관한 main_window.py 줄수 축소 stretch goal 의 첫 sub-step. 가장 risk 낮고 효과 큰 단일 변경.
+
+| 변경 | 위치 |
+|---|---|
+| `_get_default_dark_theme()` 메서드 (156줄 stylesheet 문자열) → `ui/themes.py` 의 `get_default_dark_theme()` 함수로 추출 | [ui/themes.py](../ui/themes.py) (신규) |
+| main_window 의 `_apply_theme` 이 `from .themes import get_default_dark_theme` 후 호출. 메서드 자체 통째 제거 (CLAUDE.md "delete completely" 룰) | [ui/main_window.py:392-403](../ui/main_window.py#L392-L403) |
+
+**검증**: core 85/85 ✅ + scenarios 73/73 ✅ + ruff 0 issue + format 0 diff (130 files) + PySide6 sync (sed `PyQt6→PySide6, pyqtSignal→Signal`).
+
+**효과**: main_window.py **1321 → 1166 줄 (-155줄)**.
+
+### 보류된 stretch sub-step
+
+- **4b**: 세션 CRUD (8 메서드, ~169줄) → `ui/session_management_handler.py` (예상 1166 → ~997)
+- **4c**: Step 편집 (7 메서드, ~170줄) → `ui/step_edit_handler.py` (예상 ~997 → ~827)
+- **4d**: UI setup `_setup_*` (5 메서드, ~175줄) → `ui/ui_setup.py` (예상 ~827 → ~652)
+
+KPI 무관 + (c) commercial_review.md 게이트 우선순위로 보류 결정 (5/9 사용자). 4b~d 진행 시 main_window.py 600줄대 stretch goal 도달.
+
+### Phase 1 최종 상태
+
+- ROADMAP §3 Phase 1 의 5/5 sub-task 모두 완료. KPI ("ui/ 폴더에서 banned core 직접 import 0건") 충족. test_80 + test_84 + test_85 가드 3중.
+- 예외: `core.environment_scanner` (environment_setup_dialog / settings_dialog 에서 함수 내 import) + `core.adapters.openai_compat_adapter` (settings_dialog) 는 KPI banned 목록 외 → 추후 정리.
+- main_window.py 줄수: 1304 → 1166 (Sub-step 4a 적용). 600줄대 stretch goal 은 4b/4c/4d 보류.
+
+## 15. 5/9 시장 결정 글로벌 확장 + 공개 직전 방어 정비
+
+**컨텍스트**: Phase 1 100% 완료 직후 사용자와 commercial_review.md 재독 → 시장 타깃 변경 + 공개 직전 외부 정비 패키지를 한 세션에 묶어 처리.
+
+### Stage 1 — 시장 타깃 글로벌 확장 결정 (사용자 결정 5/9)
+
+- 한국 niche 단독 → **글로벌 + 한국 dual-locale** 양립으로 변경.
+- 근거: 글로벌 dev-focused RPA SAM (~50-100M USD/yr) 이 한국 (~5-10M) 의 10배 + Computer Use 와 시간 경쟁.
+- 차별성 재포지셔닝: "한국어 UI" 단일 강점 (🟢) → "i18n (영어 + 한국어) dual-locale" 의 하나 (🟡). 진입 장벽 효과 약화 인정 + 글로벌 SAM 진입.
+
+| 갱신 문서 | 항목 |
+|---|---|
+| [docs/ROADMAP.md](../ROADMAP.md) | §0 타깃 시장 라인, §1 비전 본문 + 라이선스 절 본문, §10 변경 로그 5/9 행 |
+| [docs/commercial_review.md](commercial_review.md) | 헤더 5/9 갱신 표시, §3 차별성 표 (한국어 UI → i18n dual-locale, 🟢→🟡), §5 SAM anchor 글로벌 + ARR 추정 상향 (비관 0-15K / 중립 20-80K / 낙관 150-500K), §7 GO/NO-GO 게이트 ("한국어 콘텐츠 5+" → "영어 + 한국어 mix"), §9 변경 로그 |
+| [CLAUDE.md](../../CLAUDE.md) | 장기 로드맵 동기화 규칙 절의 타깃 시장 본문 |
+| 본 §0 | 마지막 업데이트 라인 + 시장 결정 표시 |
+
+### Stage 2 — 영어 README + 한국어 분리
+
+- [README.md](../../README.md) → 영어로 전면 재작성. 차별성 표 (ohdo vs UiPath/Power Automate vs Computer Use), Windows 전용 명시, commercial_review link 추가.
+- [README.ko.md](../../README.ko.md) 신규 — 한국어 버전. 양쪽 상단에서 cross-link.
+- pyside6_port/README.md 는 internal (라이선스 비교 baseline) 수준이라 영어 변환 보류.
+
+### Stage 3 — 공개 직전 방어 정비
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| `.gitignore` 강화 — secrets / credentials 패턴 추가 (`.env`, `.env.local`, `.env.*.local`, `*.key`, `*.pem`, `*.p12`, `*.pfx`, `*credentials*`, `*secret*`) | [.gitignore](../../.gitignore) | broad guard |
+| `COMMERCIAL.md` 신규 — 오픈코어 의도 + AGPL 적용 경계 (when AGPL OK / when commercial license 필요) + 문의 가이드 | [COMMERCIAL.md](../../COMMERCIAL.md) | dual-licensing 의도 명시. 외부 commercial 문의 진입점 |
+| `CONTRIBUTING.md` (영어) + `CONTRIBUTING.ko.md` (한국어) — DCO sign-off 가이드 (`git commit -s`), PR 체크리스트, scope 명시 (Windows-only, no XAML, Phase 2 SaaS 미공개), 환영 영역 (i18n, element picker, 테스트, 문서) | [CONTRIBUTING.md](../../CONTRIBUTING.md), [CONTRIBUTING.ko.md](../../CONTRIBUTING.ko.md) | 외부 기여자 진입점. CLA 보류 (DCO 만으로 작은 OSS 충분, 큰 기여 시 별 협의) |
+
+### 보안 검증 결과
+
+- `git ls-files | grep -iE "tmp/|data/sessions/|\.env|secret|\.key$|\.pem$|conversations"` → tracked sensitive 0건 (`.env.example` template 만).
+- `git log --diff-filter=A -- 'tmp/*' 'data/sessions/*' ...` → history commit 0건. **`git filter-repo` 불필요**.
+
+### 최종 상태 (5/9 세션 종료 시점)
+
+- baseline: core 85/85 ✅ + scenarios 73/73 ✅ + ruff 0 issue + format 0 diff (130 files).
+- **공개 가능 상태** (private → public 전환 결정만 사용자에게 남음).
+- 시장 검증 GO/NO-GO 게이트 0/4 (private 유지로 측정 불가).
+
+### 사용자 결정: 다음 단계 보류 + Phase 1.8 진입
+
+5/9 세션 종료 결정 — Phase 2 / 공개 / 시장 검증 등 외부 다음 단계는 잠시 보류.
+사용자 본인이 ohdo 를 일상 사용하면서 **AI 대화 → Python 자동화 코드 생성 기능의 완성도 향상 루프** 진행 (= 비공식 Phase 1.8).
+
+작업 흐름:
+1. 사용자가 자동화 시나리오에서 ohdo 사용
+2. 회귀 / 엣지케이스 / 품질 이슈 발견 → Claude 와 함께 root cause 분석 + fix
+3. 회귀 가드 추가 (test_core / test_scenarios)
+4. baseline 그린 유지
+
+영향 영역 (개선 후보):
+- [core/prompt_builder.py](../core/prompt_builder.py) — 프롬프트 동적 구축 (누적 코드, 컨텍스트, 분기)
+- [config/prompts.json](../config/prompts.json) — 시스템 프롬프트, 에러 복구 템플릿, jupyter 호환 가이드
+- [core/win_inspector.py](../core/win_inspector.py) — element → 코드 변환 (UWP, owner-drawn, 브라우저, 동적 auto_id)
+- [core/workflow_engine.py](../core/workflow_engine.py) + [core/import_manager.py](../core/import_manager.py) — step delta + import 추출 + jupyter 호환
+- [core/adapters/gemini_cli_adapter.py](../core/adapters/gemini_cli_adapter.py) — AI 어댑터 (응답 corrupt, timeout, 인코딩)
+- [ui/element_picker.py](../ui/element_picker.py) — element 검출 + EFP 토글 + F3 wait
+- [ui/ai_call_handler.py](../ui/ai_call_handler.py) — AI 호출 path + step_code/generated_code 분리
+
+회귀 위험 baseline: §4 의 contract 들 모두 (특히 §4.2 jupyter 6 함수, §4.5 ForegroundLock, §4.8 코드 편집 4중 안전장치) 회귀 시 즉시 발견.
+
+## 16. 5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프
+
+**컨텍스트**: 5/9 §15 종료 시점 사용자 결정 — Phase 2/공개/시장 검증 보류, 본인이 ohdo 일상 사용하면서 AI 대화→Python 자동화 코드 생성 완성도 향상 루프 진행. 검증 시나리오: OpenAI API (DeepSeek 키) 등록 → 메모장 자동화 step 1 (실행) → step 2 (새 탭 추가 클릭) → step 3 (텍스트 입력) → 발견 이슈 fix.
+
+11 unit 누적, baseline 85 → 96 (+11 회귀 가드). PySide6 port 양쪽 sync (core/ 는 cp, ui/ 는 sed PyQt6→PySide6).
+
+### Step A (5/9) — settings dialog 의 Test connection 버튼 (test_86)
+| 발견 갭 | DeepSeek 등 OpenAI 호환 LLM 을 등록해도 키 정확성 즉시 검증 불가 — 채팅에서 코드 생성 끝까지 돌려야 401 알 수 있음 (UX 나쁨, 비용 낭비) |
+| Fix | [ui/settings_dialog.py:209-302](../ui/settings_dialog.py#L209-L302) 에 `Test connection` 버튼 + `_test_openai_connection` 메서드. dialog 입력값으로 임시 어댑터 → ping 호출 (timeout 15s + max_tokens 32 + temperature 0 + "Reply with OK only.") → ✅/❌ inline label. Save 안 한 입력값으로 즉시 검증 |
+| 가드 | test_86 — 메서드 존재 + 위젯 + 콜백 dialog 입력값 사용 + 15s/32 강제 + OpenAICompatAdapter._generate_sync 직접 호출 5중 |
+
+### Step B (5/9) — _open_settings 가 AIEngineManager 재로드 (test_87)
+| 발견 갭 | settings dialog 에서 OpenAI 엔진 선택 + Apply → settings.json 저장 + theme/picker 즉시 반영. **AIEngineManager 재로드 누락** → 다음 AI 호출이 init 시점 settings 그대로 (gemini_cli 만 가지고 있어서 OpenAI 호환은 빈 api_key 401) |
+| Fix | [ui/main_window.py:1107-1124](../ui/main_window.py#L1107-L1124) `_open_settings` 가 `_save_settings()` 후 `app_service.reload_ai(self.settings)` + `self.ai_engine = self.app_service.ai_manager` 추가. ai_call_handler 가 매번 `mw.ai_engine` lookup 하므로 alias 만 갱신하면 자동 전파 |
+| 가드 | test_87 — `_open_settings` 소스에 `reload_ai(self.settings)` + `ai_manager` alias 패턴 |
+
+### B1+B2+B4 (5/9) — 어느 엔진이 호출됐는지 확인 가능 + settings 영구 저장 (test_88)
+| 발견 갭 | (B1) `mw.ai_engine.current_engine` 은 없는 속성 (`get_current_name()` 이 정답) — legacy ui 콘솔 패널의 `엔진:` 메타가 항상 빈 칸. (B2) ui_v2 의 `_send_request` worker 에서 step_done 메시지에 어느 엔진이 답했는지 명시 누락. (B4) `switch_ai_engine` (헤더 콤보 / 명령 팔레트 / onboarding 4 호출 사이트) 가 메모리 `_current_name` 만 변경하고 settings.json 영구 저장 X — 사용자가 ui_v2 헤더로 openai_compat 변경했는데 settings.json 의 ai.selected 는 gemini_cli 그대로 → 재시작 시 회귀 |
+| Fix | (B1) [ui/ai_call_handler.py:193-195](../ui/ai_call_handler.py#L193-L195) `current_engine` → `get_current_name()`. (B2) [ui_v2/main_window_v2.py:2165-2188](../ui_v2/main_window_v2.py#L2165-L2188) step_done 메시지에 `엔진: {name}` prefix. (B4) ui_v2 에 `_persist_engine_choice(name)` 헬퍼 (settings.ai.selected = name + _save_settings) + 헤더/팔레트/onboarding 모두 호출. legacy main_window `_on_ai_engine_changed` 도 settings persist |
+| 가드 | test_88 — 5중 (B1 속성명 + B2 메시지 prefix + B4 4 호출 사이트의 persist 패턴) |
+
+### P4 (5/9) — 콘솔 패널이 settings.ui.console_visible 따름 (test_89)
+| 발견 갭 | ui_v2 의 `_console_visible = False` 하드코딩 + `_build_console_panel` 의 `hide()` 하드코딩. 사용자가 Ctrl+\` 모르면 AI 응답 메타 (엔진/토큰/시간) 화면에서 볼 수 없음 + 토글해도 settings.json 영구 저장 X |
+| Fix | [ui_v2/main_window_v2.py](../ui_v2/main_window_v2.py) `__init__` 가 `_load_settings()` 로 ui.console_visible 읽고 `_console_visible` 초기화. `_build_console_panel` 이 `setVisible(self._console_visible)`. `_toggle_console` 가 settings.json 영구 저장 |
+| 가드 | test_89 — `__init__` settings 로드 + `_build_console_panel` setVisible (hardcoded hide() 0건) + `_toggle_console` 의 _save_settings 3중 |
+
+### P1a (5/9) — 가장 큰 본질 fix: system_context 가 prompt 에 inject (test_90)
+| 발견 갭 | **prompt_builder 가 self.system_context 를 보유만 하고 build_step_prompt 의 출력 (parts.join) 에 어디에도 append 하지 않음**. prompts.json 의 12K+ chars 핵심 가이드 (idempotent driver, jupyter mode, UWP wait, pyautogui PRIMARY, title_re, Text→부모 promote 등) 가 어떤 모델에도 도달조차 안 함. 이전엔 inline 가이드만 적용됨. 이게 5/9 step 2/3 가이드 무시 회귀의 진짜 원인 |
+| Fix | [core/prompt_builder.py:90](../core/prompt_builder.py#L90) `_build_step_prompt_parts` (private 공통 빌더) 에서 `system_text = self.system_context or ""` 분리. `build_step_prompt` 는 backward compat (system + user 합쳐 단일 string 반환) — 호출자 깨지지 않음 |
+| 가드 | test_90 — sentinel 본문 prepend 검증 + 사용자 요청보다 앞 위치 + 빈 system_context fail-safe |
+
+### P1b (5/9) — system role 분리 (test_91)
+| 발견 갭 | OpenAI compat 어댑터의 messages = [{role:user}] — system role 미활용. P1a 단일 string prepend 보다 best practice = system role 분리 (모델 attention 강화) |
+| Fix | (a) [core/adapters/base_adapter.py](../core/adapters/base_adapter.py) `generate(prompt, images, system=None)` 시그니처 확장. (b) [core/adapters/openai_compat_adapter.py](../core/adapters/openai_compat_adapter.py) `_generate_sync` 가 system 받으면 `messages = [{role:system}, {role:user}]`. (c) [core/adapters/gemini_cli_adapter.py](../core/adapters/gemini_cli_adapter.py) system 받으면 stdin prompt 앞에 prepend (CLI 는 role 분리 path 없음). (d) [core/ai_engine.py](../core/ai_engine.py) 통과. (e) [core/prompt_builder.py](../core/prompt_builder.py) `build_step_prompt_split` 신규 메서드 — `(system_text, user_text)` 튜플 반환. (f) [core/app_service.py:622-634](../core/app_service.py#L622-L634) `generate_step` 가 split 호출 + 어댑터에 system 별도 전달 |
+| 가드 | test_91 — split 메서드 + 어댑터 시그니처 + OpenAICompat messages 분리 + AIEngineManager 통과 + AppService split 호출 7중. scenarios mocks (`_FakeAI` / `MockAI` / `FakeAIManager` / `MockPromptBuilder`) 모두 `system=None` 인자 + `build_step_prompt_split` 추가 |
+
+### P3 (5/9) — system_context 가이드 #3 + #5 강화 (test_92)
+| Fix | [config/prompts.json](../config/prompts.json) system_context #3 → "**try/except 강제 (예외 없음)**: 외부 자원 다루는 모든 코드 블록 (앱 실행/연결 / 윈도우 wait / UI 조작 / 파일 I/O / 네트워크 / subprocess / 클립보드 / 단축키) 반드시 try/except". #5 → "**import 위치 강제 (Jupyter 호환)**: 모든 import 는 코드의 가장 최상단 (라인 1~N) 에만. try/except/함수/step 본문 안 import 금지" |
+| 가드 | test_92 — sentinel 어휘 (`try/except 강제` / `예외 없음` / `import 위치 강제` / `가장 최상단` / `step 본문 안 import 금지`) |
+
+### G1 (5/9) — system_context #17 의 element 자동 주입 X 명시 (test_93)
+| 발견 갭 | DeepSeek 가 #17 예제 (`click_target = element` 패턴) 만 복사 → `name 'click_target' is not defined` 즉시 NameError. 기존 #17 예제는 `element` 가 자동 주입된다는 잘못된 가정 — ohdo 의 흐름은 element_context 에 텍스트 메타로만 들어가고 코드는 `win.child_window(...)` 로 직접 찾아야 함 |
+| Fix | [config/prompts.json](../config/prompts.json) #17 본문에 "⚠ **변수 자동 주입 X — element 를 코드 안에서 직접 찾으세요**" 명시 + Step 1) `element = win.child_window(auto_id=..., control_type=..., found_index=0)` Step 2) walk-up promote Step 3) pyautogui.click 의 3단계 예제 추가. NameError 회귀 사례 인용 |
+| 가드 | test_93 — sentinel 4중 |
+
+### G2 + G5 (5/9) — element_context 템플릿 강제 사용 + library 블럭 essential imports (test_94/95)
+| 발견 갭 | (G2) prompt_builder 의 element_context 가이드 "참고하되 ... 수정" 어휘 너무 약함 → DeepSeek 가 [core/win_inspector.py:680-940](../core/win_inspector.py) 의 ready-to-use 코드 템플릿 (`_resolve_element` + `element` + `click_target` + walk-up + pyautogui.click 모두 포함) 을 무시하고 짧은 자체 코드 작성 → element 변수 누락. (G5) `pyautogui` import 누락 — try block 에서 NameError → except 의 fallback `click_input()` 으로 살아남음 (silent fail). 모든 step 에서 pyautogui 호출 silent fail |
+| Fix | (G2) [core/prompt_builder.py:297-340](../core/prompt_builder.py#L297-L340) "🚨 **위 ## 선택된 UI 요소 섹션의 ```python 코드 템플릿을 그대로 시작 코드로 사용하세요**" + "**자체적으로 element 변수를 다시 만들지 마세요**" + 회귀 사례 (`name 'click_target' is not defined`) 인용 + "사용자 요청 동작 코드만 템플릿 끝에 추가" 명시. (G5) [core/workflow_engine.py:846+](../core/workflow_engine.py#L846) `extract_library_block` 후 `_ensure_essential_imports` 적용 — 핵심 5개 (`time`, `subprocess`, `ctypes`, `pyautogui`, `pyperclip`) 누락 시 자동 prepend. regex 매칭으로 `import X` / `from X` 양쪽 인식 — 중복 prepend 방지 |
+| 가드 | test_94 (G5 — 5개 패키지 prepend / 누락만 / 중복 방지 / from-style 인식) + test_95 (G2 — '그대로 시작 코드로 사용' / 'element 자체 정의 금지' / 회귀 사례 인용). [tests/test_scenarios.py:2506-2515](../tests/test_scenarios.py#L2506-L2515) test_42 의 `gc.startswith` → `in gc` 변경 (G5 의 prepend 로 generated_code 시작이 library 로 변경 — 의도된 동작) |
+
+### G2.5 (5/10) — element_context 템플릿에서 import 라인 제거 (test_96)
+| 발견 갭 | G2 효과로 DeepSeek 가 element_context 템플릿을 그대로 사용 → 마커 안에 `import ctypes` / `import pyautogui` 등이 들어감. `extract_imports` (header 영역만 인식) 가 step 1 의 상단 import 만 추출 → step 2/3 의 step_imports = []. P3 #5 (import 위치 강제) 위반 + G5 와 중복 import |
+| Fix | [core/win_inspector.py:853-862](../core/win_inspector.py#L853-L862) desktop element 템플릿에서 import 5줄 (`ctypes` / `ctypes.wintypes` / `time` / `pyautogui` / `from pywinauto import Application`) 제거 + 안내 주석. owner-drawn 템플릿도 동일. [core/workflow_engine.py](../core/workflow_engine.py) `_ESSENTIAL_LIBRARY_IMPORTS` 에 `ctypes.wintypes` + `pywinauto.Application` 추가 (5 → 7개). [core/prompt_builder.py](../core/prompt_builder.py) element_context 가이드에 "import 는 코드 안에 작성하지 마세요 — 라이브러리 블럭에 자동 prepend 됨" 안내 한 줄 추가 |
+| 가드 | test_96 — desktop / owner-drawn 템플릿 import 라인 0건 + `_ESSENTIAL_LIBRARY_IMPORTS` 보강 (ctypes.wintypes + Application) |
+
+### 검증 결과 (5/10 사용자 'v2-새세션-150708' 메모장테스트 세션)
+
+**🎉 G2.5 효과 확인** — Step 2 의 import 가 정확히 step_imports 영역으로 분리됨:
+```
+step 2.step_imports: ['import ctypes', 'import ctypes.wintypes', 'import pyautogui']
+step 2.step_code: import 라인 0건. element_context 템플릿 거의 그대로 사용 (_resolve_element + element + click_target + walk-up + pyautogui.click + try/except 전체 wrapping)
+```
+
+### 잔존 갭 (다음 세션 출발점)
+
+DeepSeek-V3 의 가이드 따르기 한계로 step 3/4 에서 모델이 가이드 일관성 떨어짐:
+
+1. **Step 3 의 `app`/`win` 변수 재정의** — system_context #14(b) jupyter mode 호환 위반 (이전 step 변수 재정의 금지)
+2. **Step 3+4 의 try/except 누락** — P3 #3 위반
+3. **Step 3 의 들여쓰기 깨짐** — `def _resolve_element():` 라인 누락 + 본문만 indent → SyntaxError 가능
+4. **Step 3 의 `import pyperclip` 이 else 블록 안** — P3 #5 위반 (G5 가 자동 prepend 했음에도 AI 가 또 작성)
+5. **Step 1 의 `Application().connect(timeout=3)` 짧음** — 매 실행마다 새 메모장 인스턴스 띄움 가능. system_context #14(b) timeout 보강 필요
+6. **자동 실행 옵션 부재 (F1 후보)** — 사용자가 코드 생성 후 별도로 ▶ Ctrl+R 눌러야 실행. settings.execution.auto_run_on_step_create 같은 옵션
+
+### 후속 fix 옵션 (보류 — 다음 세션)
+
+| 옵션 | 설명 | 분량 | 기대 효과 |
+|---|---|---|---|
+| **G6** | system_context #14(b) (변수 재정의 금지) + #3 (try/except) 어휘 더 강화 + 이전 step 변수 활용 안내 명시 | 작음 | 갭 #1 + #2 부분 개선 (모델 한계 — 100% 보장 X) |
+| **G7** | step 코드 생성 후 ast 정적 분석 — 미정의 변수 / 변수 재정의 / try/except 누락 / compile fail (들여쓰기 깨짐) 검출 → 사용자 경고 + 자동 재생성 옵션 | 중간 | 모든 갭 사전 방지. 본질 해결 |
+| **G4** | system_context #14(b) timeout=3s → 5s 권장 또는 polling 추가 | 매우 작음 | 갭 #5 (메모장 재사용 안정화) |
+| **F1** | settings.execution 에 `auto_run_on_step_create` 옵션 + worker 끝부분에 옵션 체크 후 _on_run_single 호출 | 작음 | 갭 #6 (사용자 편의) |
+| **F2** | step 카드 첫 생성 시 토스트에 "▶ Ctrl+R 로 실행" 힌트 | 매우 작음 | 발견성 |
+
+**권장 우선순위**: G7 (정적 분석) > G6 (가이드 강화) > G4 + F1/F2.
 
 ## 9. 자주 하는 실수 / 주의사항
 

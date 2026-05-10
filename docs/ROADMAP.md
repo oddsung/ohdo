@@ -6,9 +6,9 @@
 
 ## 0. 문서 메타
 
-- **마지막 업데이트**: 2026-05-08 (Phase 0 완료 + Phase 1 sub-task 1·2A·3·4·5 완료. 남은 sub-task 2B (ui/ legacy 정리) 만 Phase 1 마무리)
+- **마지막 업데이트**: 2026-05-10 (**Phase 0 + Phase 1 모두 100% 완료**. Phase 1 sub-task 2 Chunk B (ui/ legacy 정리) 5/9 마무리 → KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족. Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정. **5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 11 unit — handoff §16 참조. baseline 85→96**)
 - **Owner**: @toytiger (dohahado22@gmail.com)
-- **타깃 시장**: B2C 개인 개발자 우선 (오픈코어 전략)
+- **타깃 시장**: B2C 개인 개발자 (**글로벌 + 한국 dual-locale**, 오픈코어 전략) — *2026-05-09 사용자 결정으로 한국 niche → 글로벌 우선 + 한국 동시 진행으로 확장*
 - **관련 문서**:
   - [CLAUDE.md](../CLAUDE.md) — 프로젝트 지침
   - `docs/ARCHITECTURE.md` — 아직 미작성 (Phase 1 시작 시 작성)
@@ -30,7 +30,7 @@
 - 클라우드 서비스 + Pro 기능: 상업 라이선스 (SaaS 구독)
 - **유료/무료 라인 긋기는 Phase 2 진입 시점에 결정** (현 단계 v1.0 은 100% AGPL-3.0 무료, SaaS 코드 미존재)
 
-**타깃 시장**: B2C 개인 개발자 우선. 오픈소스 커뮤니티를 통해 "개발자에게 사랑받는 도구" 로 포지셔닝한 뒤, 자연스럽게 기업 도입으로 확장.
+**타깃 시장**: B2C 개인 개발자 (**글로벌 + 한국 dual-locale**, *2026-05-09 사용자 결정 확정*). 오픈소스 커뮤니티를 통해 "개발자에게 사랑받는 도구" 로 포지셔닝한 뒤, 자연스럽게 기업 도입으로 확장. 영어 우선 + 한국어 동시 지원 (i18n) — 글로벌 SAM (50-100M USD) 진입 + 한국 niche 보호막은 약하지만 dual-locale 자체가 작은 차별성.
 
 ---
 
@@ -427,3 +427,7 @@ Phase 0~1 착수 시 가장 먼저 손대야 할 파일 (프로젝트 루트 기
 | 2026-05-05 | §1 라이선스 전략 사용자 결정 확정 — 오픈코어 (AGPL-3.0 데스크톱 + 추후 폐쇄 SaaS) 유지. v1.0 은 100% AGPL-3.0 으로 진행, SaaS 유료/무료 라인은 Phase 2 진입 시점에 결정. 결정 근거: B2C 개인 개발자 우선 + 수익화 의향 양립 → 오픈코어가 두 목표 동시 충족. |
 | 2026-05-07 | Phase 0 sub-phase 1+2 — `pyproject.toml` + `uv` 도입 (lockfile `uv.lock` 64 packages), `pre-commit` + `ruff` (lint+format) 설치, ruff `--fix` 로 520 issue 중 468 auto-fix + 47 manual + format 일괄. mypy 는 Phase 1 type hint 작업과 묶음. LICENSE (AGPL-3.0) + README 라이선스 섹션 추가. |
 | 2026-05-08 | Phase 0 sub-phase 3+4+5 — SPDX 헤더 113 .py 파일 일괄 (`# SPDX-License-Identifier: AGPL-3.0-or-later`), GitHub Actions CI 매트릭스 (lint+ubuntu+windows, ai_integration 보류), `.devcontainer/devcontainer.json` (Python 3.12 + uv + Qt deps + ruff/pylance/gitlens 확장). Phase 0 의 인프라 표준화 5/7 항목 완료, structlog/Sentry 는 별도 작업으로 이관. |
+| 2026-05-08 | Phase 1 sub-task 1·2A·3·4·5 일괄 진행 — (1) 저장소 추상화 + AppService leak 제거 + InMemoryRepository, (2A) ui_v2 5 banned import → AppService 경유 (KPI Chunk A), (3) Pydantic 모델 parallel 도입 (옵션 B 비파괴), (4) Pydantic Settings + .env 병합, (5) `agent/bridge.py` LocalBridge no-op. core 77→82, scenarios 72→73. 남은 Chunk B (ui/ legacy) 만 Phase 1 마무리 대기. |
+| 2026-05-09 | Phase 1 sub-task 2 Chunk B 완결 — ui/ legacy (main_window + 4 handler/panel) 의 banned core import 모두 제거, 모든 import 가 `core.app_service` 단일 진입점 경유. AppService 인터페이스 보강 (클래스/상수/pure 함수 re-export + workflow_engine/prompt_builder property+setter). KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족, test_83/84/85 (interface + main_window + ui/ 전체) 3중 가드. core 82→85, scenarios 73 유지. **Phase 1 100% 완료** — Phase 2 진입은 commercial_review.md GO/NO-GO 게이트 통과 후 결정. |
+| 2026-05-09 | **시장 타깃 글로벌 확장 결정** — 한국 niche → 글로벌 우선 + 한국 dual-locale 양립으로 사용자 결정. 근거: 글로벌 SAM (50-100M USD/yr) 이 한국 (5-10M) 의 10배 + Computer Use 와 시간 경쟁. 차별성 재평가: "한국어 UI" 단일 항목 → "i18n (영어 + 한국어) + Plain Python + Local-first" 조합 niche 로 재포지셔닝. 영어 README + 사용자 facing UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. commercial_review.md §3/§5/§7 동기화 갱신. |
+| 2026-05-09~10 | **Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프** — 사용자 일상 사용 중 발견 갭 11건 fix (settings dialog Test connection / reload_ai / current_engine 속성명 / ui_v2 step_done 메타 / ai.selected persist / 콘솔 가시성 settings / system_context prompt inject (P1a) / system role 분리 (P1b) / 가이드 #3+#5 강화 (P3) / element_context 템플릿 그대로 사용 강제 (G2) / library 블럭 essential imports prepend (G5) / element_context 템플릿 import 라인 제거 (G2.5)). baseline 85→96 (+11 회귀 가드 test_86~96). 자세한 내용: handoff.md §16. 잔존 갭 (DeepSeek 의 가이드 따르기 한계 — step 3/4 의 변수 재정의 + try/except 누락 + 들여쓰기 깨짐) 은 G6/G7 (정적 분석) 후속으로 보류. |
