@@ -3869,6 +3869,185 @@ if __name__ == "__main__":
             "[G2.5] _ESSENTIAL_LIBRARY_IMPORTS 에 'from pywinauto import Application' 필수",
         )
 
+    def test_97_code_validator_detects_four_issue_kinds(self):
+        """[Phase 1.8 G7-A] core.code_validator 가 4종 정적 분석 항목을 검출.
+
+        배경: handoff §16 잔존 갭 — DeepSeek-V3 같은 모델이 system_context 가이드를
+        100% 따르지 않아 step 3/4 에서 회귀 (변수 재정의 / try-except 누락 / 들여쓰기
+        깨짐 / import 위치 위반). 프롬프트 강화 (G6) 만으로는 100% 보장 불가 →
+        AI 가 코드 만든 직후 정적 분석 hook 으로 자동 검사.
+
+        본 테스트는 G7-A (검사 엔진) 만 검증. UI / AI 호출 hook 은 G7-B/C/D.
+
+        가드:
+        1. 빈 코드 / 정상 코드 → 0 issue (false positive 방지)
+        2. SyntaxError (들여쓰기 깨짐) → has_syntax_error True + 다른 검사 skip
+        3. 변수 재정의 (`app = ...` prev + cur 모두 module-level) → 'redefined_var'
+        4. try 밖 risky 호출 (`pyautogui.click(...)` module-level) → 'missing_try'
+        5. import 위치 위반 (`if x: import y`) → 'import_misplaced'
+        6. 함수 정의 안의 risky 호출은 검출 X (false positive 방지)
+        7. for-target 은 재정의 검사 제외 (module-level 단순 Assign 만)
+        8. ValidationIssue / ValidationResult 데이터 클래스 + has_issues / by_kind
+        """
+        from core.code_validator import (
+            ValidationIssue,
+            ValidationResult,
+            validate_step_code,
+        )
+
+        # 1) 빈 코드 / 정상 코드 → 0 issue
+        self.assert_true(
+            not validate_step_code("").has_issues,
+            "[G7-A] 빈 코드는 issue 0 건 (false positive 방지)",
+        )
+        self.assert_true(
+            not validate_step_code("   \n  \n").has_issues,
+            "[G7-A] 공백만 있는 코드도 issue 0 건",
+        )
+        clean_code_2 = (
+            "import pyautogui\n"
+            "try:\n"
+            "    pyautogui.click(100, 200)\n"
+            "except Exception as e:\n"
+            "    print(e)\n"
+        )
+        # 위 코드도 module-level import 라 misplaced X. risky 호출 try 안 → missing_try X
+        # 단 import 는 module body 의 직계 Import 라 misplaced 검사 통과.
+        # cur 만 검사 (prev 없음) → redefined_var X. syntax OK → 0 issue.
+        result_clean = validate_step_code(clean_code_2)
+        self.assert_true(
+            not result_clean.has_issues,
+            f"[G7-A] 정상 코드는 issue 0 건. got: {[(i.kind, i.message) for i in result_clean.issues]}",
+        )
+
+        # 2) SyntaxError → has_syntax_error + 나머지 검사 skip
+        broken_indent = (
+            "def foo():\n"
+            "x = 1\n"  # def 본문 indent 누락
+        )
+        result_syntax = validate_step_code(broken_indent)
+        self.assert_true(
+            result_syntax.has_syntax_error,
+            "[G7-A] 들여쓰기 깨진 코드는 has_syntax_error True",
+        )
+        self.assert_true(
+            result_syntax.has_issues,
+            "[G7-A] syntax 오류는 has_issues True",
+        )
+        self.assert_equal(
+            len(result_syntax.issues),
+            1,
+            "[G7-A] syntax 오류 시 다른 검사 skip (issue 1 건만)",
+        )
+        self.assert_equal(
+            result_syntax.issues[0].kind,
+            "syntax",
+            "[G7-A] syntax issue 의 kind 는 'syntax'",
+        )
+
+        # 3) 변수 재정의 — prev 의 'app' 를 cur 가 다시 module-level 로 할당
+        prev_step1 = (
+            "from pywinauto import Application\n"
+            "app = Application(backend='uia').connect(title='메모장')\n"
+            "win = app.window(title='메모장')\n"
+        )
+        cur_step3 = (
+            "app = Application(backend='uia').connect(title='메모장')\n"  # 재정의 위반
+            "win.set_focus()\n"
+        )
+        result_redef = validate_step_code(cur_step3, prev_step_codes=[prev_step1])
+        redef_issues = result_redef.by_kind("redefined_var")
+        self.assert_equal(
+            len(redef_issues),
+            1,
+            f"[G7-A] 'app' 재정의 1 건 검출 필수. got issues: {[(i.kind, i.message) for i in result_redef.issues]}",
+        )
+        self.assert_true(
+            "'app'" in redef_issues[0].message,
+            f"[G7-A] redefined_var message 에 'app' 포함 필수. got: {redef_issues[0].message}",
+        )
+
+        # 4) try 밖 risky 호출 → missing_try
+        unprotected = (
+            "import pyautogui\n"
+            "pyautogui.click(100, 200)\n"  # try 밖 module-level
+        )
+        result_risky = validate_step_code(unprotected)
+        risky_issues = result_risky.by_kind("missing_try")
+        self.assert_equal(
+            len(risky_issues),
+            1,
+            f"[G7-A] try 밖 pyautogui.click 1 건 검출 필수. got: {[(i.kind, i.message) for i in result_risky.issues]}",
+        )
+        self.assert_true(
+            "pyautogui.click" in risky_issues[0].message,
+            f"[G7-A] missing_try message 에 'pyautogui.click' 포함 필수. got: {risky_issues[0].message}",
+        )
+
+        # 5) import 위치 위반 → import_misplaced
+        misplaced_import = (
+            "x = 1\n"
+            "if x:\n"
+            "    import pyperclip\n"  # if 안 import = misplaced
+        )
+        result_imp = validate_step_code(misplaced_import)
+        imp_issues = result_imp.by_kind("import_misplaced")
+        self.assert_equal(
+            len(imp_issues),
+            1,
+            f"[G7-A] if 안 import 1 건 검출 필수. got: {[(i.kind, i.message) for i in result_imp.issues]}",
+        )
+
+        # 6) 함수 정의 안의 risky 호출은 검출 X (false positive 방지)
+        helper_with_risky = (
+            "import pyautogui\n"
+            "def helper():\n"
+            "    pyautogui.click(100, 200)\n"  # 함수 안 → 검사 제외
+            "try:\n"
+            "    helper()\n"
+            "except Exception:\n"
+            "    pass\n"
+        )
+        result_helper = validate_step_code(helper_with_risky)
+        self.assert_equal(
+            len(result_helper.by_kind("missing_try")),
+            0,
+            f"[G7-A] 함수 정의 안 risky 호출은 검출 X. got: {[(i.kind, i.message) for i in result_helper.issues]}",
+        )
+
+        # 7) for-target 은 재정의 검사 제외 — `for app in ...` 의 app 는 안 잡힘
+        for_target = "for app in [1, 2, 3]:\n    print(app)\n"
+        result_for = validate_step_code(for_target, prev_step_codes=[prev_step1])
+        self.assert_equal(
+            len(result_for.by_kind("redefined_var")),
+            0,
+            f"[G7-A] for-target 은 module-level 재정의 검사 제외. got: {[(i.kind, i.message) for i in result_for.issues]}",
+        )
+
+        # 8) 데이터 클래스 + helper 메서드
+        self.assert_true(
+            hasattr(ValidationResult, "has_issues") and hasattr(ValidationResult, "by_kind"),
+            "[G7-A] ValidationResult 에 has_issues + by_kind 메서드",
+        )
+        issue_fields = getattr(ValidationIssue, "__dataclass_fields__", {})
+        self.assert_true(
+            "kind" in issue_fields and "message" in issue_fields,
+            f"[G7-A] ValidationIssue 에 kind + message 필드. got fields: {list(issue_fields.keys())}",
+        )
+
+        # 9) 다중 issue 동시 검출 — 재정의 + try 누락 한 코드에서 둘 다 잡힘
+        multi_issue = (
+            "import pyautogui\n"
+            "app = 1\n"  # prev 의 'app' 재정의
+            "pyautogui.click(0, 0)\n"  # try 밖 risky
+        )
+        result_multi = validate_step_code(multi_issue, prev_step_codes=[prev_step1])
+        self.assert_true(
+            len(result_multi.by_kind("redefined_var")) >= 1
+            and len(result_multi.by_kind("missing_try")) >= 1,
+            f"[G7-A] 다중 issue 동시 검출 필수. got: {[(i.kind, i.message) for i in result_multi.issues]}",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
