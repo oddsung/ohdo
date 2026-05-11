@@ -83,10 +83,83 @@ class AICallHandler:
         thread = threading.Thread(target=self.call_ai_thread, args=(message, images), daemon=True)
         thread.start()
 
+    def on_regenerate_with_warnings(self, step_id: int) -> None:
+        """G7-E2: BlockCard ⚠ 다이얼로그의 재생성 버튼 → step lookup + warnings 인용
+        prompt 로 AI 재호출.
+
+        흐름:
+          1. 현재 세션에서 step_id 의 user_request + validation_warnings 추출
+          2. call_ai_thread 에 previous_warnings 전달 → prompt_builder 가 사용자
+             요청 직후에 "이전 시도 실패 원인" 섹션 prepend.
+          3. AI 가 같은 실수 반복 회피.
+
+        ui_v2 의 _on_regenerate_with_warnings 와 동일한 의미. legacy 는 chat_panel
+        의 pending_images 사용 (ui_v2 는 pending_elements).
+        """
+        mw = self.mw
+        if not mw.current_session:
+            return
+        if mw.is_processing:
+            return
+
+        # step lookup
+        target_step: dict | None = None
+        for sd in mw.current_session.steps:
+            sd_dict = sd if isinstance(sd, dict) else {}
+            if sd_dict.get("step_id") == step_id:
+                target_step = sd_dict
+                break
+        if target_step is None:
+            QMessageBox.information(mw, "안내", f"Step {step_id} 을 찾을 수 없습니다.")
+            return
+
+        # user_request 추출 — D3 의 user_request 우선, 없으면 conversation 첫 user 메시지
+        user_request = target_step.get("user_request", "")
+        if not user_request:
+            conv = target_step.get("conversation", [])
+            for msg in conv:
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    user_request = str(msg.get("content", ""))
+                    break
+        if not user_request:
+            QMessageBox.information(
+                mw, "안내", f"Step {step_id} 의 user_request 가 비어 재생성 불가."
+            )
+            return
+
+        warnings = list(target_step.get("validation_warnings", []) or [])
+
+        mw.is_processing = True
+        mw.chat_panel.set_generating(True)
+        mw.statusBar().showMessage("AI 응답 대기 중 (재생성)...")
+        mw.console_panel.log(
+            f"Step {step_id} 재생성 (코드 검사 경고 {len(warnings)}건 인용): {user_request[:80]}...",
+            "INFO",
+        )
+
+        # 재생성은 새 image 첨부 없이 동일 user_request 재호출
+        thread = threading.Thread(
+            target=self.call_ai_thread,
+            args=(user_request, []),
+            kwargs={"previous_warnings": warnings},
+            daemon=True,
+        )
+        thread.start()
+
     # ── 백그라운드: AI 어댑터 호출 + prompt 구성 ───────────────
 
-    def call_ai_thread(self, user_message: str, images: list[str]) -> None:
-        """백그라운드 스레드: AI 프롬프트 전송 및 응답 수신"""
+    def call_ai_thread(
+        self,
+        user_message: str,
+        images: list[str],
+        *,
+        previous_warnings: list[dict] | None = None,
+    ) -> None:
+        """백그라운드 스레드: AI 프롬프트 전송 및 응답 수신.
+
+        previous_warnings 가 있으면 prompt_builder.build_step_prompt 에 전달 →
+        사용자 요청 직후 [1.5] "이전 시도 코드 검사 결과" 섹션 inject (G7-E2).
+        """
         mw = self.mw
         try:
             # 방어 코드 추가
@@ -124,6 +197,7 @@ class AICallHandler:
                 element_context=element_ctx,
                 project_type=mw.current_session.project_type,
                 is_browser_element=is_browser_elem,
+                previous_warnings=previous_warnings,
             )
 
             mw.signals.log_message.emit(f"[PROMPT] 프롬프트 전송 ({len(prompt)}자)")
@@ -255,6 +329,30 @@ class AICallHandler:
         delta_body = extract_code_delta(separated_body, prev_body)
         delta_imports = extract_import_delta(separated_imports, prev_imports)
 
+        # G7-E1 (Phase 1.8): legacy 의 step 생성 path 에 code_validator hook.
+        # ui_v2 는 app_service.generate_step 의 G7-B hook 이 자동 부착하지만
+        # legacy 는 직접 ai_engine.generate 호출이라 hook 없음 → 카드 ⚠ 위젯이
+        # 항상 안 뜸. 차단 X — 실행 그대로. 정적 분석 실패는 try/except 로 보호.
+        validation_warnings: list[dict] = []
+        try:
+            from core.code_validator import validate_step_code
+
+            prev_step_codes_for_check: list[str] = []
+            if mw.current_session and mw.current_session.steps:
+                for ls in mw.current_session.steps:
+                    ls_dict = ls if isinstance(ls, dict) else {}
+                    sc = ls_dict.get("step_code") or ""
+                    if sc:
+                        prev_step_codes_for_check.append(sc)
+            val_result = validate_step_code(delta_body, prev_step_codes=prev_step_codes_for_check)
+            validation_warnings = [
+                {"kind": iss.kind, "message": iss.message, "line": iss.line}
+                for iss in val_result.issues
+            ]
+        except Exception:
+            # 정적 분석 실패는 step 생성을 막지 않음
+            pass
+
         step = Step(
             status="completed" if response["success"] else "failed",
             conversation=[
@@ -284,6 +382,7 @@ class AICallHandler:
             execution_result=None,
             step_code=delta_body,
             step_imports=delta_imports,
+            validation_warnings=validation_warnings,
         )
         mw.session_manager.add_step(mw.current_session, step)
 
@@ -295,6 +394,20 @@ class AICallHandler:
         mw.is_processing = False
         mw.chat_panel.set_generating(False)
         mw.statusBar().showMessage("준비 완료")
+
+        # F1: 옵션 ON 시 step 생성 직후 자동 단독 실행 trigger.
+        # 메인 스레드 (signal 콜백) 에서 호출되므로 _on_run_single_step 직접 호출 가능.
+        # AI 응답 성공 + step_id > 0 (라이브러리/initial 아님) + 옵션 켜진 경우만.
+        if (
+            response.get("success")
+            and step.step_id > 0
+            and mw.settings.get("execution", {}).get("auto_run_on_step_create", False)
+        ):
+            try:
+                mw._on_run_single_step(step.step_id)
+            except Exception as exc:
+                # 자동 실행 실패는 step 생성을 무효화하지 않음
+                mw.console_panel.log(f"자동 실행 실패 (무시): {exc}", "WARNING")
 
     # ── step 실행 결과 표시 ───────────────────────────────────
 

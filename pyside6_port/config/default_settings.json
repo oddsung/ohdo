@@ -43,7 +43,9 @@
     "max_retry_count": 3,
     "retry_delay_ms": 1000,
     "screenshot_on_error": true,
-    "sandbox_mode": true
+    "sandbox_mode": true,
+    "auto_regenerate_on_warning": false,
+    "auto_run_on_step_create": false
   },
   "visual_feedback": {
     "enabled": true
@@ -52,7 +54,8 @@
     "theme": "dark",
     "console_visible": true,
     "font_size": 11,
-    "language": "ko"
+    "language": "ko",
+    "hint_run_shown": false
   },
   "output_project": {
     "default_output_dir": "",

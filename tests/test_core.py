@@ -4048,6 +4048,862 @@ if __name__ == "__main__":
             f"[G7-A] 다중 issue 동시 검출 필수. got: {[(i.kind, i.message) for i in result_multi.issues]}",
         )
 
+    def test_98_app_service_generate_step_attaches_validation_warnings(self):
+        """[Phase 1.8 G7-B] AppService.generate_step 가 code_validator hook 으로
+        Step.validation_warnings 메타를 첨부한다 (차단 X — 실행 가능).
+
+        배경: G7-A 의 정적 분석 엔진은 순수 함수. 실제 흐름에 연결하려면
+        generate_step 마지막 (Step 생성 직전) 에 검사 호출 + 결과를 dict 리스트로
+        변환해서 Step.validation_warnings 에 저장. UI 표시 / 재생성은 G7-C/D.
+
+        가드:
+        1. Step dataclass + StepModel 미러 모두 validation_warnings 필드 보유
+        2. generate_step 소스에 validate_step_code import + 호출 + 결과 변환 패턴
+        3. Step 생성 시 validation_warnings 인자 전달
+        4. 정적 분석 실패도 step 생성 흐름 보호 (try/except)
+        5. 위반 코드 (try 밖 risky 호출) end-to-end → Step.validation_warnings 비어있지 않음
+        """
+        import inspect
+        from dataclasses import fields as dc_fields
+
+        from core.app_service import AppService
+        from core.models import StepModel
+        from core.session_manager import Step
+
+        # 1) Step dataclass 의 validation_warnings 필드
+        step_field_names = {f.name for f in dc_fields(Step)}
+        self.assert_true(
+            "validation_warnings" in step_field_names,
+            f"[G7-B] Step dataclass 에 validation_warnings 필드 필수. got: {sorted(step_field_names)}",
+        )
+        # 기본값 빈 리스트
+        new_step = Step()
+        self.assert_equal(
+            new_step.validation_warnings,
+            [],
+            "[G7-B] Step.validation_warnings 기본값 빈 리스트",
+        )
+
+        # 2) StepModel Pydantic 미러도 동일 필드
+        model_field_names = set(StepModel.model_fields.keys())
+        self.assert_true(
+            "validation_warnings" in model_field_names,
+            f"[G7-B] StepModel 미러에 validation_warnings 필드 필수. got: {sorted(model_field_names)}",
+        )
+
+        # 3) generate_step 소스에 hook 패턴
+        gen_src = inspect.getsource(AppService.generate_step)
+        for pattern, desc in (
+            ("from .code_validator import validate_step_code", "validate_step_code import"),
+            ("validate_step_code(", "validate_step_code 호출"),
+            ("validation_warnings", "validation_warnings 변수 사용"),
+            ("validation_warnings=validation_warnings", "Step 생성 시 인자 전달"),
+        ):
+            self.assert_true(
+                pattern in gen_src,
+                f"[G7-B] generate_step 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 4) 정적 분석 실패 시 보호 (try/except 로 감싸짐) — import 라인이 try 본문에 위치
+        # 단순 패턴 매칭: hook 블록이 try: ... except Exception: pass 로 감싸짐
+        hook_idx = gen_src.find("from .code_validator import validate_step_code")
+        self.assert_true(hook_idx > 0, "[G7-B] hook 블록 위치 확인")
+        # hook 앞 100 자 안에 'try:' 가 있어야 함
+        prefix = gen_src[max(0, hook_idx - 200) : hook_idx]
+        self.assert_true(
+            "try:" in prefix,
+            "[G7-B] validate_step_code import 가 try 블록 안에 위치 (분석 실패 보호)",
+        )
+
+        # 5) End-to-end: 위반 코드를 통과시키면 validation_warnings 가 채워지는지
+        # AppService.generate_step 직접 호출은 AI 어댑터 mock 등 복잡 → 검사 함수
+        # 직접 호출로 hook 의 입출력 형식 검증 (Step 생성 args 와 동일 형식).
+        from core.code_validator import validate_step_code
+
+        bad_code = "import pyautogui\npyautogui.click(0, 0)\n"
+        result = validate_step_code(bad_code)
+        warnings_dicts = [
+            {"kind": iss.kind, "message": iss.message, "line": iss.line} for iss in result.issues
+        ]
+        self.assert_true(
+            len(warnings_dicts) >= 1 and warnings_dicts[0]["kind"] == "missing_try",
+            f"[G7-B] hook 의 dict 변환 형식: kind/message/line. got: {warnings_dicts}",
+        )
+        # Step 생성에 그대로 전달 가능한 list[dict] 형식인지
+        step_with_warnings = Step(validation_warnings=warnings_dicts)
+        self.assert_equal(
+            len(step_with_warnings.validation_warnings),
+            len(warnings_dicts),
+            "[G7-B] Step.validation_warnings 에 dict 리스트 그대로 저장",
+        )
+
+    def test_99_ui_shows_validation_warning_indicator(self):
+        """[Phase 1.8 G7-C] BlockCard (legacy) + StepCardV2 (ui_v2) 가
+        validation_warnings 받으면 헤더 ⚠ 위젯 + 상세 다이얼로그 메서드 제공.
+
+        구현은 inspect.getsource 패턴 + 시그니처 패턴으로 검증 (실제 위젯 표시는
+        Qt 환경 의존). UI 환경 없이 verify 가능한 가드:
+        1. BlockCard.__init__ + StepCardV2.__init__ 시그니처에 validation_warnings 인자
+        2. 카드 소스에 ⚠ 위젯 생성 + setToolTip + 클릭 핸들러 패턴
+        3. _show_validation_dialog 메서드 존재 양 클래스
+        4. caller (code_viewer._add_step_block + main_window._refresh_block_view +
+           ui_v2 caller) 가 validation_warnings 키 전달 패턴
+        5. 빈 warnings 시 ⚠ 위젯 미생성 (false positive 방지) — 조건문 패턴 검증
+        """
+        import inspect
+
+        from ui.code_viewer import BlockCard, BlockViewWidget
+        from ui.main_window import MainWindow
+        from ui_v2.main_window_v2 import MainWindowV2, StepCardV2
+
+        # 1) 시그니처 — BlockCard
+        block_sig = inspect.signature(BlockCard.__init__)
+        self.assert_true(
+            "validation_warnings" in block_sig.parameters,
+            f"[G7-C] BlockCard.__init__ 에 validation_warnings 인자 필수. got: {list(block_sig.parameters.keys())}",
+        )
+
+        # 2) 시그니처 — StepCardV2
+        step_sig = inspect.signature(StepCardV2.__init__)
+        self.assert_true(
+            "validation_warnings" in step_sig.parameters,
+            f"[G7-C] StepCardV2.__init__ 에 validation_warnings 인자 필수. got: {list(step_sig.parameters.keys())}",
+        )
+
+        # 3) BlockCard 소스 — ⚠ 위젯 패턴
+        block_init_src = inspect.getsource(BlockCard.__init__)
+        for pattern, desc in (
+            ('QLabel("⚠")', "⚠ QLabel 생성"),
+            ("setToolTip(", "tooltip 설정"),
+            ("if self._validation_warnings:", "warnings 있을 때만 위젯 (false positive 방지)"),
+            ("_show_validation_dialog", "클릭 핸들러 연결"),
+        ):
+            self.assert_true(
+                pattern in block_init_src,
+                f"[G7-C] BlockCard.__init__ 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 4) StepCardV2 소스 — 동일 패턴
+        step_init_src = inspect.getsource(StepCardV2.__init__)
+        for pattern, desc in (
+            ('QLabel("⚠")', "StepCardV2 ⚠ QLabel"),
+            ("setToolTip(", "StepCardV2 tooltip"),
+            ("if self._validation_warnings:", "StepCardV2 warnings 조건"),
+            ("_show_validation_dialog", "StepCardV2 클릭 핸들러"),
+        ):
+            self.assert_true(
+                pattern in step_init_src,
+                f"[G7-C] StepCardV2.__init__ 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 5) _show_validation_dialog 메서드 존재
+        self.assert_true(
+            hasattr(BlockCard, "_show_validation_dialog"),
+            "[G7-C] BlockCard._show_validation_dialog 메서드 필수",
+        )
+        self.assert_true(
+            hasattr(StepCardV2, "_show_validation_dialog"),
+            "[G7-C] StepCardV2._show_validation_dialog 메서드 필수",
+        )
+
+        # 6) 다이얼로그 내용에 kind label 매핑 (사용자 친화 메시지)
+        block_dialog_src = inspect.getsource(BlockCard._show_validation_dialog)
+        for kind in ("syntax", "redefined_var", "missing_try", "import_misplaced"):
+            self.assert_true(
+                f'"{kind}"' in block_dialog_src,
+                f"[G7-C] BlockCard._show_validation_dialog 에 kind '{kind}' 라벨 매핑 필수",
+            )
+
+        # 7) caller — code_viewer._add_step_block 가 validation_warnings 전달
+        add_block_src = inspect.getsource(BlockViewWidget._add_step_block)
+        self.assert_true(
+            'validation_warnings=data.get("validation_warnings")' in add_block_src,
+            "[G7-C] BlockViewWidget._add_step_block 가 data 의 validation_warnings 전달 필수",
+        )
+
+        # 8) caller — main_window._refresh_block_view 가 step_dict.validation_warnings 수집
+        refresh_src = inspect.getsource(MainWindow._refresh_block_view)
+        self.assert_true(
+            '"validation_warnings": step_dict.get("validation_warnings")' in refresh_src,
+            "[G7-C] MainWindow._refresh_block_view 가 step_dict 의 validation_warnings 를 steps_data 에 추가 필수",
+        )
+
+        # 9) caller — ui_v2 StepCardV2 호출이 sd.get("validation_warnings") 전달
+        v2_src = inspect.getsource(MainWindowV2)
+        self.assert_true(
+            'validation_warnings=list(sd.get("validation_warnings"' in v2_src,
+            "[G7-C] ui_v2 의 StepCardV2 호출이 sd.validation_warnings 전달 필수",
+        )
+
+    def test_100_g7d_regenerate_with_warnings_injects_prompt(self):
+        """[Phase 1.8 G7-D] 자동 재생성 흐름 — warnings 인용을 다음 prompt 에 inject.
+
+        가드:
+        1. prompt_builder.build_step_prompt_split / build_step_prompt 시그니처에
+           previous_warnings 인자 추가
+        2. previous_warnings 전달 시 user_text 에 sentinel 패턴 inject
+           ("이전 시도 코드 검사 결과", "반드시 피해야 할 문제")
+        3. previous_warnings=None 시 inject 안 됨 (idempotent — 기존 흐름 회귀 X)
+        4. app_service.generate_step 시그니처에 previous_warnings 인자 + prompt_builder
+           호출 시 전달
+        5. config/default_settings.json 에 execution.auto_regenerate_on_warning 키
+           (default false)
+        6. ui_v2 StepCardV2 에 regenerate_with_warnings_requested signal
+        7. _show_validation_dialog 에 '재생성' 버튼 + signal emit
+        8. MainWindowV2 가 새 signal 연결 + _on_regenerate_with_warnings 핸들러
+        9. MainWindowV2._send_request 시그니처에 previous_warnings 인자
+        """
+        import inspect
+        import json as _json
+        from pathlib import Path as _Path
+
+        from core.app_service import AppService
+        from core.prompt_builder import PromptBuilder
+        from ui_v2.main_window_v2 import MainWindowV2, StepCardV2
+
+        # 1) prompt_builder 시그니처
+        split_sig = inspect.signature(PromptBuilder.build_step_prompt_split)
+        self.assert_true(
+            "previous_warnings" in split_sig.parameters,
+            f"[G7-D] build_step_prompt_split 에 previous_warnings 인자 필수. got: {list(split_sig.parameters.keys())}",
+        )
+        legacy_sig = inspect.signature(PromptBuilder.build_step_prompt)
+        self.assert_true(
+            "previous_warnings" in legacy_sig.parameters,
+            f"[G7-D] build_step_prompt 에도 previous_warnings 인자 필수. got: {list(legacy_sig.parameters.keys())}",
+        )
+
+        # 2) inject 동작 — 빈 prompts 로 builder 생성 후 dummy session 으로 호출
+        class _DummySession:
+            steps: list = []
+            project_type: str = "desktop"
+
+            def __init__(self):
+                self.settings = {}
+
+        builder = PromptBuilder(prompts_config={})
+        session = _DummySession()
+        warnings = [
+            {"kind": "redefined_var", "message": "변수 'app' 재정의", "line": 2},
+            {"kind": "missing_try", "message": "위험한 호출 'pyautogui.click()' 노출", "line": 5},
+        ]
+        _, user_text_with = builder.build_step_prompt_split(
+            session=session,
+            user_request="step 3: 텍스트 입력",
+            previous_warnings=warnings,
+        )
+        for sentinel in (
+            "이전 시도 코드 검사 결과",
+            "반드시 피해야 할 문제",
+            "변수 재정의",
+            "try/except 누락",
+        ):
+            self.assert_true(
+                sentinel in user_text_with,
+                f"[G7-D] previous_warnings inject 시 user_text 에 '{sentinel}' 포함 필수",
+            )
+
+        # 3) previous_warnings=None 시 inject 안 됨 (idempotent)
+        _, user_text_none = builder.build_step_prompt_split(
+            session=session,
+            user_request="step 3: 텍스트 입력",
+        )
+        self.assert_true(
+            "이전 시도 코드 검사 결과" not in user_text_none,
+            "[G7-D] previous_warnings=None 시 inject 안 됨 (기존 흐름 회귀 방지)",
+        )
+
+        # 4) app_service.generate_step 시그니처 + prompt_builder 호출 전달
+        gen_sig = inspect.signature(AppService.generate_step)
+        self.assert_true(
+            "previous_warnings" in gen_sig.parameters,
+            f"[G7-D] AppService.generate_step 에 previous_warnings 인자 필수. got: {list(gen_sig.parameters.keys())}",
+        )
+        gen_src = inspect.getsource(AppService.generate_step)
+        self.assert_true(
+            "previous_warnings=previous_warnings" in gen_src,
+            "[G7-D] generate_step 가 prompt_builder.build_step_prompt_split 호출 시 previous_warnings 전달 필수",
+        )
+
+        # 5) default_settings.json 에 auto_regenerate_on_warning
+        proj_root = _Path(__file__).resolve().parent.parent
+        defaults = _json.loads(
+            (proj_root / "config" / "default_settings.json").read_text(encoding="utf-8")
+        )
+        self.assert_true(
+            "auto_regenerate_on_warning" in defaults.get("execution", {}),
+            f"[G7-D] default_settings.json 의 execution 에 auto_regenerate_on_warning 키 필수. got execution keys: {list(defaults.get('execution', {}).keys())}",
+        )
+        self.assert_equal(
+            defaults["execution"]["auto_regenerate_on_warning"],
+            False,
+            "[G7-D] auto_regenerate_on_warning default 는 False (사용자 클릭 우선)",
+        )
+
+        # 6) StepCardV2 에 새 signal
+        self.assert_true(
+            hasattr(StepCardV2, "regenerate_with_warnings_requested"),
+            "[G7-D] StepCardV2 에 regenerate_with_warnings_requested signal 필수",
+        )
+
+        # 7) _show_validation_dialog 에 재생성 버튼 + emit
+        dialog_src = inspect.getsource(StepCardV2._show_validation_dialog)
+        for pattern, desc in (
+            ('addButton("재생성"', "QMessageBox '재생성' 버튼 추가"),
+            ("regenerate_with_warnings_requested.emit", "재생성 클릭 시 signal emit"),
+            ("clickedButton() is regenerate_btn", "재생성 버튼 클릭 분기"),
+        ):
+            self.assert_true(
+                pattern in dialog_src,
+                f"[G7-D] _show_validation_dialog 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 8) MainWindowV2 의 signal 연결 + 핸들러
+        v2_src = inspect.getsource(MainWindowV2)
+        self.assert_true(
+            "card.regenerate_with_warnings_requested.connect" in v2_src,
+            "[G7-D] MainWindowV2 가 카드의 regenerate_with_warnings_requested 시그널 연결 필수",
+        )
+        self.assert_true(
+            hasattr(MainWindowV2, "_on_regenerate_with_warnings"),
+            "[G7-D] MainWindowV2._on_regenerate_with_warnings 핸들러 필수",
+        )
+        handler_src = inspect.getsource(MainWindowV2._on_regenerate_with_warnings)
+        for pattern, desc in (
+            ("validation_warnings", "step.validation_warnings 추출"),
+            ("previous_warnings=", "_send_request 에 previous_warnings 전달"),
+        ):
+            self.assert_true(
+                pattern in handler_src,
+                f"[G7-D] _on_regenerate_with_warnings 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 9) _send_request 시그니처에 previous_warnings
+        send_sig = inspect.signature(MainWindowV2._send_request)
+        self.assert_true(
+            "previous_warnings" in send_sig.parameters,
+            f"[G7-D] MainWindowV2._send_request 에 previous_warnings 인자 필수. got: {list(send_sig.parameters.keys())}",
+        )
+
+    def test_101_g4_connect_timeout_minimum_5s(self):
+        """[Phase 1.8 G4] Application().connect() 의 첫 timeout 이 5초 이상.
+
+        배경 (handoff §16 잔존 갭 #5): system_context #14(b) 의 예제 코드가
+        `timeout=3` 으로 짧음 → 매 step 누적 실행 시 기존 메모장이 부하/포커스
+        전환으로 1~2초 응답 지연 시 false-negative → except 분기 → `Popen` 으로
+        새 메모장 인스턴스 매번 추가.
+
+        Fix:
+        - prompts.json system_context #14(b) 의 첫 connect 예제 timeout=3 → 5
+        - timeout=3 금지 어휘 + polling 패턴 추가
+        - core/win_inspector.py:154 의 inspect_window 도 timeout=3 → 5
+
+        가드:
+        1. system_context #14(b) 영역에 `timeout=3` 패턴 부재 (또는 금지 어휘만)
+        2. system_context 에 `timeout=5` 권장 + 'timeout=3 금지' 어휘 sentinel
+        3. system_context 에 polling 대안 패턴 sentinel ('for _ in range(20)' + 'time.sleep(0.25)')
+        4. win_inspector inspect_window 의 connect timeout >= 5
+        """
+        import inspect as _inspect
+        import json as _json
+        from pathlib import Path as _Path
+
+        from core.win_inspector import WindowInspector
+
+        # 1+2+3) prompts.json system_context 검증
+        proj_root = _Path(__file__).resolve().parent.parent
+        prompts = _json.loads((proj_root / "config" / "prompts.json").read_text(encoding="utf-8"))
+        system_context = prompts.get("system_context", "")
+        self.assert_true(system_context, "[G4] system_context 본문 비어있지 않아야 함")
+
+        # 잔존 갭 #5 fix 의 핵심: 첫 connect 의 timeout=3 패턴이 system_context 의
+        # idempotent 예제 (#14(b)) 에서 제거되어 있어야 한다. 단 '금지' 어휘로 timeout=3
+        # 자체가 본문에 등장하는 건 OK (반례 명시) — 코드 라인 'timeout=3' 만 검사.
+        self.assert_true(
+            'connect(title_re=r".*메모장", timeout=3, found_index=0)' not in system_context,
+            "[G4] system_context 의 첫 connect 예제에 'timeout=3' 코드 라인 부재 필수 (5초 이상으로 보강)",
+        )
+
+        # G4 권장 어휘 + polling 패턴 sentinel
+        for sentinel, desc in (
+            ("timeout=5", "권장 timeout=5"),
+            ("timeout=3 금지", "timeout=3 금지 어휘 (잔존 갭 #5 fix)"),
+            ("for _ in range(20)", "polling 패턴 — 20 회 반복"),
+            ("time.sleep(0.25)", "polling 인터벌 — 0.25 초"),
+        ):
+            self.assert_true(
+                sentinel in system_context,
+                f"[G4] system_context 에 '{desc}' 패턴 필수: '{sentinel}'",
+            )
+
+        # 4) win_inspector inspect_window 의 connect timeout
+        inspect_src = _inspect.getsource(WindowInspector.inspect_window)
+        self.assert_true(
+            "timeout=5" in inspect_src or "timeout=3" not in inspect_src,
+            "[G4] WindowInspector.inspect_window 의 connect timeout 이 5 이상이어야 함 (timeout=3 부재 또는 5)",
+        )
+        self.assert_true(
+            'connect(title_re=f".*{title}.*", timeout=3)' not in inspect_src,
+            "[G4] inspect_window 의 connect 가 timeout=3 사용 금지 (5 이상으로 보강)",
+        )
+
+    def test_102_g7e1_legacy_ai_call_handler_attaches_validation_warnings(self):
+        """[Phase 1.8 G7-E1] legacy AICallHandler.on_ai_response 가 code_validator
+        hook 으로 Step.validation_warnings 메타를 부착한다.
+
+        배경: ui_v2 는 app_service.generate_step (G7-B hook) 으로 자동 부착되지만
+        legacy 는 직접 ai_engine.generate 호출이라 hook 없음 → 카드의 ⚠ 위젯이
+        legacy 세션에서 항상 안 뜸. G7-E1 은 legacy 의 Step 생성 직전에 동일 hook.
+        차단 X — 메타만 첨부. UI 재생성은 G7-E2.
+
+        가드:
+        1. AICallHandler.on_ai_response 소스에 validate_step_code import + 호출
+        2. Step 생성 시 validation_warnings 인자 전달
+        3. 정적 분석 실패 시 보호 (try/except)
+        4. prev_step_codes 수집 (모든 이전 step 의 step_code)
+        """
+        import inspect as _inspect
+
+        from ui.ai_call_handler import AICallHandler
+
+        src = _inspect.getsource(AICallHandler.on_ai_response)
+        for pattern, desc in (
+            ("from core.code_validator import validate_step_code", "validate_step_code import"),
+            ("validate_step_code(", "validate_step_code 호출"),
+            ("validation_warnings", "validation_warnings 변수 사용"),
+            ("validation_warnings=validation_warnings", "Step 생성 시 인자 전달"),
+            ("prev_step_codes", "prev_step_codes 수집 (변수 재정의 검사용)"),
+        ):
+            self.assert_true(
+                pattern in src,
+                f"[G7-E1] AICallHandler.on_ai_response 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 정적 분석 실패 시 보호 — import 가 try 블록 안에 위치
+        hook_idx = src.find("from core.code_validator import validate_step_code")
+        self.assert_true(hook_idx > 0, "[G7-E1] hook 블록 위치 확인")
+        prefix = src[max(0, hook_idx - 200) : hook_idx]
+        self.assert_true(
+            "try:" in prefix,
+            "[G7-E1] validate_step_code import 가 try 블록 안에 위치 (분석 실패 보호)",
+        )
+
+    def test_103_g7e2_legacy_blockcard_regenerate_with_warnings(self):
+        """[Phase 1.8 G7-E2] legacy BlockCard 의 ⚠ 다이얼로그 재생성 버튼 + signal
+        relay + AICallHandler.on_regenerate_with_warnings 핸들러 + call_ai_thread
+        의 previous_warnings 인자 전달.
+
+        ui_v2 의 G7-D 와 동일한 패턴을 legacy 에 이식. signal relay 는 BlockCard
+        → BlockViewWidget → CodeViewer → MainWindow → AICallHandler 의 3단계.
+
+        가드:
+        1. BlockCard 에 regenerate_with_warnings_requested signal
+        2. BlockCard._show_validation_dialog 에 '재생성' 버튼 + emit 패턴 (step_id > 0 만)
+        3. BlockViewWidget + CodeViewer 도 동일 outer signal + relay 연결
+        4. MainWindow signal 연결 + _on_regenerate_with_warnings 위임 stub
+        5. AICallHandler.on_regenerate_with_warnings 메서드 + call_ai_thread
+           시그니처에 previous_warnings 인자 + build_step_prompt 호출 시 전달
+        """
+        import inspect as _inspect
+
+        from ui.ai_call_handler import AICallHandler
+        from ui.code_viewer import BlockCard, BlockViewWidget, CodeViewer
+        from ui.main_window import MainWindow
+
+        # 1) BlockCard signal
+        self.assert_true(
+            hasattr(BlockCard, "regenerate_with_warnings_requested"),
+            "[G7-E2] BlockCard 에 regenerate_with_warnings_requested signal 필수",
+        )
+
+        # 2) _show_validation_dialog 패턴
+        dialog_src = _inspect.getsource(BlockCard._show_validation_dialog)
+        for pattern, desc in (
+            ('addButton("재생성"', "재생성 버튼 추가"),
+            ("regenerate_with_warnings_requested.emit", "signal emit"),
+            ("self.step_id > 0", "step_id > 0 만 재생성 (library/initial 제외)"),
+            ("clickedButton() is regenerate_btn", "재생성 버튼 클릭 분기"),
+        ):
+            self.assert_true(
+                pattern in dialog_src,
+                f"[G7-E2] BlockCard._show_validation_dialog 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 3) BlockViewWidget + CodeViewer outer signal + relay
+        self.assert_true(
+            hasattr(BlockViewWidget, "regenerate_with_warnings_requested"),
+            "[G7-E2] BlockViewWidget 에 regenerate_with_warnings_requested outer signal 필수",
+        )
+        self.assert_true(
+            hasattr(CodeViewer, "regenerate_with_warnings_requested"),
+            "[G7-E2] CodeViewer 에 regenerate_with_warnings_requested outer signal 필수",
+        )
+        # BlockViewWidget._add_step_block 가 카드 signal 을 outer 로 연결
+        add_block_src = _inspect.getsource(BlockViewWidget._add_step_block)
+        self.assert_true(
+            "card.regenerate_with_warnings_requested.connect(self.regenerate_with_warnings_requested)"
+            in add_block_src,
+            "[G7-E2] _add_step_block 가 카드의 regenerate signal 을 outer 로 relay 필수",
+        )
+        # CodeViewer 의 block_view signal 연결 — __init__ 또는 _setup_ui 등 어디든 OK
+        cv_src = _inspect.getsource(CodeViewer)
+        self.assert_true(
+            "self.block_view.regenerate_with_warnings_requested.connect" in cv_src,
+            "[G7-E2] CodeViewer 에 block_view 의 regenerate signal relay 필수",
+        )
+
+        # 4) MainWindow signal 연결 + 위임 stub
+        mw_src = _inspect.getsource(MainWindow)
+        self.assert_true(
+            "self.code_viewer.regenerate_with_warnings_requested.connect" in mw_src,
+            "[G7-E2] MainWindow 에 code_viewer 의 regenerate signal 연결 필수",
+        )
+        self.assert_true(
+            hasattr(MainWindow, "_on_regenerate_with_warnings"),
+            "[G7-E2] MainWindow._on_regenerate_with_warnings 위임 stub 필수",
+        )
+        stub_src = _inspect.getsource(MainWindow._on_regenerate_with_warnings)
+        self.assert_true(
+            "self.ai_handler.on_regenerate_with_warnings" in stub_src,
+            "[G7-E2] MainWindow._on_regenerate_with_warnings 가 ai_handler 로 위임 필수",
+        )
+
+        # 5) AICallHandler 메서드 + call_ai_thread 시그니처 + build_step_prompt 전달
+        self.assert_true(
+            hasattr(AICallHandler, "on_regenerate_with_warnings"),
+            "[G7-E2] AICallHandler.on_regenerate_with_warnings 메서드 필수",
+        )
+        handler_src = _inspect.getsource(AICallHandler.on_regenerate_with_warnings)
+        for pattern, desc in (
+            ("validation_warnings", "step.validation_warnings 추출"),
+            ('"previous_warnings": warnings', "call_ai_thread 에 previous_warnings kwarg 전달"),
+            ("user_request", "user_request 추출"),
+        ):
+            self.assert_true(
+                pattern in handler_src,
+                f"[G7-E2] on_regenerate_with_warnings 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # call_ai_thread 시그니처
+        call_sig = _inspect.signature(AICallHandler.call_ai_thread)
+        self.assert_true(
+            "previous_warnings" in call_sig.parameters,
+            f"[G7-E2] call_ai_thread 에 previous_warnings 인자 필수. got: {list(call_sig.parameters.keys())}",
+        )
+
+        # build_step_prompt 호출 시 previous_warnings 전달
+        call_src = _inspect.getsource(AICallHandler.call_ai_thread)
+        self.assert_true(
+            "previous_warnings=previous_warnings" in call_src,
+            "[G7-E2] call_ai_thread 의 build_step_prompt 호출이 previous_warnings 전달 필수",
+        )
+
+    def test_104_g6_prompt_strengthens_variable_reuse_and_try_except(self):
+        """[Phase 1.8 G6] system_context 의 try/except (#3) + 변수 재정의 (#20)
+        가이드 어휘 강화 — G7 의 사후 검출과 시너지.
+
+        배경: handoff §16 잔존 갭 #1 (변수 재정의) + #2 (try-except 누락) 은 G7
+        정적 분석으로 사후 검출 + 재생성으로 대응됐지만, 모델이 처음부터 회피하면
+        ⚠ 안 뜨고 토큰/시간 절약. G6 은 prompt-side 어휘 강화 (사전 회피).
+
+        가드:
+        1. #3 (try/except 강제) 에 정적 분석기 / 재생성 path 인용 어휘
+        2. #14(b) 변수 명명 규칙 끝에 #20 cross-reference
+        3. 새 #20 "이전 step 변수 재사용 — 재정의 금지" 가이드 본문
+        4. #20 에 회귀 사례 (5/10 DeepSeek-V3 메모장테스트 step 3) 인용
+        5. #20 에 module-level Assign 만 검사 어휘 (false positive 방지 설명)
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        proj_root = _Path(__file__).resolve().parent.parent
+        prompts = _json.loads((proj_root / "config" / "prompts.json").read_text(encoding="utf-8"))
+        sc = prompts.get("system_context", "")
+        self.assert_true(sc, "[G6] system_context 본문 비어있지 않아야 함")
+
+        # 1) #3 강화 — 정적 분석기 / 재생성 path 인용
+        for sentinel, desc in (
+            ("silent fallthrough", "외부 자원 silent fallthrough 경고"),
+            ("정적 분석기", "code_validator 검출 명시"),
+            ("code_validator", "정적 분석기 모듈명"),
+            ("재생성", "재생성 path 인용"),
+        ):
+            self.assert_true(
+                sentinel in sc,
+                f"[G6] #3 강화 — system_context 에 '{desc}' 어휘 필수: '{sentinel}'",
+            )
+
+        # 2) #14(b) cross-reference
+        self.assert_true(
+            "가이드 #20 참조" in sc,
+            "[G6] #14(b) 변수 명명 규칙 끝에 '#20 참조' cross-reference 필수",
+        )
+
+        # 3) 새 #20 본문 sentinel
+        for sentinel, desc in (
+            ("이전 step 변수 재사용", "#20 제목"),
+            ("재정의 금지", "재정의 금지 어휘"),
+            ("Jupyter mode 핵심", "jupyter mode 강조"),
+            ("`app`, `win`, `driver`", "재사용 대상 변수명 명시"),
+        ):
+            self.assert_true(
+                sentinel in sc,
+                f"[G6] #20 — system_context 에 '{desc}' 어휘 필수: '{sentinel}'",
+            )
+
+        # 4) 회귀 사례 인용
+        self.assert_true(
+            "DeepSeek-V3 메모장테스트 step 3" in sc,
+            "[G6] #20 에 5/10 DeepSeek-V3 회귀 사례 인용 필수 (구체 사례로 모델 학습 가이드)",
+        )
+
+        # 5) module-level Assign 만 검사 (false positive 방지 설명)
+        for sentinel, desc in (
+            ("module-level", "module-level scope 명시"),
+            ("for x in", "for-target 제외 명시 (loop 변수 무관)"),
+        ):
+            self.assert_true(
+                sentinel in sc,
+                f"[G6] #20 에 false positive 방지 — '{desc}' 어휘 필수: '{sentinel}'",
+            )
+
+    def test_105_f2_g7ux_run_hint_and_settings_checkbox(self):
+        """[Phase 1.8 F2 + G7-UX] step 생성 시 실행 힌트 토스트 (영구 dismiss) +
+        settings dialog 의 auto_regenerate_on_warning 체크박스.
+
+        F2: 사용자가 ▶ Ctrl+R / ⏯ 단독 버튼 발견성 향상. 토스트 1회만, settings.ui
+        .hint_run_shown 으로 영구 dismiss.
+
+        G7-UX: G7-D 가 default_settings.json 에 execution.auto_regenerate_on_warning
+        키만 정의 — UI 토글 없음. settings dialog 의 실행 탭에 체크박스 + tooltip
+        노출 + save/load 연결.
+
+        가드:
+        1. config/default_settings.json 의 ui.hint_run_shown: false (F2)
+        2. ui_v2 MainWindowV2._on_step_done 에 hint 토스트 + 영구화 로직 (F2)
+        3. SettingsDialog 에 auto_regen_cb 체크박스 존재 (G7-UX)
+        4. save 로직에 auto_regenerate_on_warning 영구화 (G7-UX)
+        5. _build_ui (또는 init) 가 exec_config.get("auto_regenerate_on_warning") 로 초기화
+        """
+        import inspect as _inspect
+        import json as _json
+        from pathlib import Path as _Path
+
+        from ui.settings_dialog import SettingsDialog
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        # 1) F2: default_settings.json
+        proj_root = _Path(__file__).resolve().parent.parent
+        defaults = _json.loads(
+            (proj_root / "config" / "default_settings.json").read_text(encoding="utf-8")
+        )
+        self.assert_true(
+            "hint_run_shown" in defaults.get("ui", {}),
+            f"[F2] default_settings.json 의 ui 에 hint_run_shown 키 필수. got ui keys: {list(defaults.get('ui', {}).keys())}",
+        )
+        self.assert_equal(
+            defaults["ui"]["hint_run_shown"],
+            False,
+            "[F2] hint_run_shown default 는 False (첫 사용자 시 토스트 1회 표시)",
+        )
+
+        # 2) F2: _on_step_done 의 hint 토스트 + 영구화
+        step_done_src = _inspect.getsource(MainWindowV2._on_step_done)
+        for pattern, desc in (
+            ("hint_run_shown", "ui.hint_run_shown 플래그 사용"),
+            ("Ctrl+R", "Ctrl+R 단축키 안내"),
+            ("⏯ 단독", "단독 버튼 안내"),
+            ('ui_cfg["hint_run_shown"] = True', "영구 dismiss 플래그 설정"),
+            ("_save_settings(self.settings)", "settings.json 영구 저장"),
+        ):
+            self.assert_true(
+                pattern in step_done_src,
+                f"[F2] _on_step_done 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 3+4+5) G7-UX: SettingsDialog 의 auto_regen_cb + save
+        sd_src = _inspect.getsource(SettingsDialog)
+        for pattern, desc in (
+            ("self.auto_regen_cb", "auto_regen_cb 위젯"),
+            ('exec_config.get("auto_regenerate_on_warning"', "load: exec_config 에서 초기화"),
+            (
+                'self.settings["execution"]["auto_regenerate_on_warning"]',
+                "save: 영구화",
+            ),
+            ("자동 재생성", "체크박스 라벨 한국어"),
+        ):
+            self.assert_true(
+                pattern in sd_src,
+                f"[G7-UX] SettingsDialog 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+    def test_106_f1_auto_run_on_step_create(self):
+        """[Phase 1.8 F1] step 카드 생성 직후 자동 단독 실행 (옵션 ON 시).
+
+        잔존 갭 #6 (마지막 남은 ⏳ 항목): 현재 사용자가 AI 응답 후 ▶ Ctrl+R / ⏯ 단독
+        버튼 별도로 눌러야 실행. F1 은 settings.execution.auto_run_on_step_create
+        옵션 ON 시 자동 trigger. **default OFF — 안전**: AI 코드가 위험 동작 포함 시
+        사용자 확인 없이 실행 위험.
+
+        ui_v2 의 무한 루프 회피: blocks 실행 path 의 step_done 도 같은 핸들러로
+        들어오므로, 자동 실행 trigger 는 별도 signal (request_auto_run) 사용 —
+        generate_step worker 만 emit, _on_run_single 에 직접 연결.
+
+        가드:
+        1. config/default_settings.json 의 execution.auto_run_on_step_create: false
+        2. ui_v2 V2Signals 에 request_auto_run signal + worker 의 옵션 체크 emit +
+           MainWindowV2 의 connect → _on_run_single
+        3. legacy ai_call_handler.on_ai_response 에 옵션 체크 + _on_run_single_step 호출
+        4. SettingsDialog 에 auto_run_cb 체크박스 + tooltip 의 ⚠ 경고 + save
+        """
+        import inspect as _inspect
+        import json as _json
+        from pathlib import Path as _Path
+
+        from ui.ai_call_handler import AICallHandler
+        from ui.settings_dialog import SettingsDialog
+        from ui_v2.main_window_v2 import MainWindowV2, V2Signals
+
+        # 1) default_settings.json
+        proj_root = _Path(__file__).resolve().parent.parent
+        defaults = _json.loads(
+            (proj_root / "config" / "default_settings.json").read_text(encoding="utf-8")
+        )
+        self.assert_true(
+            "auto_run_on_step_create" in defaults.get("execution", {}),
+            f"[F1] default_settings.json 의 execution 에 auto_run_on_step_create 키 필수. got execution keys: {list(defaults.get('execution', {}).keys())}",
+        )
+        self.assert_equal(
+            defaults["execution"]["auto_run_on_step_create"],
+            False,
+            "[F1] auto_run_on_step_create default 는 False (위험 동작 안전)",
+        )
+
+        # 2) ui_v2: V2Signals.request_auto_run + worker emit + connect
+        self.assert_true(
+            hasattr(V2Signals, "request_auto_run"),
+            "[F1] V2Signals 에 request_auto_run signal 필수 (blocks 실행 path 와 분리)",
+        )
+        v2_src = _inspect.getsource(MainWindowV2)
+        for pattern, desc in (
+            ('"auto_run_on_step_create"', "worker 의 옵션 체크"),
+            ("self.signals.request_auto_run.emit(step.step_id)", "worker 의 signal emit"),
+            (
+                "self.signals.request_auto_run.connect(self._on_run_single)",
+                "MainWindowV2 의 signal connect → _on_run_single",
+            ),
+        ):
+            self.assert_true(
+                pattern in v2_src,
+                f"[F1] ui_v2 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 3) legacy ai_call_handler.on_ai_response 의 옵션 체크 + 자동 실행
+        legacy_src = _inspect.getsource(AICallHandler.on_ai_response)
+        for pattern, desc in (
+            ('"auto_run_on_step_create"', "legacy 의 옵션 체크"),
+            ("mw._on_run_single_step(step.step_id)", "legacy 의 자동 실행 호출"),
+            ("step.step_id > 0", "step_id > 0 (library/initial 제외)"),
+        ):
+            self.assert_true(
+                pattern in legacy_src,
+                f"[F1] legacy ai_call_handler 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+        # 4) SettingsDialog 에 auto_run_cb + tooltip ⚠ + save
+        sd_src = _inspect.getsource(SettingsDialog)
+        for pattern, desc in (
+            ("self.auto_run_cb", "auto_run_cb 위젯"),
+            ('exec_config.get("auto_run_on_step_create"', "load: 초기화"),
+            (
+                'self.settings["execution"]["auto_run_on_step_create"]',
+                "save: 영구화",
+            ),
+            ("자동 실행", "체크박스 라벨 한국어"),
+            ("위험 동작", "tooltip 경고 어휘 (사용자 인지)"),
+        ):
+            self.assert_true(
+                pattern in sd_src,
+                f"[F1] SettingsDialog 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+    def test_107_c1_i18n_infrastructure(self):
+        """[Phase 1.9 C-1] i18n 인프라 — core.i18n + locale catalogue.
+
+        5/9 dual-locale 결정 + commercial_review §7 게이트 #3 (영어 + 한국어
+        콘텐츠 mix) 준비. C-1 은 인프라만 구축, UI 연결은 후속 unit.
+
+        가드:
+        1. core.i18n import + set_locale/get_locale/tr/reset_cache 4 함수 존재
+        2. fallback locale = "en" (글로벌 우선)
+        3. locale catalogue 양쪽 (en.json + ko.json) 존재 + 동일 키 집합
+        4. tr() 기본 동작 — current → fallback → key, format 치환
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        from core import i18n
+
+        # 1) 모듈 API 4 함수
+        for fn in ("set_locale", "get_locale", "tr", "reset_cache"):
+            self.assert_true(
+                callable(getattr(i18n, fn, None)),
+                f"[C-1] core.i18n.{fn} 호출 가능 필수",
+            )
+
+        # 2) fallback locale = "en"
+        self.assert_equal(
+            i18n._FALLBACK_LOCALE,
+            "en",
+            "[C-1] fallback locale 은 'en' (5/9 글로벌 우선 결정)",
+        )
+
+        # 3) catalogue 양쪽 존재 + 동일 키 집합
+        locale_dir = _Path(i18n.__file__).parent / "locale"
+        en_path = locale_dir / "en.json"
+        ko_path = locale_dir / "ko.json"
+        self.assert_true(en_path.exists(), f"[C-1] {en_path} 필수")
+        self.assert_true(ko_path.exists(), f"[C-1] {ko_path} 필수")
+        en_cat = _json.loads(en_path.read_text(encoding="utf-8"))
+        ko_cat = _json.loads(ko_path.read_text(encoding="utf-8"))
+        self.assert_equal(
+            set(en_cat.keys()),
+            set(ko_cat.keys()),
+            "[C-1] en/ko catalogue 키 집합 동일 (한쪽 추가 시 다른쪽도 추가)",
+        )
+        self.assert_true(
+            len(en_cat) >= 1,
+            f"[C-1] en catalogue 최소 1개 키 (인프라 가드용 sample). got {len(en_cat)}",
+        )
+
+        # 4) tr 동작 — current → fallback → key
+        i18n.reset_cache()
+        i18n.set_locale("en")
+        self.assert_equal(i18n.tr("common.ok"), "OK", "[C-1] en locale tr")
+        i18n.set_locale("ko")
+        self.assert_equal(i18n.tr("common.ok"), "확인", "[C-1] ko locale tr")
+        # 미정의 키 → 키 자체 반환 (placeholder 안 깨짐)
+        self.assert_equal(
+            i18n.tr("nonexistent.key.xyz"),
+            "nonexistent.key.xyz",
+            "[C-1] 미정의 키는 키 자체 반환",
+        )
+        # 미지원 locale → fallback (en) 으로 조회
+        i18n.set_locale("xx")
+        self.assert_equal(
+            i18n.tr("common.ok"),
+            "OK",
+            "[C-1] 미지원 locale 은 fallback (en) 사용",
+        )
+        # format 치환 (인자 누락 시 원문 반환)
+        # catalogue 에 format 키 없는 sample 만 있으므로 missing key path 도 확인
+        i18n.set_locale("en")
+        self.assert_equal(i18n.tr("x.{a}", a="1"), "x.{a}", "[C-1] missing key + format 시 키 반환")
+
+        # cleanup — locale 복원
+        i18n.reset_cache()
+        i18n.set_locale("en")
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 

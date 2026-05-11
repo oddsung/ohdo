@@ -588,6 +588,9 @@ class BlockCard(QFrame):
     wait_changed = Signal(int, object)  # object 로 None 허용
     # 블럭 삭제 요청 (step_id)
     block_delete_requested = Signal(int)
+    # G7-E2: ⚠ 다이얼로그의 재생성 버튼 → MainWindow 가 step lookup + warnings 인용 prompt
+    # 으로 AI 재호출. (ui_v2 의 regenerate_with_warnings_requested 와 동일 의미)
+    regenerate_with_warnings_requested = Signal(int)  # step_id
 
     _BTN_STYLE = """
         QPushButton {
@@ -642,6 +645,7 @@ class BlockCard(QFrame):
         parent=None,
         wait_after_ms: int | None = None,
         default_wait_ms: int = 500,
+        validation_warnings: list[dict] | None = None,
     ):
         """
         Args:
@@ -651,6 +655,8 @@ class BlockCard(QFrame):
             status:  "✅" / "❌" / "🔄" / "" 등 실행 상태 아이콘
             wait_after_ms: 이 step 후 개별 대기시간 (None = default 사용)
             default_wait_ms: settings 의 기본값 (라벨 회색 표시용)
+            validation_warnings: code_validator 정적 분석 결과 (G7-C). 빈 리스트/None
+                이면 ⚠ 위젯 미표시. 각 원소: {kind, message, line}.
         """
         super().__init__(parent)
         self.step_id = step_id
@@ -658,6 +664,7 @@ class BlockCard(QFrame):
         self._editing = False
         self._wait_after_ms = wait_after_ms
         self._default_wait_ms = default_wait_ms
+        self._validation_warnings = list(validation_warnings or [])
 
         # 테두리 색: library(0)=파랑, initial(-1)=노랑, step(>0)=어둠
         if step_id == 0:
@@ -707,6 +714,27 @@ class BlockCard(QFrame):
         self.status_label = QLabel(status)
         self.status_label.setStyleSheet("color: #a6e3a1; border: none; font-size: 13px;")
         h_layout.addWidget(self.status_label)
+
+        # G7-C: 정적 분석 경고 표시 — issues 있을 때만 ⚠ 위젯. 클릭 시 상세 다이얼로그.
+        self.validation_warning_label: QLabel | None = None
+        if self._validation_warnings:
+            self.validation_warning_label = QLabel("⚠")
+            self.validation_warning_label.setStyleSheet(
+                "color: #f9e2af; border: none; font-size: 14px; font-weight: bold;"
+            )
+            self.validation_warning_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            tooltip_lines = [f"코드 검사 경고 {len(self._validation_warnings)}건 (클릭: 상세 보기)"]
+            for w in self._validation_warnings[:3]:
+                line_str = f" (line {w.get('line')})" if w.get("line") else ""
+                tooltip_lines.append(f"- [{w.get('kind', '?')}]{line_str} {w.get('message', '')}")
+            if len(self._validation_warnings) > 3:
+                tooltip_lines.append(f"... 외 {len(self._validation_warnings) - 3}건")
+            self.validation_warning_label.setToolTip("\n".join(tooltip_lines))
+            self.validation_warning_label.mousePressEvent = lambda _e: (
+                self._show_validation_dialog()
+            )
+            h_layout.addWidget(self.validation_warning_label)
+
         h_layout.addStretch()
 
         # ── 수정 버튼 ──
@@ -979,6 +1007,44 @@ class BlockCard(QFrame):
         if reply == QMessageBox.StandardButton.Yes:
             self.block_delete_requested.emit(self.step_id)
 
+    def _show_validation_dialog(self) -> None:
+        """G7-C/E2: ⚠ 아이콘 클릭 → 정적 분석 경고 상세 다이얼로그.
+
+        각 issue 의 kind / line / message 를 한 줄씩 표시. 사용자가 한눈에 보고
+        "재생성" 버튼으로 warnings 인용 prompt 로 AI 재호출 (G7-E2), 또는 닫기.
+        ui_v2 의 StepCardV2._show_validation_dialog 와 동일 패턴.
+        """
+        lines = [f"Step {self.step_id} 코드 검사 경고 {len(self._validation_warnings)}건\n"]
+        kind_label = {
+            "syntax": "문법 오류",
+            "redefined_var": "변수 재정의",
+            "missing_try": "try/except 누락",
+            "import_misplaced": "import 위치 위반",
+        }
+        for idx, w in enumerate(self._validation_warnings, start=1):
+            kind = w.get("kind", "?")
+            label = kind_label.get(kind, kind)
+            line_no = w.get("line")
+            line_str = f" (line {line_no})" if line_no else ""
+            msg = w.get("message", "")
+            lines.append(f"{idx}. [{label}]{line_str} {msg}")
+        lines.append("")
+        lines.append("'재생성' 클릭 시 위 문제를 AI 에게 알리고 같은 요청으로 다시 생성합니다.")
+
+        # G7-E2: 재생성 버튼 — 클릭 시 새 signal emit (MainWindow 가 받아서 ai_call_handler 호출).
+        # step_id <= 0 (library/initial) 은 재생성 의미 없음 — 정보 표시만.
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle(f"Step {self.step_id} 코드 검사 경고")
+        msg_box.setText("\n".join(lines))
+        regenerate_btn = None
+        if self.step_id > 0:
+            regenerate_btn = msg_box.addButton("재생성", QMessageBox.ButtonRole.ActionRole)
+        msg_box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
+        msg_box.exec()
+        if regenerate_btn is not None and msg_box.clickedButton() is regenerate_btn:
+            self.regenerate_with_warnings_requested.emit(self.step_id)
+
 
 # ──────────────────────────────────────────────────
 # 블럭 뷰 위젯 (Colab-style 전체 레이아웃)
@@ -1008,6 +1074,8 @@ class BlockViewWidget(QWidget):
     block_code_edited = Signal(int, str)
     # 블럭 삭제 요청 (step_id)
     block_delete_requested = Signal(int)
+    # G7-E2: 카드 ⚠ 다이얼로그의 재생성 버튼 relay (step_id)
+    regenerate_with_warnings_requested = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1214,12 +1282,14 @@ class BlockViewWidget(QWidget):
             status=status,
             wait_after_ms=data.get("wait_after_ms"),
             default_wait_ms=self._default_wait_ms,
+            validation_warnings=data.get("validation_warnings") or [],
         )
         card.run_from_here_requested.connect(self._on_run_from)
         card.run_single_requested.connect(self.run_single_step_requested)
         card.block_code_edited.connect(self.block_code_edited)
         card.block_delete_requested.connect(self.block_delete_requested)
         card.wait_changed.connect(self.wait_changed)
+        card.regenerate_with_warnings_requested.connect(self.regenerate_with_warnings_requested)
         self._block_cards.append(card)
         self._remove_stretch()
         self.cards_layout.addWidget(card)
@@ -1335,6 +1405,9 @@ class CodeViewer(QWidget):
     kernel_reset_requested = Signal()  # 커널 재시작 요청
     block_step_code_edited = Signal(int, str)  # 블럭에서 코드 수정 (step_id, new_code)
     block_step_delete_requested = Signal(int)  # 블럭 삭제 요청 (step_id)
+    # G7-E2: 블럭 카드의 ⚠ 다이얼로그 재생성 버튼 relay (step_id). MainWindow 가
+    # ai_handler 의 on_regenerate_with_warnings 로 위임.
+    regenerate_with_warnings_requested = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1381,6 +1454,9 @@ class CodeViewer(QWidget):
         self.block_view.stop_requested.connect(self.stop_code_requested)
         self.block_view.block_code_edited.connect(self.block_step_code_edited)
         self.block_view.block_delete_requested.connect(self.block_step_delete_requested)
+        self.block_view.regenerate_with_warnings_requested.connect(
+            self.regenerate_with_warnings_requested
+        )
         self.tab_widget.addTab(self.block_view, "🧱 블럭 뷰")
 
         layout.addWidget(self.tab_widget)

@@ -151,7 +151,8 @@ class WindowInspector:
             if handle:
                 app.connect(handle=handle)
             elif title:
-                app.connect(title_re=f".*{title}.*", timeout=3)
+                # G4: timeout=3 은 응답 지연 환경에서 false-negative 가능 — 5초로 보강.
+                app.connect(title_re=f".*{title}.*", timeout=5)
             else:
                 return {"error": "title 또는 handle을 지정해주세요."}
 

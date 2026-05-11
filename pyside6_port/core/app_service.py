@@ -577,6 +577,7 @@ class AppService:
         element_context: Optional[str] = None,
         window_context: Optional[str] = None,
         is_browser_element: bool = False,
+        previous_warnings: Optional[list[dict]] = None,
     ) -> tuple[Optional[Step], "AIResponse"]:
         """사용자 요청 → 프롬프트 구성 → AI 호출 → Step 생성 + 세션에 추가.
 
@@ -629,6 +630,7 @@ class AppService:
             element_context=element_context,
             window_context=window_context,
             is_browser_element=is_browser_element,
+            previous_warnings=previous_warnings,
         )
         # 로깅용 합본 (대화 로그 저장 + on_progress 메시지) — 어댑터엔 split 전달
         prompt = (system_text + "\n\n" + user_text) if system_text else user_text
@@ -696,6 +698,30 @@ class AppService:
         delta_body = _ecd(separated_body, prev_body) if prev_body else separated_body
         delta_imports = _eid(separated_imports, prev_imports)
 
+        # G7-B (Phase 1.8): AI 가 생성한 delta_body 정적 분석. DeepSeek 같은
+        # 모델이 system_context 가이드를 100% 안 따르는 케이스 (변수 재정의 /
+        # try-except 누락 / import 위치 위반 / SyntaxError) 를 사용자에게 경고.
+        # 차단 X — 실행은 그대로 가능. UI 표시 + 자동 재생성은 G7-C/D.
+        # 정적 분석 자체 실패는 try/except 로 막아 step 생성 흐름 보호.
+        validation_warnings: list[dict] = []
+        try:
+            from .code_validator import validate_step_code
+
+            prev_step_codes_for_check: list[str] = []
+            for ls_data in steps_for_prev:
+                ls = ls_data if isinstance(ls_data, dict) else {}
+                sc = ls.get("step_code") or ""
+                if sc:
+                    prev_step_codes_for_check.append(sc)
+            val_result = validate_step_code(delta_body, prev_step_codes=prev_step_codes_for_check)
+            validation_warnings = [
+                {"kind": iss.kind, "message": iss.message, "line": iss.line}
+                for iss in val_result.issues
+            ]
+        except Exception:
+            # 정적 분석 실패는 step 생성을 막지 않음
+            pass
+
         # Step 생성 + 세션 추가 — D6: 첨부 이미지가 있으면 captures 에 보존
         # (카드 thumbnail 표시 + 디버깅 추적용)
         step = Step(
@@ -707,6 +733,7 @@ class AppService:
             captures=list(images) if images else [],
             step_code=delta_body,
             step_imports=delta_imports,
+            validation_warnings=validation_warnings,
         )
         self.add_step(session.session_id, step)
         return step, response

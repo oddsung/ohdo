@@ -266,6 +266,10 @@ class MainWindow(QMainWindow):
         self.code_viewer.kernel_reset_requested.connect(self._on_kernel_reset)
         self.code_viewer.block_step_code_edited.connect(self._on_block_step_code_edited)
         self.code_viewer.block_step_delete_requested.connect(self._on_step_delete)
+        # G7-E2: BlockCard ⚠ 다이얼로그 재생성 버튼 → ai_handler 로 위임
+        self.code_viewer.regenerate_with_warnings_requested.connect(
+            self._on_regenerate_with_warnings
+        )
         self.main_splitter.addWidget(self.code_viewer)
 
         # 스플리터 비율 설정 (세션:대화:코드 = 1:2:2)
@@ -1066,6 +1070,8 @@ class MainWindow(QMainWindow):
                     "delta_code": delta_code,
                     "status": "",
                     "wait_after_ms": step_dict.get("wait_after_ms"),
+                    # G7-C: 정적 분석 경고 메타 (code_validator). 카드 헤더 ⚠ 표시.
+                    "validation_warnings": step_dict.get("validation_warnings") or [],
                 }
             )
             prev_step_dict = step_dict
@@ -1088,6 +1094,10 @@ class MainWindow(QMainWindow):
     def _stop_session_kernels(self):
         """현재 세션의 커널을 정지합니다 (세션 전환 시 호출) — handler 위임."""
         self.block_executor.stop_session_kernels()
+
+    def _on_regenerate_with_warnings(self, step_id: int) -> None:
+        """G7-E2: BlockCard ⚠ 다이얼로그의 재생성 버튼 — AICallHandler 로 위임."""
+        self.ai_handler.on_regenerate_with_warnings(step_id)
 
     def _get_valid_python_exe(self) -> str:
         """유효한 Python 실행 경로 반환 — handler 위임."""

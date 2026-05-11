@@ -78,6 +78,7 @@ class PromptBuilder:
         max_history_steps: int = 5,
         project_type: str = "desktop",
         is_browser_element: bool = False,
+        previous_warnings: Optional[list[dict]] = None,
     ) -> str:
         """
         단계별 대화 프롬프트를 생성합니다.
@@ -100,6 +101,7 @@ class PromptBuilder:
             max_history_steps=max_history_steps,
             project_type=project_type,
             is_browser_element=is_browser_element,
+            previous_warnings=previous_warnings,
         )
         return (system_text + "\n\n" + user_text) if system_text else user_text
 
@@ -114,6 +116,7 @@ class PromptBuilder:
         max_history_steps: int = 5,
         project_type: str = "desktop",
         is_browser_element: bool = False,
+        previous_warnings: Optional[list[dict]] = None,
     ) -> tuple[str, str]:
         """P1b: build_step_prompt 의 split 버전 — (system_text, user_text) 반환.
 
@@ -134,6 +137,7 @@ class PromptBuilder:
             max_history_steps=max_history_steps,
             project_type=project_type,
             is_browser_element=is_browser_element,
+            previous_warnings=previous_warnings,
         )
 
     def _build_step_prompt_parts(
@@ -147,6 +151,7 @@ class PromptBuilder:
         max_history_steps: int = 5,
         project_type: str = "desktop",
         is_browser_element: bool = False,
+        previous_warnings: Optional[list[dict]] = None,
     ) -> tuple[str, str]:
         """내부 빌더 — (system_text, user_text) 반환. system 은 self.system_context,
         user 는 사용자 요청 + 컨텍스트 + 규칙. 두 호출자 (build_step_prompt /
@@ -166,6 +171,38 @@ class PromptBuilder:
             "※ 코드 내 주석(#으로 시작하는 줄)은 반드시 한 줄로만 작성하세요. 주석 안에 줄바꿈(\\n)을 포함하면 Python 문법 오류가 발생합니다."
         )
         parts.append("")
+
+        # ═══════════════════════════════════════════
+        # [1.5] G7-D: 이전 시도 정적 분석 경고 (재생성 흐름) — 있을 때만
+        # ═══════════════════════════════════════════
+        # AI 가 이전에 생성한 코드가 code_validator 의 검사를 통과 못 했을 때,
+        # 사용자가 ⚠ 다이얼로그에서 "재생성" 클릭 → 이 섹션이 prompt 에 inject.
+        # 이전 실수를 명시적으로 알려서 같은 패턴을 반복하지 않도록 강제.
+        if previous_warnings:
+            parts.append("## 🚨 이전 시도 코드 검사 결과 (반드시 피해야 할 문제)")
+            parts.append(
+                "이전에 생성한 코드가 정적 분석에서 아래 문제로 실패했습니다. "
+                "이번 코드 생성 시 **반드시 같은 실수를 피하세요**:"
+            )
+            _kind_label = {
+                "syntax": "문법 오류 (들여쓰기/괄호 등)",
+                "redefined_var": "변수 재정의 (jupyter mode 호환 위반)",
+                "missing_try": "try/except 누락 (외부 자원 호출 보호 안 됨)",
+                "import_misplaced": "import 위치 위반 (try/def/if 안 import)",
+            }
+            for idx, w in enumerate(previous_warnings, start=1):
+                kind = w.get("kind", "?")
+                label = _kind_label.get(kind, kind)
+                line_no = w.get("line")
+                line_str = f" (line {line_no})" if line_no else ""
+                msg = w.get("message", "")
+                parts.append(f"  {idx}. [{label}]{line_str} {msg}")
+            parts.append(
+                "→ 위 문제 해결: (a) 이전 step 에서 정의한 변수 (`app`, `win`, `driver` 등) 를 "
+                "다시 정의하지 말고 그대로 재사용. (b) 모든 외부 자원 호출은 try/except 로 감쌀 것. "
+                "(c) 모든 import 는 코드 최상단 (라인 1~N) 에만 작성. (d) 들여쓰기/괄호 검증."
+            )
+            parts.append("")
 
         # ═══════════════════════════════════════════
         # [2] 컨텍스트 (이전 스텝/코드)

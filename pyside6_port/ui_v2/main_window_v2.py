@@ -170,6 +170,9 @@ class V2Signals(QObject):
     log = Signal(str)
     step_done = Signal(int, bool, str)  # step_id, success, message
     refresh_view = Signal()
+    # F1: generate_step worker 가 옵션 체크 후 emit — _on_run_single 로 연결
+    # (blocks 실행 path 의 step_done 과 분리해서 무한 루프 회피)
+    request_auto_run = Signal(int)
 
 
 class MessageInput(QPlainTextEdit):
@@ -492,6 +495,9 @@ class StepCardV2(QFrame):
     reorder_requested = Signal(int, str)  # step_id, "up" | "down"
     # 코드 직접 수정 (v1 BlockCard.block_code_edited 패턴 재사용)
     code_edited = Signal(int, str)  # step_id, new_code
+    # G7-D: ⚠ 다이얼로그의 재생성 버튼 → MainWindow 가 step lookup + warnings 인용 prompt
+    # 으로 generate_step 재호출. (regenerate_requested 와 분리 — warnings 인용 path 명시)
+    regenerate_with_warnings_requested = Signal(int)  # step_id
 
     def __init__(
         self,
@@ -503,11 +509,14 @@ class StepCardV2(QFrame):
         status: str = "",
         captures: Optional[list[str]] = None,
         expanded: bool = False,
+        validation_warnings: Optional[list[dict]] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.step_id = step_id
         self._captures = list(captures or [])
+        # G7-C: code_validator 정적 분석 결과. 빈 리스트/None 이면 ⚠ 미표시.
+        self._validation_warnings: list[dict] = list(validation_warnings or [])
 
         # 테두리 색 — wireframes_v2.md §1
         if step_id == 0:
@@ -561,6 +570,26 @@ class StepCardV2(QFrame):
             status_label = QLabel(status)
             status_label.setStyleSheet(f"color: {COLORS['success']}; border: none;")
             header.addWidget(status_label)
+
+        # G7-C: 정적 분석 경고 표시 — issues 있을 때만 ⚠ 위젯. 클릭 시 상세 다이얼로그.
+        self.validation_warning_label: Optional[QLabel] = None
+        if self._validation_warnings:
+            self.validation_warning_label = QLabel("⚠")
+            self.validation_warning_label.setStyleSheet(
+                f"color: {COLORS['warning']}; border: none; font-size: 14px; font-weight: bold;"
+            )
+            self.validation_warning_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            tooltip_lines = [f"코드 검사 경고 {len(self._validation_warnings)}건 (클릭: 상세 보기)"]
+            for w in self._validation_warnings[:3]:
+                line_str = f" (line {w.get('line')})" if w.get("line") else ""
+                tooltip_lines.append(f"- [{w.get('kind', '?')}]{line_str} {w.get('message', '')}")
+            if len(self._validation_warnings) > 3:
+                tooltip_lines.append(f"... 외 {len(self._validation_warnings) - 3}건")
+            self.validation_warning_label.setToolTip("\n".join(tooltip_lines))
+            self.validation_warning_label.mousePressEvent = lambda _e: (
+                self._show_validation_dialog()
+            )
+            header.addWidget(self.validation_warning_label)
 
         # 헤더 영역 클릭 → 토글 (drag-drop 의 mousePressEvent 와 충돌 회피 위해
         # frame 자체에 mousePressEvent 부착)
@@ -787,6 +816,40 @@ class StepCardV2(QFrame):
         self._content_widget.setVisible(expanded)
         self._expand_icon.setText("▼" if expanded else "▶")
 
+    def _show_validation_dialog(self) -> None:
+        """G7-C/D: ⚠ 아이콘 클릭 → 정적 분석 경고 상세 다이얼로그.
+
+        각 issue 의 kind / line / message 를 한 줄씩 표시. 사용자가 한눈에 보고
+        "재생성" 버튼으로 warnings 인용 prompt 로 AI 재호출 (G7-D), 또는 닫기.
+        """
+        lines = [f"Step {self.step_id} 코드 검사 경고 {len(self._validation_warnings)}건\n"]
+        kind_label = {
+            "syntax": "문법 오류",
+            "redefined_var": "변수 재정의",
+            "missing_try": "try/except 누락",
+            "import_misplaced": "import 위치 위반",
+        }
+        for idx, w in enumerate(self._validation_warnings, start=1):
+            kind = w.get("kind", "?")
+            label = kind_label.get(kind, kind)
+            line_no = w.get("line")
+            line_str = f" (line {line_no})" if line_no else ""
+            msg = w.get("message", "")
+            lines.append(f"{idx}. [{label}]{line_str} {msg}")
+        lines.append("")
+        lines.append("'재생성' 클릭 시 위 문제를 AI 에게 알리고 같은 요청으로 다시 생성합니다.")
+
+        # G7-D: Retry 버튼 — 클릭 시 새 signal emit (MainWindow 가 받아서 재생성).
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle(f"Step {self.step_id} 코드 검사 경고")
+        msg_box.setText("\n".join(lines))
+        regenerate_btn = msg_box.addButton("재생성", QMessageBox.ButtonRole.ActionRole)
+        msg_box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
+        msg_box.exec()
+        if msg_box.clickedButton() is regenerate_btn:
+            self.regenerate_with_warnings_requested.emit(self.step_id)
+
     def _build_capture_thumbnail(self, path: str) -> Optional[QLabel]:
         """캡처 이미지를 카드 폭에 맞게 리사이즈해 thumbnail QLabel 반환.
 
@@ -924,6 +987,8 @@ class MainWindowV2(QMainWindow):
         self.signals.log.connect(self._append_log)
         self.signals.step_done.connect(self._on_step_done)
         self.signals.refresh_view.connect(self._refresh_step_cards)
+        # F1: generate_step worker 가 옵션 ON 시 emit → _on_run_single 직접 연결
+        self.signals.request_auto_run.connect(self._on_run_single)
 
         self.current_session: Optional[Session] = None
         # D4: 세션별 커널 (탭마다 별도 인스턴스)
@@ -1814,10 +1879,13 @@ class MainWindowV2(QMainWindow):
                 status=status_str,
                 captures=list(sd.get("captures", []) or []),
                 expanded=False,  # 사용자 요청: 코드 영역 default 접힘
+                # G7-C: 정적 분석 경고 메타 (code_validator). 헤더 ⚠ 표시.
+                validation_warnings=list(sd.get("validation_warnings", []) or []),
             )
             card.run_single_requested.connect(self._on_run_single)
             card.run_from_here_requested.connect(self._on_run_from)
             card.regenerate_requested.connect(self._on_regenerate)
+            card.regenerate_with_warnings_requested.connect(self._on_regenerate_with_warnings)
             card.reorder_requested.connect(self._on_step_reorder)
             card.code_edited.connect(self._on_block_code_edited)
             self._insert_card(card)
@@ -2113,6 +2181,7 @@ class MainWindowV2(QMainWindow):
         full_request: str,
         images: Optional[list[str]] = None,
         elements: Optional[list[dict]] = None,
+        previous_warnings: Optional[list[dict]] = None,
     ) -> None:
         """AI 호출 worker — _on_send_message + _on_regenerate (D17) 공통.
 
@@ -2171,6 +2240,7 @@ class MainWindowV2(QMainWindow):
                         on_progress=lambda m: self.signals.log.emit(m),
                         element_context=element_ctx,
                         is_browser_element=is_browser_elem,
+                        previous_warnings=previous_warnings,
                     )
                 )
                 loop.close()
@@ -2207,6 +2277,14 @@ class MainWindowV2(QMainWindow):
                         f"{response.tokens_used} tokens, "
                         f"{response.response_time_ms}ms)",
                     )
+                    # F1: 옵션 ON 시 step 생성 직후 자동 단독 실행 trigger.
+                    # blocks 실행 path 의 step_done 과 분리된 별도 signal 사용 —
+                    # 실행 완료 후 또 자동 실행되는 무한 루프 회피.
+                    if (
+                        self.settings.get("execution", {}).get("auto_run_on_step_create", False)
+                        and step.step_id > 0
+                    ):
+                        self.signals.request_auto_run.emit(step.step_id)
             except Exception as e:
                 self.signals.step_done.emit(0, False, f"AI 호출 예외: {e}")
 
@@ -2515,6 +2593,21 @@ class MainWindowV2(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+        # F2: step 첫 생성 시 실행 방법 힌트 토스트 — 영구 dismiss
+        if success and step_id > 0:
+            ui_cfg = self.settings.setdefault("ui", {})
+            if not ui_cfg.get("hint_run_shown", False):
+                self._toast(
+                    "💡 ▶ Ctrl+R 또는 카드의 ⏯ 단독 버튼으로 실행 (다시 안 보임)",
+                    level="info",
+                )
+                ui_cfg["hint_run_shown"] = True
+                try:
+                    self._save_settings(self.settings)
+                except Exception:
+                    # 영구화 실패해도 토스트 동작은 유지
+                    pass
+
     # ── 콘솔 / 로그 ───────────────────────────────────────────
 
     def _toggle_console(self) -> None:
@@ -2572,6 +2665,43 @@ class MainWindowV2(QMainWindow):
             level="warning",
             action_label="재생성",
             action_callback=do_regenerate,
+        )
+
+    def _on_regenerate_with_warnings(self, step_id: int) -> None:
+        """G7-D: ⚠ 다이얼로그의 '재생성' 버튼 → step 의 user_request + validation_warnings
+        를 함께 prompt 에 inject 해서 generate_step 재호출.
+
+        흐름:
+          1. 현재 세션에서 step_id 의 user_request 와 validation_warnings 추출
+          2. _send_request 에 previous_warnings 전달 → prompt_builder 가 사용자
+             요청 직후에 "이전 시도 실패 원인" 섹션 prepend.
+          3. AI 가 같은 실수 반복 회피.
+        """
+        if not self.current_session:
+            return
+        target_step: Optional[dict] = None
+        for sd in self.current_session.steps:
+            sd_dict = sd if isinstance(sd, dict) else {}
+            if sd_dict.get("step_id") == step_id:
+                target_step = sd_dict
+                break
+        if target_step is None:
+            self._toast(f"Step {step_id} 을 찾을 수 없습니다", "error")
+            return
+        user_request = target_step.get("user_request", "") or self._extract_user_msg(
+            target_step.get("conversation", [])
+        )
+        if not user_request:
+            self._toast(f"Step {step_id} 의 user_request 가 비어 재생성 불가", "warning")
+            return
+        warnings = list(target_step.get("validation_warnings", []) or [])
+        self._log(f"Step {step_id} 재생성 (코드 검사 경고 {len(warnings)}건 인용)")
+        elems = list(self._pending_elements) if self._pending_elements else None
+        self._send_request(
+            user_request,
+            images=None,
+            elements=elems,
+            previous_warnings=warnings,
         )
 
     def _on_step_reorder(self, step_id: int, direction: str) -> None:

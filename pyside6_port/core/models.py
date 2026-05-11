@@ -115,6 +115,8 @@ class StepModel(BaseModel):
     wait_after_ms: Optional[int] = None
     user_request: str = ""
     ai_description: str = ""
+    # G7-B (Phase 1.8): code_validator 정적 분석 결과. Step dataclass 미러.
+    validation_warnings: list = Field(default_factory=list)
 
     model_config = {"extra": "allow"}
 

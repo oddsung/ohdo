@@ -89,6 +89,10 @@ class Step:
     # 기존 v1 은 conversation 리스트에서 같은 정보 추출 — 양쪽 호환.
     user_request: str = ""
     ai_description: str = ""
+    # G7-B (Phase 1.8): code_validator.validate_step_code 의 결과 메타. 차단 X.
+    # 각 원소: {"kind": "syntax"|"redefined_var"|"missing_try"|"import_misplaced",
+    #          "message": str, "line": int}. UI 표시 / 재생성은 G7-C/D.
+    validation_warnings: list = field(default_factory=list)
 
 
 @dataclass

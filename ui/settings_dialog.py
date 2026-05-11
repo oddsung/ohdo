@@ -361,6 +361,27 @@ class SettingsDialog(QDialog):
         self.sandbox_cb.setChecked(exec_config.get("sandbox_mode", True))
         form.addRow(self.sandbox_cb)
 
+        # G7-UX: 코드 검사 경고 시 자동 재생성
+        self.auto_regen_cb = QCheckBox("코드 검사 경고 시 자동 재생성 (G7)")
+        self.auto_regen_cb.setChecked(exec_config.get("auto_regenerate_on_warning", False))
+        self.auto_regen_cb.setToolTip(
+            "AI 생성 코드가 정적 분석 (변수 재정의 / try-except 누락 / import 위치 / 문법 오류) "
+            "에 걸리면 ⚠ 발견 즉시 prompt 에 인용해서 한 번 더 AI 호출.\n"
+            "기본 OFF — 사용자가 카드의 ⚠ 다이얼로그에서 '재생성' 클릭으로 수동 트리거 권장."
+        )
+        form.addRow(self.auto_regen_cb)
+
+        # F1: step 카드 생성 직후 자동 단독 실행
+        self.auto_run_cb = QCheckBox("코드 생성 직후 자동 실행 (F1)")
+        self.auto_run_cb.setChecked(exec_config.get("auto_run_on_step_create", False))
+        self.auto_run_cb.setToolTip(
+            "AI 가 step 카드 생성 직후 자동으로 그 step 단독 실행.\n"
+            "⚠ AI 코드가 위험 동작 (파일 삭제, subprocess 임의 실행, "
+            "잘못된 좌표 클릭 등) 포함 시 사용자 확인 없이 실행 — 되돌리기 어려운 결과 가능.\n"
+            "기본 OFF — 사용자가 ▶ Ctrl+R / ⏯ 단독 버튼으로 수동 트리거 권장."
+        )
+        form.addRow(self.auto_run_cb)
+
         # 비주얼 피드백 오버레이
         self.visual_feedback_cb = QCheckBox(
             "실행 중 시각 피드백 표시 (마우스 클릭 리플 · 좌표 · 키 입력)"
@@ -669,6 +690,8 @@ class SettingsDialog(QDialog):
         self.settings["execution"]["step_delay_ms"] = self.delay_spin.value()
         self.settings["execution"]["screenshot_on_error"] = self.error_screenshot_cb.isChecked()
         self.settings["execution"]["sandbox_mode"] = self.sandbox_cb.isChecked()
+        self.settings["execution"]["auto_regenerate_on_warning"] = self.auto_regen_cb.isChecked()
+        self.settings["execution"]["auto_run_on_step_create"] = self.auto_run_cb.isChecked()
 
         # 비주얼 피드백
         if "visual_feedback" not in self.settings:
