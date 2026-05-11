@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-11 (5/4~5/11 작업 — 자세한 변경은 §5 변경 이력 + §11/§12/§13/§14/§15/§16/§17/§18 인계 노트 참조). baseline: **core 106/106 + scenarios 73/73 그린**. **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18.
+> 마지막 업데이트: 2026-05-12 (5/4~5/12 작업 — 자세한 변경은 §5 변경 이력 + §11/§12/§13/§14/§15/§16/§17/§18/§19 인계 노트 참조). baseline: **core 107/107 + scenarios 73/73 그린** (PyQt6 venv 기준; PySide6 검증은 새 세션 venv 셋업 후). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12: Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 새 세션에서 Plan 1 (디렉터리 swap + PyQt6 deprecate + PySide6 venv 셋업) 진행 예정.** 자세한 §19.
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1056,6 +1056,84 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
   - G6 가이드 강화 후 model 의 사전 회피율 (⚠ 안 뜨는 비율 증가?)
 - 효과 측정 후 새 갭 발견 시 후속 fix 결정
 - 또는 다른 우선순위 (Phase 2 commercial_review GO/NO-GO / 영어 README + i18n / Agent 브리지 PoC 등 — handoff §7)
+
+## 19. 5/12 Phase 1.9 C-1 i18n 인프라 + commercial_review 게이트 평가 + PySide6 main 전환 결정
+
+**컨텍스트**: §18 7 unit 완료 + commit `6c7f9c1` 후 일상 사용 검증 대기 상태에서 진입. 이번 세션은 Phase 2 GO/NO-GO 게이트 평가 + Phase 1.9 i18n 인프라 첫 unit + 라이선스 호환성 결정 + 단일 commit (`b11b980`).
+
+### B (5/12) — commercial_review GO/NO-GO 게이트 평가
+
+| 게이트 | 결과 | 비고 |
+|---|---|---|
+| 1. GitHub Stars 500+ | ❌ 선결과제 미완 | github.com/oddsung/ohdo 404 — 저장소 public 공개 안 됨 |
+| 2. 유료 의향 5명+ | ❓ 데이터 필요 | 외부 채널 (Discord/이메일/X DM) 응답 — 사용자 확인 |
+| 3. 영어 + 한국어 콘텐츠 mix | 🟡 부분 진행 | README 양쪽 있음 (README.md + README.ko.md) / Show HN·Reddit·dev.to·블로그·유튜브 외부 노출 데이터 필요 |
+| 4. Computer Use 우월 X | ❓ 사용자 판단 | 2024-10 출시 + ~1.5년 경과. Anthropic 최근 메이저 업데이트 추적 필요 |
+
+**종합 판단**: 4개 중 ≥3 미충족/평가 불가 → Phase 2 SaaS 백엔드 진입 **NO-GO** 권고. 선결과제: 저장소 public 공개 (게이트 #1 측정 시작점). 옵션 B (Computer Use 어댑터 PoC 1~2주 spike) 또는 옵션 C (포트폴리오 재정의) 도 후보 — commercial_review.md §6/§7 참조.
+
+### C-1 (5/12) — i18n 인프라 (test_107)
+
+| 발견 갭 | 5/9 dual-locale 결정 후 i18n 인프라 미시작. ui/, ui_v2/, core/ 사용자 노출 ~4,800 줄 모두 한국어 literal. QTranslator/gettext/tr() 호출 0건 |
+| Fix | (a) [core/i18n.py](../core/i18n.py) — dict 기반 translation dispatcher. API 4 함수 (set_locale/get_locale/tr/reset_cache). fallback locale = `en` (5/9 글로벌 우선 결정). missing key 시 키 자체 반환 + format 스킵 (debug 시 placeholder 그대로 보임). 동시 사용 안 한 locale catalogue 는 lazy 로드 + 메모리 캐시. (b) [core/locale/en.json](../core/locale/en.json) + [core/locale/ko.json](../core/locale/ko.json) — sample 3 키 (app.title, common.ok, common.cancel) |
+| 가드 | test_107 — 모듈 API 4 함수 callable + fallback locale = "en" + catalogue 양쪽 존재 + 키 집합 동일 (한쪽 추가 시 다른쪽 누락 방지) + tr 동작 4 케이스 (en/ko/미정의 키/미지원 locale → fallback) |
+
+**prompts.json locale 관리 design 결정**: 옵션 1 (언어별 파일 분리) — `prompts.{ko,en}.json`. 단순, diff 가독성 ↑, 한국어 sentinel test 회귀 보호 (test_104 등). C-4 에서 실제 분리 작업 진행 예정. fallback = en (글로벌 우선). 영어 초안은 Claude 작성 + 사용자 리뷰.
+
+### 5/12 결정 — 최종 PySide6 만 사용 (PyQt6 보관)
+
+**컨텍스트**: 5/2 PySide6 port 추가 (LGPL 라이선스 유연성) 후 양쪽 sync 부담. PyQt6 = GPL → AGPL-3.0 데스크톱 + 상업 SaaS 오픈코어 전략과 라이선스 마찰. PySide6 = LGPL → 호환성 ↑.
+
+**결정**:
+- **최종적으로 PySide6 만 사용**, PyQt6 코드는 **삭제 X / 보관**
+- 이번 세션부터 PyQt6 쪽 작업 안 함, **PySide6 만 작업**
+- 새 세션에서 **Plan 1 (디렉터리 swap + PyQt6 deprecate + PySide6 venv 셋업)** 진행
+
+**이번 세션 PySide6 catch-up**: 5/4~5/11 작업이 PySide6 port 에 코드 sync 됐으나 회귀 가드 11개 (test_97~test_106) 누락 발견 — handoff §18 의 "양쪽 sync 완료" 와 충돌. test_97~test_107 합 12 가드 한 번에 PySide6 catch-up (1035 줄 삽입). PyQt6 직접 import 0건 → sed 변환 불필요, straight copy. PyQt6/PySide6 test 함수 집합 완전 일치 확인.
+
+**검증 한계**: 양 venv (`venv/`, `.venv/`) 모두 PySide6 미설치 → PySide6 port baseline 실행 검증 불가. handoff §3 의 "별도 venv 없음" 정확. 새 세션 venv 셋업 후 확보 예정.
+
+### Commit (5/12)
+
+`b11b980 feat: Phase 1.8 G7 + 후속 fix 7 unit + Phase 1.9 C-1 i18n 인프라`
+- 34 files / +4134 / -31
+- 7 새 파일: core/i18n.py + core/locale/{en,ko}.json + pyside6_port/core/i18n.py + pyside6_port/core/locale/{en,ko}.json + pyside6_port/docs/handoff.md
+- pre-commit hook (end-of-file-fixer) 가 config/default_settings.json 양쪽 newline 자동 fix → re-stage 후 재시도 통과
+- `tests/results/latest_result.json` unstaged 유지 (test 결과 캐시, .gitignore 후보 — handoff TODO)
+
+### 다음 세션 출발점 (Plan 1)
+
+**Plan 1 작업 항목 (디렉터리 swap + PyQt6 deprecate + PySide6 venv 셋업)** — 새 세션 시작 시 실행:
+
+1. **디렉터리 swap**:
+   - `pyside6_port/` → 메인 위치 (`ui/`, `ui_v2/`, `core/`, `tests/`, `config/`, `docs/` 가 PySide6 기준)
+   - 기존 `ui/`, `ui_v2/` (PyQt6) → `legacy_pyqt6/` 로 이동 후 deprecate (삭제 X, 보관)
+   - `core/` 는 라이브러리 의존성 없으므로 동일 (PySide6 port 의 core 가 PyQt6 의 복사본)
+2. **문서 갱신**:
+   - `CLAUDE.md` (root + pyside6_port 양쪽 → 하나로 통합, PySide6 기준)
+   - `README.md` + `README.ko.md` — PySide6 기반 명시
+   - `docs/ROADMAP.md` — Phase 2 진입 직전 단계, 라이선스 호환성 변경 반영
+   - `pyside6_port/docs/handoff.md` 와 `docs/handoff.md` 통합
+3. **CI 갱신**:
+   - `.github/workflows/ci.yml` — PySide6 dependency 추가, PyQt6 matrix 제거 또는 legacy_pyqt6 한정
+4. **venv 셋업**:
+   - `.venv` 에 PySide6 추가 (`uv add PySide6`) 또는 별도 `.venv-pyside6/`
+   - baseline 실행 검증 (`core 107/107 + scenarios 73/73 그린`)
+5. **`tests/results/` gitignore 추가**: 캐시 파일 commit 제외 자동화
+
+**Plan 1 완료 후 C-2 ~ C-6 진입**:
+6. C-2 — ui_v2/ 사용자 노출 문자열 추출 + locale catalogue 채움 (~600 lines)
+7. C-3 — skip (PyQt6 legacy 미작업)
+8. C-4 — prompts.{ko,en}.json 분리 + 영어 초안 작성 + 회귀 가드 갱신 (test_104 등 한국어 sentinel 분리)
+9. C-5 — 로그/콘솔 메시지 영어 통일
+10. C-6 — README sync 점검 (이미 양쪽 있음, 0 unit)
+
+**B 후속 (사용자 action 필요)**:
+11. 저장소 public 공개 (게이트 #1 측정 시작점). README CI 뱃지 동작 확인
+12. 외부 콘텐츠 노출 (Show HN / Reddit r/Python / dev.to / 한국 블로그/유튜브)
+13. 유료 의향 응답 수집 채널 (Discord/이메일/X DM) 셋업
+14. Computer Use 최근 메이저 업데이트 추적
+15. 데이터 확보 후 Phase 2 GO/NO-GO 재평가 — commercial_review.md §7 게이트 4개 재검사
 
 ## 9. 자주 하는 실수 / 주의사항
 
