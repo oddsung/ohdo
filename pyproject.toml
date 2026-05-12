@@ -23,7 +23,9 @@ classifiers = [
 ]
 
 dependencies = [
-    # UI Framework (PyQt6 — GPL/Riverbank commercial. PySide6 port 는 pyside6_port/ 참조)
+    # UI Framework — dual import phase (5/12 ~ swap).
+    # PySide6 (LGPL) 가 메인 전환 예정. PyQt6 는 swap 후 C5 에서 optional extra 로 격리.
+    "PySide6>=6.5.0",
     "PyQt6>=6.5.0",
     # Screen Capture & Image Processing
     "mss>=9.0.0",
