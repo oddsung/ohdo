@@ -4907,6 +4907,52 @@ if __name__ == "__main__":
         i18n.reset_cache()
         i18n.set_locale("en")
 
+    def test_108_c2_i18n_call_sites_match_catalogue(self):
+        """[Phase 1.9 C-2] ui_v2/ 의 tr() 호출 key 가 en+ko catalogue 양쪽 존재.
+
+        raw key 가 화면에 노출되는 사고 방지 (catalog 누락 시 tr() 가 key 자체 반환).
+        Plan 1 C-2a~c 통합 가드 — 새 tr() 호출 추가 시 catalogue 누락 즉시 감지.
+
+        가드:
+        1. ui_v2/ 안의 모든 .py 파일 스캔 → tr("ns.key") 정규식으로 key 추출
+        2. 추출된 모든 key 가 en.json + ko.json 양쪽에 존재 검증
+        3. tr() 호출 최소 1개 존재 (i18n 적용 sanity)
+        """
+        import json as _json
+        import re as _re
+        from pathlib import Path as _Path
+
+        project_root = _Path(__file__).parent.parent
+        locale_dir = project_root / "core" / "locale"
+        en_cat = _json.loads((locale_dir / "en.json").read_text(encoding="utf-8"))
+        ko_cat = _json.loads((locale_dir / "ko.json").read_text(encoding="utf-8"))
+
+        ui_v2_dir = project_root / "ui_v2"
+        # tr("ns.key" — multi-line 분리 (ruff format) 대응 위해 \s* 사용 (\s 는 \n 포함).
+        tr_pattern = _re.compile(r'\btr\(\s*"([^"]+)"')
+
+        found_keys: set[str] = set()
+        for py_file in ui_v2_dir.glob("*.py"):
+            text = py_file.read_text(encoding="utf-8")
+            for m in tr_pattern.finditer(text):
+                found_keys.add(m.group(1))
+
+        self.assert_true(
+            len(found_keys) > 0,
+            "[C-2] ui_v2/ 안 tr() 호출 1개 이상 필수 (i18n 적용 검증)",
+        )
+
+        missing_en = sorted(k for k in found_keys if k not in en_cat)
+        missing_ko = sorted(k for k in found_keys if k not in ko_cat)
+        self.assert_true(
+            not missing_en,
+            f"[C-2] en.json 에 누락된 tr key {len(missing_en)} 개: {missing_en[:5]}",
+        )
+        self.assert_true(
+            not missing_ko,
+            f"[C-2] ko.json 에 누락된 tr key {len(missing_ko)} 개: {missing_ko[:5]}",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
