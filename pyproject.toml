@@ -23,10 +23,10 @@ classifiers = [
 ]
 
 dependencies = [
-    # UI Framework — dual import phase (5/12 ~ swap).
-    # PySide6 (LGPL) 가 메인 전환 예정. PyQt6 는 swap 후 C5 에서 optional extra 로 격리.
+    # UI Framework — 5/12 PySide6 (LGPL) 메인 전환 완료.
+    # PyQt6 (GPL/Riverbank commercial) 는 legacy_pyqt6/ 에 deprecated 코드로 보존,
+    # 의존성은 optional extra [legacy-pyqt6] 로 격리 (아래 [project.optional-dependencies]).
     "PySide6>=6.5.0",
-    "PyQt6>=6.5.0",
     # Screen Capture & Image Processing
     "mss>=9.0.0",
     "Pillow>=10.0.0",
@@ -64,6 +64,11 @@ dev = [
 ]
 # 테스트 도구 — 현재 자체 test_runner 사용 (pytest 미사용). 미래 pytest 도입 시 채움
 test = []
+# 5/12 PySide6 메인 전환 후 PyQt6 deprecated 코드 (legacy_pyqt6/) 실행용.
+# `uv sync --extra legacy-pyqt6` 로만 설치. 기본 sync 에는 포함 안 됨.
+legacy-pyqt6 = [
+    "PyQt6>=6.5.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/oddsung/ohdo"
