@@ -1,5 +1,27 @@
 {
   "app.title": "ohdo",
   "common.ok": "확인",
-  "common.cancel": "취소"
+  "common.cancel": "취소",
+
+  "ui_v2.onboarding.window_title": "ohdo 시작하기",
+  "ui_v2.onboarding.btn_skip": "건너뛰기",
+  "ui_v2.onboarding.btn_prev": "◀ 이전",
+  "ui_v2.onboarding.btn_next": "다음 ▶",
+  "ui_v2.onboarding.btn_start": "시작 ▶",
+  "ui_v2.onboarding.page_env_title": "🐍  Python 환경 점검",
+  "ui_v2.onboarding.page_env_description": "ohdo 는 Python 자동화 코드를 실행하기 위해\nPython 인터프리터 + 필수 패키지 + AI CLI 가 필요합니다.\n\n환경이 준비되지 않았다면 설정 (Ctrl+,) 의\n'🔧 환경' 탭에서 자동 점검을 실행하세요.",
+  "ui_v2.onboarding.page_engine_title": "🤖  AI 엔진 선택",
+  "ui_v2.onboarding.page_engine_sub": "첫 자동화에 사용할 AI 엔진을 선택하세요. 나중에 설정에서 변경 가능.",
+  "ui_v2.onboarding.engine_gemini_cli": "Gemini CLI (감지됨, 무료)",
+  "ui_v2.onboarding.engine_openai_compat": "OpenAI 호환 API (직접 키 등록 — OpenAI/DeepSeek/Groq/Ollama 등)",
+  "ui_v2.onboarding.page_first_title": "🎯  첫 자동화 만들기",
+  "ui_v2.onboarding.page_first_sub": "선택한 시나리오로 첫 세션이 생성되고 입력창에 자동 채움됩니다.",
+  "ui_v2.onboarding.scenario_notepad_label": "메모장 한글 입력",
+  "ui_v2.onboarding.scenario_notepad_prompt": "메모장 열고 '안녕하세요' 입력 후 Ctrl+S 로 저장",
+  "ui_v2.onboarding.scenario_browser_label": "네이버 검색",
+  "ui_v2.onboarding.scenario_browser_prompt": "Chrome 으로 naver.com 접속 후 '삼성전자' 검색",
+  "ui_v2.onboarding.scenario_empty_label": "빈 세션",
+
+  "ui_v2.command_palette.placeholder": "세션 또는 명령 검색...",
+  "ui_v2.command_palette.help_text": "↑↓ 이동   Enter 실행   Esc 닫기"
 }

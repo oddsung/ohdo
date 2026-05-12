@@ -36,6 +36,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.i18n import tr
+
 _COLORS = {
     "bg_base": "#1e1e2e",
     "bg_surface": "#181825",
@@ -50,12 +52,20 @@ _COLORS = {
 class OnboardingWizard(QDialog):
     """첫 실행 시 사용자 가이드. settings.ui.onboarding_done=True 면 스킵."""
 
-    # 추천 시나리오 (D14 기본값)
-    SCENARIOS = [
-        ("메모장 한글 입력", "메모장 열고 '안녕하세요' 입력 후 Ctrl+S 로 저장"),
-        ("네이버 검색", "Chrome 으로 naver.com 접속 후 '삼성전자' 검색"),
-        ("빈 세션", ""),
-    ]
+    @staticmethod
+    def _scenarios() -> list[tuple[str, str]]:
+        # locale 변경 후 첫 인스턴스화 시점에 평가되도록 method 로 노출 (class attr 회피).
+        return [
+            (
+                tr("ui_v2.onboarding.scenario_notepad_label"),
+                tr("ui_v2.onboarding.scenario_notepad_prompt"),
+            ),
+            (
+                tr("ui_v2.onboarding.scenario_browser_label"),
+                tr("ui_v2.onboarding.scenario_browser_prompt"),
+            ),
+            (tr("ui_v2.onboarding.scenario_empty_label"), ""),
+        ]
 
     def __init__(self, settings: dict, parent=None) -> None:
         super().__init__(parent)
@@ -65,7 +75,7 @@ class OnboardingWizard(QDialog):
         self.selected_scenario: Optional[str] = None  # 시나리오의 user_request 텍스트
         self.skipped: bool = False
 
-        self.setWindowTitle("ohdo 시작하기")
+        self.setWindowTitle(tr("ui_v2.onboarding.window_title"))
         self.setMinimumSize(560, 440)
         self.setStyleSheet(f"""
             OnboardingWizard, QWidget {{
@@ -109,17 +119,17 @@ class OnboardingWizard(QDialog):
 
         # 푸터 — 건너뛰기 / 이전 / 다음 / 시작
         footer = QHBoxLayout()
-        skip_btn = QPushButton("건너뛰기")
+        skip_btn = QPushButton(tr("ui_v2.onboarding.btn_skip"))
         skip_btn.clicked.connect(self._on_skip)
         footer.addWidget(skip_btn)
         footer.addStretch()
 
-        self.prev_btn = QPushButton("◀ 이전")
+        self.prev_btn = QPushButton(tr("ui_v2.onboarding.btn_prev"))
         self.prev_btn.clicked.connect(self._on_prev)
         self.prev_btn.setEnabled(False)
         footer.addWidget(self.prev_btn)
 
-        self.next_btn = QPushButton("다음 ▶")
+        self.next_btn = QPushButton(tr("ui_v2.onboarding.btn_next"))
         self.next_btn.setStyleSheet(
             f"background-color: {_COLORS['primary']}; color: {_COLORS['bg_base']}; "
             f"font-weight: bold;"
@@ -135,7 +145,7 @@ class OnboardingWizard(QDialog):
         v = QVBoxLayout(w)
         v.setSpacing(16)
 
-        title = QLabel("🐍  Python 환경 점검")
+        title = QLabel(tr("ui_v2.onboarding.page_env_title"))
         title.setFont(QFont("Malgun Gothic", 14, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(title)
@@ -143,12 +153,7 @@ class OnboardingWizard(QDialog):
         v.addSpacing(8)
 
         # 간단 상태 — 자세한 스캔은 Settings 다이얼로그
-        status = QLabel(
-            "ohdo 는 Python 자동화 코드를 실행하기 위해\n"
-            "Python 인터프리터 + 필수 패키지 + AI CLI 가 필요합니다.\n\n"
-            "환경이 준비되지 않았다면 설정 (Ctrl+,) 의\n"
-            "'🔧 환경' 탭에서 자동 점검을 실행하세요."
-        )
+        status = QLabel(tr("ui_v2.onboarding.page_env_description"))
         status.setStyleSheet(f"color: {_COLORS['text_muted']}; font-size: 12px;")
         status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status.setWordWrap(True)
@@ -162,14 +167,14 @@ class OnboardingWizard(QDialog):
         v = QVBoxLayout(w)
         v.setSpacing(12)
 
-        title = QLabel("🤖  AI 엔진 선택")
+        title = QLabel(tr("ui_v2.onboarding.page_engine_title"))
         title.setFont(QFont("Malgun Gothic", 14, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(title)
 
         v.addSpacing(8)
 
-        sub = QLabel("첫 자동화에 사용할 AI 엔진을 선택하세요. 나중에 설정에서 변경 가능.")
+        sub = QLabel(tr("ui_v2.onboarding.page_engine_sub"))
         sub.setStyleSheet(f"color: {_COLORS['text_muted']}; font-size: 11px;")
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
@@ -183,8 +188,8 @@ class OnboardingWizard(QDialog):
         current_selected = self._settings.get("ai", {}).get("selected", "gemini_cli")
 
         engine_options = [
-            ("gemini_cli", "Gemini CLI (감지됨, 무료)"),
-            ("openai_compat", "OpenAI 호환 API (직접 키 등록 — OpenAI/DeepSeek/Groq/Ollama 등)"),
+            ("gemini_cli", tr("ui_v2.onboarding.engine_gemini_cli")),
+            ("openai_compat", tr("ui_v2.onboarding.engine_openai_compat")),
         ]
         for key, label in engine_options:
             if key not in engines_cfg:
@@ -204,14 +209,14 @@ class OnboardingWizard(QDialog):
         v = QVBoxLayout(w)
         v.setSpacing(12)
 
-        title = QLabel("🎯  첫 자동화 만들기")
+        title = QLabel(tr("ui_v2.onboarding.page_first_title"))
         title.setFont(QFont("Malgun Gothic", 14, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(title)
 
         v.addSpacing(8)
 
-        sub = QLabel("선택한 시나리오로 첫 세션이 생성되고 입력창에 자동 채움됩니다.")
+        sub = QLabel(tr("ui_v2.onboarding.page_first_sub"))
         sub.setStyleSheet(f"color: {_COLORS['text_muted']}; font-size: 11px;")
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
@@ -219,7 +224,7 @@ class OnboardingWizard(QDialog):
         v.addSpacing(8)
 
         self._scenario_group = QButtonGroup(self)
-        for label, prompt_text in self.SCENARIOS:
+        for label, prompt_text in self._scenarios():
             display = label if not prompt_text else f"{label} — {prompt_text}"
             rb = QRadioButton(display)
             rb.setProperty("scenario_prompt", prompt_text)
@@ -259,7 +264,9 @@ class OnboardingWizard(QDialog):
         idx = self.stack.currentIndex()
         last = self.stack.count() - 1
         self.prev_btn.setEnabled(idx > 0)
-        self.next_btn.setText("시작 ▶" if idx == last else "다음 ▶")
+        self.next_btn.setText(
+            tr("ui_v2.onboarding.btn_start") if idx == last else tr("ui_v2.onboarding.btn_next")
+        )
         self.step_label.setText(f"{idx + 1} / {self.stack.count()}")
 
     def _collect_results(self) -> None:

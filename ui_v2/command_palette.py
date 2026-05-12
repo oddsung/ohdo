@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.i18n import tr
+
 # 디자인 토큰 (main_window_v2.py 와 일관)
 _COLORS = {
     "bg_base": "#1e1e2e",
@@ -87,7 +89,7 @@ class CommandPalette(QDialog):
         search_icon.setStyleSheet(f"color: {_COLORS['text_muted']}; border: none; font-size: 14px;")
         search_row.addWidget(search_icon)
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("세션 또는 명령 검색...")
+        self.search_edit.setPlaceholderText(tr("ui_v2.command_palette.placeholder"))
         self.search_edit.setStyleSheet(f"""
             QLineEdit {{
                 background-color: transparent;
@@ -129,7 +131,7 @@ class CommandPalette(QDialog):
         layout.addWidget(self.list_widget, stretch=1)
 
         # 하단 도움말
-        help_label = QLabel("↑↓ 이동   Enter 실행   Esc 닫기")
+        help_label = QLabel(tr("ui_v2.command_palette.help_text"))
         help_label.setStyleSheet(f"color: {_COLORS['text_muted']}; border: none; font-size: 10px;")
         help_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(help_label)

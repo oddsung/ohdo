@@ -2759,11 +2759,11 @@ class ScenariosTest(TestCase):
 
         from ui_v2.onboarding import OnboardingWizard
 
-        # SCENARIOS = 3개 (메모장/네이버/빈)
+        # SCENARIOS = 3개 (메모장/브라우저/빈) — i18n 도입 후 method 로 노출
         self.assert_equal(
-            len(OnboardingWizard.SCENARIOS),
+            len(OnboardingWizard._scenarios()),
             3,
-            "[D14] 추천 시나리오 3개 필수 (메모장/네이버/빈 세션)",
+            "[D14] 추천 시나리오 3개 필수 (메모장/브라우저/빈 세션)",
         )
         # should_show — settings.ui.onboarding_done 미설정 시 True
         self.assert_true(

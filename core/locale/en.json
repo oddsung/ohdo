@@ -1,5 +1,27 @@
 {
   "app.title": "ohdo",
   "common.ok": "OK",
-  "common.cancel": "Cancel"
+  "common.cancel": "Cancel",
+
+  "ui_v2.onboarding.window_title": "ohdo Getting Started",
+  "ui_v2.onboarding.btn_skip": "Skip",
+  "ui_v2.onboarding.btn_prev": "◀ Back",
+  "ui_v2.onboarding.btn_next": "Next ▶",
+  "ui_v2.onboarding.btn_start": "Start ▶",
+  "ui_v2.onboarding.page_env_title": "🐍  Python Environment Check",
+  "ui_v2.onboarding.page_env_description": "ohdo runs Python automation code, so you need a Python interpreter,\nrequired packages, and an AI CLI.\n\nIf the environment is not ready, open Settings (Ctrl+,)\nand run the auto-scan from the '🔧 Environment' tab.",
+  "ui_v2.onboarding.page_engine_title": "🤖  Choose AI Engine",
+  "ui_v2.onboarding.page_engine_sub": "Choose the AI engine for your first automation. You can change it later in Settings.",
+  "ui_v2.onboarding.engine_gemini_cli": "Gemini CLI (detected, free)",
+  "ui_v2.onboarding.engine_openai_compat": "OpenAI-compatible API (register your key — OpenAI / DeepSeek / Groq / Ollama, etc.)",
+  "ui_v2.onboarding.page_first_title": "🎯  Create Your First Automation",
+  "ui_v2.onboarding.page_first_sub": "The selected scenario creates your first session and fills the input box automatically.",
+  "ui_v2.onboarding.scenario_notepad_label": "Notepad text input",
+  "ui_v2.onboarding.scenario_notepad_prompt": "Open Notepad, type 'Hello' and save with Ctrl+S",
+  "ui_v2.onboarding.scenario_browser_label": "Web search",
+  "ui_v2.onboarding.scenario_browser_prompt": "Open google.com in Chrome and search for 'Samsung Electronics'",
+  "ui_v2.onboarding.scenario_empty_label": "Empty session",
+
+  "ui_v2.command_palette.placeholder": "Search sessions or commands...",
+  "ui_v2.command_palette.help_text": "↑↓ navigate   Enter run   Esc close"
 }
