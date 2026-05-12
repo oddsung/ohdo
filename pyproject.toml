@@ -98,6 +98,8 @@ extend-exclude = [
     "venv",
     ".venv",
     "packages",
+    # 5/12 Plan 1 — PyQt6 deprecated 코드 (보관만, lint 의무 없음).
+    "legacy_pyqt6",
     # 루트 레벨 임시 진단 스크립트 (CI 대상 X)
     "test_click_diagnosis.py",
     "uia_test.py",
@@ -110,6 +112,20 @@ select = ["E", "F", "W", "I"]
 # E501 (line too long) 은 ruff format 이 자동 처리하므로 lint 단계에선 제외.
 # F401 (unused import) 은 __init__.py 의 re-export 패턴 false positive 회피용 module-level ignore.
 ignore = ["E501"]
+
+# 5/12 Plan 1 swap — ruff 의 source-layout 자동 추론은 root 의 `ui/__init__.py`
+# 같은 패키지 마커에 의존. swap 중간 상태에서 일시적으로 깨질 수 있으므로 명시.
+[tool.ruff.lint.isort]
+known-first-party = [
+    "core",
+    "ui",
+    "ui_v2",
+    "tests",
+    "actions",
+    "agent",
+    "recognition",
+    "scripts",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
