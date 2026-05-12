@@ -590,7 +590,12 @@ class StepCardV2(QFrame):
                 line_str = f" (line {w.get('line')})" if w.get("line") else ""
                 tooltip_lines.append(f"- [{w.get('kind', '?')}]{line_str} {w.get('message', '')}")
             if len(self._validation_warnings) > 3:
-                tooltip_lines.append(f"... 외 {len(self._validation_warnings) - 3}건")
+                tooltip_lines.append(
+                    tr(
+                        "ui_v2.step_card.validation_tooltip_overflow",
+                        count=len(self._validation_warnings) - 3,
+                    )
+                )
             self.validation_warning_label.setToolTip("\n".join(tooltip_lines))
             self.validation_warning_label.mousePressEvent = lambda _e: (
                 self._show_validation_dialog()
@@ -1813,7 +1818,10 @@ class MainWindowV2(QMainWindow):
     def _on_new_session(self) -> None:
         from datetime import datetime
 
-        title = f"v2-새세션-{datetime.now().strftime('%H%M%S')}"
+        title = tr(
+            "ui_v2.session.new_title_v2",
+            timestamp=datetime.now().strftime("%H%M%S"),
+        )
         session = self.app_service.create_session(title=title)
         self._refresh_session_list()
         # D4: 새 탭으로 엶 (currentChanged → _switch_session 자동 호출)
@@ -2010,7 +2018,7 @@ class MainWindowV2(QMainWindow):
 
     def _on_stop(self) -> None:
         self.app_service.stop_blocks()
-        self._log("⏹ 중지 요청")
+        self._log(tr("ui_v2.log.stop_requested"))
 
     def _on_kernel_reset(self, *args) -> None:
         """현재 활성 세션의 커널만 재시작 (D4: 다른 세션 커널은 유지)."""
@@ -2023,7 +2031,7 @@ class MainWindowV2(QMainWindow):
             except Exception:
                 pass
             del self._kernels[sid]
-        self._log("🔄 커널 재시작")
+        self._log(tr("ui_v2.log.kernel_restart"))
 
     def _on_run_initial(self, _step_id: int) -> None:
         """Initial 단독 실행 — AppService.run_initial_block_sync 사용 (Phase 2.5 contract)."""
@@ -2056,7 +2064,7 @@ class MainWindowV2(QMainWindow):
             )
             return
 
-        self._log("⏯ Initial 블럭 단독 실행 시작")
+        self._log(tr("ui_v2.log.initial_alone_started"))
         self.lower()  # Win11 ForegroundLock 우회 패턴
 
         def worker():
@@ -2072,10 +2080,12 @@ class MainWindowV2(QMainWindow):
                     result.success,
                     f"Initial ({result.duration_ms}ms)"
                     if result.success
-                    else f"Initial 실패: {result.error}",
+                    else tr("ui_v2.step_done.initial_failed", error=str(result.error)),
                 )
             except Exception as e:
-                self.signals.step_done.emit(-1, False, f"Initial 예외: {e}")
+                self.signals.step_done.emit(
+                    -1, False, tr("ui_v2.step_done.initial_exception", error=str(e))
+                )
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2121,7 +2131,7 @@ class MainWindowV2(QMainWindow):
             )
             return
 
-        self._log(f"▶ {label} 실행 시작")
+        self._log(tr("ui_v2.log.run_started", label=label))
         self._status_bar.showMessage(tr("ui_v2.run.status_running", label=label))
         self.lower()
 
@@ -2135,7 +2145,9 @@ class MainWindowV2(QMainWindow):
                         kernel=kernel,
                         start_from_step_id=start_from,
                         stop_after_step_id=stop_after,
-                        on_step_start=lambda sid: self.signals.log.emit(f"▶ Step {sid} 실행 중..."),
+                        on_step_start=lambda sid: self.signals.log.emit(
+                            tr("ui_v2.log.step_running", step_id=sid)
+                        ),
                         on_step_complete=lambda sid, result: self.signals.log.emit(
                             f"{'✅' if result.success else '❌'} Step {sid} "
                             f"({result.duration_ms}ms)"
@@ -2157,7 +2169,9 @@ class MainWindowV2(QMainWindow):
                 # step_done 으로 input 재활성화 + 카드 재구성 + 윈도우 복원 트리거
                 self.signals.step_done.emit(0, True, msg)
             except Exception as e:
-                self.signals.step_done.emit(0, False, f"실행 예외: {e}")
+                self.signals.step_done.emit(
+                    0, False, tr("ui_v2.step_done.run_exception", error=str(e))
+                )
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2167,9 +2181,9 @@ class MainWindowV2(QMainWindow):
             # B4: settings.json 영구 저장 — switch_ai_engine 은 메모리 _current_name
             # 만 변경. 재시작 시 일관성 유지를 위해 ai.selected 도 persist.
             self._persist_engine_choice(name)
-            self._log(f"AI 엔진 전환: {name}")
+            self._log(tr("ui_v2.log.engine_switched", name=name))
         except Exception as e:
-            self._log(f"엔진 전환 실패: {e}")
+            self._log(tr("ui_v2.log.engine_switch_failed", error=str(e)))
 
     def _persist_engine_choice(self, name: str) -> None:
         """settings.json 의 ai.selected 를 영구 저장. switch_ai_engine 호출
@@ -2179,7 +2193,7 @@ class MainWindowV2(QMainWindow):
             s.setdefault("ai", {})["selected"] = name
             self._save_settings(s)
         except Exception as e:  # noqa: BLE001
-            self._log(f"settings.ai.selected 저장 실패: {e}")
+            self._log(tr("ui_v2.log.persist_engine_failed", error=str(e)))
 
     def _on_send_message(self) -> None:
         """사용자 메시지 → AppService.generate_step 호출 → Step 추가 → 카드 갱신.
@@ -2281,15 +2295,21 @@ class MainWindowV2(QMainWindow):
                     WindowInspector.should_use_selenium(e) for e in elements_for_prompt
                 )
             except Exception as e:  # noqa: BLE001
-                self._log(f"element 컨텍스트 구성 실패 (무시): {e}")
+                self._log(tr("ui_v2.log.element_ctx_failed", error=str(e)))
 
         preview = full_request.replace("📌 선택된 요소:", "").strip().splitlines()
         preview = preview[0][:120] if preview else ""
-        self._log(f"사용자: {preview}")
+        self._log(tr("ui_v2.log.user_prefix", preview=preview))
         if images:
-            self._log(f"  + 이미지 {len(images)}개 첨부")
+            self._log(tr("ui_v2.log.attach_images", count=len(images)))
         if element_ctx:
-            self._log(f"  + element 컨텍스트 {len(element_ctx)}자, browser_path={is_browser_elem}")
+            self._log(
+                tr(
+                    "ui_v2.log.attach_element_ctx",
+                    chars=len(element_ctx),
+                    path=is_browser_elem,
+                )
+            )
         self._set_input_enabled(False)
         self._set_send_state(True)  # 전송 → ⏹ 중지 토글
 
@@ -2414,7 +2434,14 @@ class MainWindowV2(QMainWindow):
             path = captures_dir / f"v2_capture_{ts}.png"
             pil_image.save(str(path))
             self._pending_images.append(str(path))
-            self._log(f"📷 캡처 저장: {path.name} ({pil_image.size[0]}x{pil_image.size[1]})")
+            self._log(
+                tr(
+                    "ui_v2.log.capture_saved",
+                    name=path.name,
+                    w=pil_image.size[0],
+                    h=pil_image.size[1],
+                )
+            )
             self._toast(
                 tr(
                     "ui_v2.toast.capture_saved",
@@ -2426,7 +2453,7 @@ class MainWindowV2(QMainWindow):
             )
             self._refresh_chip_area()
         except Exception as e:
-            self._log(f"캡처 저장 실패: {e}")
+            self._log(tr("ui_v2.log.capture_save_failed", error=str(e)))
             self._toast(tr("ui_v2.toast.capture_save_failed", error=str(e)), "error")
         finally:
             self._capture_overlay = None
@@ -2437,7 +2464,7 @@ class MainWindowV2(QMainWindow):
         self._capture_overlay = None
         self.raise_()
         self.activateWindow()
-        self._log("캡처 취소")
+        self._log(tr("ui_v2.log.capture_canceled"))
 
     def _on_elempick(self) -> None:
         """v1 ElementPickerOverlay 재사용. settings 통째로 전달 (overlay 내부에서
@@ -2466,7 +2493,7 @@ class MainWindowV2(QMainWindow):
         self._pending_elements.append(element_info)
         ctype = element_info.get("control_type", "?")
         name = element_info.get("name", "")
-        self._log(f"🎯 요소 선택: [{ctype}] {name[:40]}")
+        self._log(tr("ui_v2.log.elempick_done", ctype=ctype, name=name[:40]))
         self._toast(
             tr("ui_v2.toast.elempick_done", ctype=ctype, name=name[:40]),
             "success",
@@ -2514,9 +2541,9 @@ class MainWindowV2(QMainWindow):
                 filepath = captures_dir / filename
                 img.save(str(filepath))
                 self._pending_images.append(str(filepath))
-                self._log(f"  + 요소 영역 캡처: {filename} ({w}x{h})")
+                self._log(tr("ui_v2.log.element_region_captured", filename=filename, w=w, h=h))
         except Exception as e:  # noqa: BLE001
-            self._log(f"  요소 캡처 실패 (무시): {e}")
+            self._log(tr("ui_v2.log.element_region_capture_failed", error=str(e)))
 
         self._refresh_chip_area()
         self._element_overlay = None
@@ -2527,7 +2554,7 @@ class MainWindowV2(QMainWindow):
         self._element_overlay = None
         self.raise_()
         self.activateWindow()
-        self._log("요소 선택 취소")
+        self._log(tr("ui_v2.log.elempick_canceled"))
 
     def _refresh_chip_area(self) -> None:
         """pending images + elements 를 chip 영역에 텍스트로 표시 (PoC 단순)."""
@@ -2557,7 +2584,7 @@ class MainWindowV2(QMainWindow):
         if dialog.exec():
             new_settings = dialog.get_settings()
             self._save_settings(new_settings)
-            self._log("설정 저장 완료. AI 엔진 재초기화...")
+            self._log(tr("ui_v2.log.settings_save_done_engine_reinit"))
             try:
                 # AppService 의 ai_manager 교체 (BYO 모델 변경 등 즉시 반영)
                 self.app_service.reload_ai(new_settings)
@@ -2568,10 +2595,10 @@ class MainWindowV2(QMainWindow):
                     self.engine_combo.addItem(e["name"])
                 self.engine_combo.setCurrentText(self.app_service.get_ai_engine_name() or "")
                 self.engine_combo.blockSignals(False)
-                self._log("✅ 설정 적용 완료")
+                self._log(tr("ui_v2.log.settings_apply_done"))
                 self._toast(tr("ui_v2.toast.settings_saved"), "success")
             except Exception as e:
-                self._log(f"설정 적용 중 오류: {e}")
+                self._log(tr("ui_v2.log.settings_apply_error", error=str(e)))
                 self._toast(tr("ui_v2.toast.settings_apply_error", error=str(e)), "error")
 
     def _on_command_palette(self) -> None:
@@ -2745,7 +2772,7 @@ class MainWindowV2(QMainWindow):
             settings.setdefault("ui", {})["sidebar_collapsed"] = self._sidebar_collapsed
             self._save_settings(settings)
         except Exception as e:
-            self._log(f"사이드바 상태 저장 실패: {e}")
+            self._log(tr("ui_v2.log.sidebar_state_save_failed", error=str(e)))
 
     def _on_regenerate(self, step_id: int, user_request: str) -> None:
         """D17: 사용자 요청 클릭 → 토스트 confirm → AppService.generate_step 재호출.
@@ -2755,7 +2782,7 @@ class MainWindowV2(QMainWindow):
         preview = user_request[:60] + ("..." if len(user_request) > 60 else "")
 
         def do_regenerate():
-            self._log(f"Step {step_id} 재생성: {preview}")
+            self._log(tr("ui_v2.log.step_regenerate", step_id=step_id, preview=preview))
             # 재생성 시점엔 pending elements 가 비어있을 가능성 — None 그대로.
             # 사용자가 새 element 선택했으면 self._pending_elements 사용.
             elems = list(self._pending_elements) if self._pending_elements else None
@@ -2796,7 +2823,7 @@ class MainWindowV2(QMainWindow):
             self._toast(tr("ui_v2.toast.empty_user_request", step_id=step_id), "warning")
             return
         warnings = list(target_step.get("validation_warnings", []) or [])
-        self._log(f"Step {step_id} 재생성 (코드 검사 경고 {len(warnings)}건 인용)")
+        self._log(tr("ui_v2.log.step_regenerate_warnings", step_id=step_id, count=len(warnings)))
         elems = list(self._pending_elements) if self._pending_elements else None
         self._send_request(
             user_request,
@@ -2878,7 +2905,7 @@ class MainWindowV2(QMainWindow):
             self._toast(tr("ui_v2.toast.session_reload_failed", error=str(e)), "error")
             return
         self._refresh_step_cards()
-        self._log(f"Step {from_step_id} → Step {target_step_id} 자리로 이동")
+        self._log(tr("ui_v2.log.step_reorder_to", from_id=from_step_id, to_id=target_step_id))
 
     def _append_log(self, msg: str) -> None:
         from datetime import datetime
@@ -2905,7 +2932,7 @@ class MainWindowV2(QMainWindow):
             self._kernels[sid] = kernel
             return kernel
         except Exception as e:
-            self._log(f"커널 생성 실패: {e}")
+            self._log(tr("ui_v2.log.kernel_create_failed", error=str(e)))
             return None
 
     def closeEvent(self, event) -> None:
