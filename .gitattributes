@@ -1,0 +1,47 @@
+# Normalize line endings across platforms.
+# Default: detect text vs binary, force LF in repo + working tree.
+* text=auto eol=lf
+
+# Source code (LF — matches ruff line-ending = "lf").
+*.py text eol=lf
+*.pyi text eol=lf
+*.toml text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+
+# Docs / config / data (LF).
+*.md text eol=lf
+*.rst text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+
+# Windows-native scripts (CRLF — PowerShell/cmd expect native line endings).
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets (no line-ending conversion, no diff).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.pyc binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
