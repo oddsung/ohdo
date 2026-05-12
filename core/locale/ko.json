@@ -72,5 +72,51 @@
   "ui_v2.chat.tooltip_send": "메시지 전송 (Enter / Ctrl+Enter)",
   "ui_v2.chat.tooltip_stop": "AI 응답 중지",
   "ui_v2.chat.tooltip_capture": "화면 캡처 — 다음 메시지에 첨부",
-  "ui_v2.chat.tooltip_elempick": "요소 선택 — 다음 메시지에 컨텍스트 추가"
+  "ui_v2.chat.tooltip_elempick": "요소 선택 — 다음 메시지에 컨텍스트 추가",
+
+  "ui_v2.tab.untitled_session": "(제목 없음)",
+  "ui_v2.tab.tooltip_new": "새 탭 — 클릭: 메뉴",
+  "ui_v2.tab.menu_close": "닫기",
+  "ui_v2.tab.menu_rename": "이름 변경...",
+  "ui_v2.tab.menu_duplicate": "복제",
+  "ui_v2.tab.menu_export": "워크플로우 내보내기...",
+  "ui_v2.tab.menu_delete": "🗑 세션 영구 삭제",
+  "ui_v2.tab.menu_new_empty": "📄 새 세션 (빈)",
+  "ui_v2.tab.menu_load_from_sidebar": "📂 사이드바에서 불러오기...",
+  "ui_v2.tab.menu_import_workflow": "📥 워크플로우 가져오기...",
+  "ui_v2.tab.menu_templates": "💡 템플릿",
+
+  "ui_v2.sidebar.title": "📋 세션",
+  "ui_v2.sidebar.menu_open": "열기 (새 탭)",
+  "ui_v2.sidebar.menu_delete": "🗑 영구 삭제",
+  "ui_v2.sidebar.status_session": "세션: {title}",
+
+  "ui_v2.session.rename_title": "세션 이름 변경",
+  "ui_v2.session.rename_label": "새 제목:",
+  "ui_v2.session.delete_title": "세션 영구 삭제",
+  "ui_v2.session.delete_confirm": "세션 '{title}' 을(를) 영구 삭제하시겠습니까?\n세션의 모든 step / 캡처 / 코드가 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.",
+  "ui_v2.session.duplicate_title": "{original} (복사본)",
+
+  "ui_v2.workflow.export_dir_title": "내보낼 폴더 선택",
+  "ui_v2.workflow.import_dir_title": "가져올 export 폴더 선택",
+
+  "ui_v2.scenarios.notepad_label": "메모장 한글 입력",
+  "ui_v2.scenarios.notepad_title": "메모장 자동화",
+  "ui_v2.scenarios.notepad_prompt": "메모장 열고 '안녕하세요' 입력 후 Ctrl+S 로 저장",
+  "ui_v2.scenarios.browser_label": "네이버 검색",
+  "ui_v2.scenarios.browser_title": "네이버 검색 자동화",
+  "ui_v2.scenarios.browser_prompt": "Chrome 으로 naver.com 접속 후 '삼성전자' 검색",
+
+  "ui_v2.toast.session_load_failed": "세션 로드 실패: {error}",
+  "ui_v2.toast.save_failed": "저장 실패: {error}",
+  "ui_v2.toast.session_renamed": "세션 이름 변경: {title}",
+  "ui_v2.toast.session_duplicated": "세션 복제: {title}",
+  "ui_v2.toast.delete_failed": "삭제 실패: {error}",
+  "ui_v2.toast.session_deleted": "세션 삭제: {title}",
+  "ui_v2.toast.export_done": "내보내기 완료: {name}",
+  "ui_v2.toast.export_failed": "내보내기 실패: {error}",
+  "ui_v2.toast.import_done": "가져오기 완료: {title}",
+  "ui_v2.toast.import_no_session_json": "폴더에 session.json 없음: {error}",
+  "ui_v2.toast.import_failed": "가져오기 실패: {error}",
+  "ui_v2.toast.sidebar_double_click_hint": "사이드바에서 세션을 더블클릭해 새 탭으로 엽니다"
 }

@@ -72,5 +72,51 @@
   "ui_v2.chat.tooltip_send": "Send message (Enter / Ctrl+Enter)",
   "ui_v2.chat.tooltip_stop": "Stop AI response",
   "ui_v2.chat.tooltip_capture": "Screen capture — attach to next message",
-  "ui_v2.chat.tooltip_elempick": "Pick element — add context to next message"
+  "ui_v2.chat.tooltip_elempick": "Pick element — add context to next message",
+
+  "ui_v2.tab.untitled_session": "(Untitled)",
+  "ui_v2.tab.tooltip_new": "New tab — click for menu",
+  "ui_v2.tab.menu_close": "Close",
+  "ui_v2.tab.menu_rename": "Rename...",
+  "ui_v2.tab.menu_duplicate": "Duplicate",
+  "ui_v2.tab.menu_export": "Export workflow...",
+  "ui_v2.tab.menu_delete": "🗑 Delete session permanently",
+  "ui_v2.tab.menu_new_empty": "📄 New session (empty)",
+  "ui_v2.tab.menu_load_from_sidebar": "📂 Load from sidebar...",
+  "ui_v2.tab.menu_import_workflow": "📥 Import workflow...",
+  "ui_v2.tab.menu_templates": "💡 Templates",
+
+  "ui_v2.sidebar.title": "📋 Sessions",
+  "ui_v2.sidebar.menu_open": "Open (new tab)",
+  "ui_v2.sidebar.menu_delete": "🗑 Delete permanently",
+  "ui_v2.sidebar.status_session": "Session: {title}",
+
+  "ui_v2.session.rename_title": "Rename session",
+  "ui_v2.session.rename_label": "New title:",
+  "ui_v2.session.delete_title": "Delete session permanently",
+  "ui_v2.session.delete_confirm": "Permanently delete session '{title}'?\nAll steps / captures / code will be removed.\nThis cannot be undone.",
+  "ui_v2.session.duplicate_title": "{original} (Copy)",
+
+  "ui_v2.workflow.export_dir_title": "Select export folder",
+  "ui_v2.workflow.import_dir_title": "Select export folder to import",
+
+  "ui_v2.scenarios.notepad_label": "Notepad text input",
+  "ui_v2.scenarios.notepad_title": "Notepad automation",
+  "ui_v2.scenarios.notepad_prompt": "Open Notepad, type 'Hello' and save with Ctrl+S",
+  "ui_v2.scenarios.browser_label": "Web search",
+  "ui_v2.scenarios.browser_title": "Web search automation",
+  "ui_v2.scenarios.browser_prompt": "Open google.com in Chrome and search for 'Samsung Electronics'",
+
+  "ui_v2.toast.session_load_failed": "Session load failed: {error}",
+  "ui_v2.toast.save_failed": "Save failed: {error}",
+  "ui_v2.toast.session_renamed": "Session renamed: {title}",
+  "ui_v2.toast.session_duplicated": "Session duplicated: {title}",
+  "ui_v2.toast.delete_failed": "Delete failed: {error}",
+  "ui_v2.toast.session_deleted": "Session deleted: {title}",
+  "ui_v2.toast.export_done": "Export complete: {name}",
+  "ui_v2.toast.export_failed": "Export failed: {error}",
+  "ui_v2.toast.import_done": "Import complete: {title}",
+  "ui_v2.toast.import_no_session_json": "No session.json in folder: {error}",
+  "ui_v2.toast.import_failed": "Import failed: {error}",
+  "ui_v2.toast.sidebar_double_click_hint": "Double-click a session in the sidebar to open it in a new tab"
 }

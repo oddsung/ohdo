@@ -1314,7 +1314,7 @@ class MainWindowV2(QMainWindow):
         # D21: + 새 탭 버튼 → 메뉴 (새로 만들기 / 불러오기 / 템플릿)
         plus_btn = QToolButton()
         plus_btn.setText("+")
-        plus_btn.setToolTip("새 탭 — 클릭: 메뉴")
+        plus_btn.setToolTip(tr("ui_v2.tab.tooltip_new"))
         plus_btn.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: 16px; "
             f"background: transparent; border: none; padding: 4px 10px;"
@@ -1340,9 +1340,9 @@ class MainWindowV2(QMainWindow):
         try:
             session = self.app_service.get_session(session_id)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"세션 로드 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.session_load_failed", error=str(e)), "error")
             return
-        title = session.title[:24] if session.title else "(제목 없음)"
+        title = session.title[:24] if session.title else tr("ui_v2.tab.untitled_session")
         # 1) state 먼저 동기화 (_on_tab_changed 가 즉시 정상 처리하도록)
         self._tab_session_ids.append(session_id)
         # 2) addTab — 첫 탭이면 currentChanged(0) 자동 발동 → _on_tab_changed 정상 동작
@@ -1376,13 +1376,15 @@ class MainWindowV2(QMainWindow):
             try:
                 self.current_session = self.app_service.get_session(session_id)
             except Exception as e:  # noqa: BLE001
-                self._toast(f"세션 로드 실패: {e}", "error")
+                self._toast(tr("ui_v2.toast.session_load_failed", error=str(e)), "error")
                 self.current_session = None
                 return
             self._load_active_tab_state(session_id)
             self._refresh_step_cards()
             self._refresh_chip_area()
-            self._status_bar.showMessage(f"세션: {self.current_session.title}")
+            self._status_bar.showMessage(
+                tr("ui_v2.sidebar.status_session", title=self.current_session.title)
+            )
             # 사이드바 highlight 동기화
             self._highlight_sidebar_session(session_id)
         finally:
@@ -1439,44 +1441,49 @@ class MainWindowV2(QMainWindow):
             return
         sid = self._tab_session_ids[index]
         menu = QMenu(self)
-        menu.addAction("닫기", lambda: self._on_tab_close(index))
-        menu.addAction("이름 변경...", lambda: self._on_tab_rename(sid))
-        menu.addAction("복제", lambda: self._on_tab_duplicate(sid))
-        menu.addAction("워크플로우 내보내기...", lambda: self._on_tab_export(sid))
+        menu.addAction(tr("ui_v2.tab.menu_close"), lambda: self._on_tab_close(index))
+        menu.addAction(tr("ui_v2.tab.menu_rename"), lambda: self._on_tab_rename(sid))
+        menu.addAction(tr("ui_v2.tab.menu_duplicate"), lambda: self._on_tab_duplicate(sid))
+        menu.addAction(tr("ui_v2.tab.menu_export"), lambda: self._on_tab_export(sid))
         menu.addSeparator()
-        menu.addAction("🗑 세션 영구 삭제", lambda: self._on_session_delete(sid))
+        menu.addAction(tr("ui_v2.tab.menu_delete"), lambda: self._on_session_delete(sid))
         menu.exec(self._tab_bar.mapToGlobal(pos))
 
     def _on_tab_rename(self, session_id: str) -> None:
         try:
             session = self.app_service.get_session(session_id)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"세션 로드 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.session_load_failed", error=str(e)), "error")
             return
-        new_title, ok = QInputDialog.getText(self, "세션 이름 변경", "새 제목:", text=session.title)
+        new_title, ok = QInputDialog.getText(
+            self,
+            tr("ui_v2.session.rename_title"),
+            tr("ui_v2.session.rename_label"),
+            text=session.title,
+        )
         if not ok or not new_title.strip():
             return
         session.title = new_title.strip()
         try:
             self.app_service.save_session(session)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"저장 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.save_failed", error=str(e)), "error")
             return
         # 탭 라벨 갱신
         if session_id in self._tab_session_ids:
             idx = self._tab_session_ids.index(session_id)
             self._tab_bar.setTabText(idx, session.title[:24])
         self._refresh_session_list()
-        self._toast(f"세션 이름 변경: {session.title}", "success")
+        self._toast(tr("ui_v2.toast.session_renamed", title=session.title), "success")
 
     def _on_tab_duplicate(self, session_id: str) -> None:
         try:
             src = self.app_service.get_session(session_id)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"세션 로드 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.session_load_failed", error=str(e)), "error")
             return
         dup = self.app_service.create_session(
-            title=f"{src.title} (복사본)",
+            title=tr("ui_v2.session.duplicate_title", original=src.title),
             project_type=src.project_type,
             description=src.description,
         )
@@ -1498,7 +1505,7 @@ class MainWindowV2(QMainWindow):
             )
         self._refresh_session_list()
         self._open_session_tab(dup.session_id)
-        self._toast(f"세션 복제: {dup.title}", "success")
+        self._toast(tr("ui_v2.toast.session_duplicated", title=dup.title), "success")
 
     def _on_session_delete(self, session_id: str) -> None:
         """세션 영구 삭제 — confirm 후 AppService.delete_session.
@@ -1514,10 +1521,8 @@ class MainWindowV2(QMainWindow):
 
         reply = QMessageBox.question(
             self,
-            "세션 영구 삭제",
-            f"세션 '{title}' 을(를) 영구 삭제하시겠습니까?\n"
-            f"세션의 모든 step / 캡처 / 코드가 삭제됩니다.\n"
-            f"이 작업은 되돌릴 수 없습니다.",
+            tr("ui_v2.session.delete_title"),
+            tr("ui_v2.session.delete_confirm", title=title),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1533,11 +1538,11 @@ class MainWindowV2(QMainWindow):
         try:
             self.app_service.delete_session(session_id)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"삭제 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.delete_failed", error=str(e)), "error")
             return
 
         self._refresh_session_list()
-        self._toast(f"세션 삭제: {title}", "warning")
+        self._toast(tr("ui_v2.toast.session_deleted", title=title), "warning")
 
     def _on_sidebar_context_menu(self, pos) -> None:
         """사이드바 세션 우클릭 — 열기 / 이름 변경 / 복제 / 내보내기 / 삭제."""
@@ -1548,14 +1553,14 @@ class MainWindowV2(QMainWindow):
         if not sid:
             return
         menu = QMenu(self)
-        menu.addAction("열기 (새 탭)", lambda: self._open_session_tab(sid))
+        menu.addAction(tr("ui_v2.sidebar.menu_open"), lambda: self._open_session_tab(sid))
         menu.addSeparator()
-        menu.addAction("이름 변경...", lambda: self._on_tab_rename(sid))
-        menu.addAction("복제", lambda: self._on_tab_duplicate(sid))
-        menu.addAction("워크플로우 내보내기...", lambda: self._on_tab_export(sid))
+        menu.addAction(tr("ui_v2.tab.menu_rename"), lambda: self._on_tab_rename(sid))
+        menu.addAction(tr("ui_v2.tab.menu_duplicate"), lambda: self._on_tab_duplicate(sid))
+        menu.addAction(tr("ui_v2.tab.menu_export"), lambda: self._on_tab_export(sid))
         menu.addSeparator()
         # 삭제 액션 — 빨간 텍스트로 destructive 표시
-        del_action = menu.addAction("🗑 영구 삭제")
+        del_action = menu.addAction(tr("ui_v2.sidebar.menu_delete"))
         del_action.triggered.connect(lambda: self._on_session_delete(sid))
         menu.exec(self.session_list.mapToGlobal(pos))
 
@@ -1565,7 +1570,7 @@ class MainWindowV2(QMainWindow):
         결과 폴더에 main.py / requirements.txt / README.md / run.bat (실행 가능)
         + session.json / captures/ / scripts/ (가져오기 가능) 모두 포함.
         """
-        out_path = QFileDialog.getExistingDirectory(self, "내보낼 폴더 선택", "")
+        out_path = QFileDialog.getExistingDirectory(self, tr("ui_v2.workflow.export_dir_title"), "")
         if not out_path:
             return
         try:
@@ -1581,9 +1586,9 @@ class MainWindowV2(QMainWindow):
                 output_dir=target,
                 settings=output_settings,
             )
-            self._toast(f"내보내기 완료: {project_dir.name}", "success")
+            self._toast(tr("ui_v2.toast.export_done", name=project_dir.name), "success")
         except Exception as e:  # noqa: BLE001
-            self._toast(f"내보내기 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.export_failed", error=str(e)), "error")
 
     def _on_import_workflow(self) -> None:
         """워크플로우 가져오기 — AppService.import_workflow (D22 가져오기 짝).
@@ -1591,39 +1596,39 @@ class MainWindowV2(QMainWindow):
         ``export_workflow`` 결과 폴더 (또는 같은 구조 — session.json 필수) 를 받아
         새 UUID 로 ``data/sessions/`` 에 복사. 사이드바 갱신 + 새 탭으로 열기.
         """
-        src_path = QFileDialog.getExistingDirectory(self, "가져올 export 폴더 선택", "")
+        src_path = QFileDialog.getExistingDirectory(self, tr("ui_v2.workflow.import_dir_title"), "")
         if not src_path:
             return
         try:
             session = self.app_service.import_workflow(source_dir=src_path)
             self._refresh_session_list()
             self._open_session_tab(session.session_id)
-            self._toast(f"가져오기 완료: {session.title}", "success")
+            self._toast(tr("ui_v2.toast.import_done", title=session.title), "success")
         except FileNotFoundError as e:  # noqa: BLE001
-            self._toast(f"폴더에 session.json 없음: {e}", "error")
+            self._toast(tr("ui_v2.toast.import_no_session_json", error=str(e)), "error")
         except Exception as e:  # noqa: BLE001
-            self._toast(f"가져오기 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.import_failed", error=str(e)), "error")
 
     # D21: + 탭 버튼 메뉴
     def _on_plus_tab(self) -> None:
         menu = QMenu(self)
-        menu.addAction("📄 새 세션 (빈)", self._on_new_session)
-        menu.addAction("📂 사이드바에서 불러오기...", self._focus_sidebar_search)
-        menu.addAction("📥 워크플로우 가져오기...", self._on_import_workflow)
+        menu.addAction(tr("ui_v2.tab.menu_new_empty"), self._on_new_session)
+        menu.addAction(tr("ui_v2.tab.menu_load_from_sidebar"), self._focus_sidebar_search)
+        menu.addAction(tr("ui_v2.tab.menu_import_workflow"), self._on_import_workflow)
         menu.addSeparator()
-        sub = menu.addMenu("💡 템플릿")
+        sub = menu.addMenu(tr("ui_v2.tab.menu_templates"))
         sub.addAction(
-            "메모장 한글 입력",
+            tr("ui_v2.scenarios.notepad_label"),
             lambda: self._new_session_with_scenario(
-                "메모장 자동화",
-                "메모장 열고 '안녕하세요' 입력 후 Ctrl+S 로 저장",
+                tr("ui_v2.scenarios.notepad_title"),
+                tr("ui_v2.scenarios.notepad_prompt"),
             ),
         )
         sub.addAction(
-            "네이버 검색",
+            tr("ui_v2.scenarios.browser_label"),
             lambda: self._new_session_with_scenario(
-                "네이버 검색 자동화",
-                "Chrome 으로 naver.com 접속 후 '삼성전자' 검색",
+                tr("ui_v2.scenarios.browser_title"),
+                tr("ui_v2.scenarios.browser_prompt"),
                 project_type="web",
             ),
         )
@@ -1642,7 +1647,7 @@ class MainWindowV2(QMainWindow):
         """사이드바가 접혀있으면 펼치고 검색 안내 토스트."""
         if self._sidebar_collapsed:
             self._toggle_sidebar()
-        self._toast("사이드바에서 세션을 더블클릭해 새 탭으로 엽니다", "info")
+        self._toast(tr("ui_v2.toast.sidebar_double_click_hint"), "info")
 
     def _highlight_sidebar_session(self, session_id: str) -> None:
         """활성 세션을 사이드바 목록에서 select."""
@@ -1657,7 +1662,7 @@ class MainWindowV2(QMainWindow):
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 4, 8)
 
-        title = QLabel("📋 세션")
+        title = QLabel(tr("ui_v2.sidebar.title"))
         title.setFont(QFont("Malgun Gothic", 11, QFont.Weight.Bold))
         layout.addWidget(title)
 

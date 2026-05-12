@@ -1665,8 +1665,8 @@ class ScenariosTest(TestCase):
             "[D22] _on_import_workflow 가 AppService.import_workflow 호출 필수",
         )
         self.assert_true(
-            "워크플로우 가져오기" in src,
-            "[D22] + 탭 메뉴에 '워크플로우 가져오기' 액션 노출 필수",
+            'tr("ui_v2.tab.menu_import_workflow")' in src,
+            "[D22] + 탭 메뉴에 'menu_import_workflow' tr key 노출 필수",
         )
 
     def test_73_agent_bridge_skeleton(self):
@@ -2332,10 +2332,10 @@ class ScenariosTest(TestCase):
             "[사이드바] customContextMenuRequested → _on_sidebar_context_menu 연결 필수",
         )
 
-        # 탭 우클릭 메뉴에 영구 삭제 항목
+        # 탭 우클릭 메뉴에 영구 삭제 항목 — i18n 도입 후 tr key 검색.
         self.assert_true(
-            "세션 영구 삭제" in src,
-            "[탭 우클릭] '세션 영구 삭제' 항목 필수",
+            'tr("ui_v2.tab.menu_delete")' in src,
+            "[탭 우클릭] 'menu_delete' tr key 항목 필수",
         )
 
         # AppService.delete_session 실 동작 (UI 없이)
@@ -2660,8 +2660,8 @@ class ScenariosTest(TestCase):
                 f"[D21] {method} 필수",
             )
         self.assert_true(
-            "💡 템플릿" in src or "템플릿" in src,
-            "[D21] + 탭 메뉴에 '템플릿' 서브메뉴 노출",
+            'tr("ui_v2.tab.menu_templates")' in src,
+            "[D21] + 탭 메뉴에 'menu_templates' tr key 서브메뉴 노출",
         )
 
         # D22
