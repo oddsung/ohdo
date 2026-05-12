@@ -74,6 +74,7 @@ from PySide6.QtWidgets import (
 # 모두 app_service 에서 re-export. ai_engine / session_manager / execution_kernel /
 # storage 직접 import 금지.
 from core.app_service import AppService, ExecutionKernel, Session, Step
+from core.i18n import tr
 
 # ── 디자인 토큰 (wireframes_v2.md §8) ────────────────────────────────
 
@@ -550,7 +551,7 @@ class StepCardV2(QFrame):
         self._header_frame = QFrame()
         self._header_frame.setStyleSheet("QFrame { background: transparent; }")
         self._header_frame.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._header_frame.setToolTip("클릭: 코드 영역 펼치기/접기")
+        self._header_frame.setToolTip(tr("ui_v2.step_card.header_tooltip"))
         header = QHBoxLayout(self._header_frame)
         header.setContentsMargins(0, 0, 0, 0)
 
@@ -579,7 +580,12 @@ class StepCardV2(QFrame):
                 f"color: {COLORS['warning']}; border: none; font-size: 14px; font-weight: bold;"
             )
             self.validation_warning_label.setCursor(Qt.CursorShape.PointingHandCursor)
-            tooltip_lines = [f"코드 검사 경고 {len(self._validation_warnings)}건 (클릭: 상세 보기)"]
+            tooltip_lines = [
+                tr(
+                    "ui_v2.step_card.validation_tooltip_header",
+                    count=len(self._validation_warnings),
+                )
+            ]
             for w in self._validation_warnings[:3]:
                 line_str = f" (line {w.get('line')})" if w.get("line") else ""
                 tooltip_lines.append(f"- [{w.get('kind', '?')}]{line_str} {w.get('message', '')}")
@@ -612,7 +618,7 @@ class StepCardV2(QFrame):
             req_edit.setMaximumHeight(60)
             self._tame_text_widget(req_edit)
             req_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-            req_edit.setToolTip("클릭하면 이 요청으로 다시 생성 (토스트 confirm)")
+            req_edit.setToolTip(tr("ui_v2.step_card.req_edit_tooltip"))
             req_edit.setStyleSheet(f"""
                 QPlainTextEdit {{
                     background-color: {COLORS["bg_overlay"]};
@@ -646,7 +652,7 @@ class StepCardV2(QFrame):
                 f"font-size: 12px; background: transparent; border: none;"
             )
             ai_preview.setCursor(Qt.CursorShape.PointingHandCursor)
-            ai_preview.setToolTip("클릭하면 전체 설명 펼침/접기")
+            ai_preview.setToolTip(tr("ui_v2.step_card.ai_preview_tooltip"))
             ai_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             ai_preview.setMinimumWidth(0)
 
@@ -733,7 +739,16 @@ class StepCardV2(QFrame):
             wait_label.setStyleSheet(f"color: {COLORS['text_muted']}; border: none;")
             footer.addWidget(wait_label)
             self.wait_combo = QComboBox()
-            self.wait_combo.addItems(["0", "200", "500 (기본)", "1000", "2000", "사용자 정의..."])
+            self.wait_combo.addItems(
+                [
+                    "0",
+                    "200",
+                    tr("ui_v2.step_card.wait_default_suffix"),
+                    "1000",
+                    "2000",
+                    tr("ui_v2.step_card.wait_custom"),
+                ]
+            )
             self.wait_combo.setCurrentIndex(2)
             self.wait_combo.setMaximumWidth(120)
             footer.addWidget(self.wait_combo)
@@ -745,26 +760,26 @@ class StepCardV2(QFrame):
             )
             up_btn = QToolButton()
             up_btn.setText("⬆")
-            up_btn.setToolTip("위로 이동")
+            up_btn.setToolTip(tr("ui_v2.step_card.btn_up_tooltip"))
             up_btn.setStyleSheet(reorder_style)
             up_btn.clicked.connect(lambda: self.reorder_requested.emit(self.step_id, "up"))
             footer.addWidget(up_btn)
 
             down_btn = QToolButton()
             down_btn.setText("⬇")
-            down_btn.setToolTip("아래로 이동")
+            down_btn.setToolTip(tr("ui_v2.step_card.btn_down_tooltip"))
             down_btn.setStyleSheet(reorder_style)
             down_btn.clicked.connect(lambda: self.reorder_requested.emit(self.step_id, "down"))
             footer.addWidget(down_btn)
 
         # ✏️ 수정 버튼 — Library (step_id == 0) 제외, Initial/Step 모두 편집 가능
         if step_id != 0:
-            self.edit_btn = QPushButton("✏️ 수정")
+            self.edit_btn = QPushButton(tr("ui_v2.step_card.btn_edit"))
             self.edit_btn.setStyleSheet(
                 f"background-color: {COLORS['bg_overlay']}; color: {COLORS['text_base']}; "
                 f"padding: 4px 10px;"
             )
-            self.edit_btn.setToolTip("코드 직접 수정 — 클릭 후 편집, 다시 클릭으로 저장")
+            self.edit_btn.setToolTip(tr("ui_v2.step_card.btn_edit_tooltip"))
             self.edit_btn.clicked.connect(self._toggle_edit)
             footer.addWidget(self.edit_btn)
 
@@ -772,7 +787,7 @@ class StepCardV2(QFrame):
 
         # D11: Initial 은 "▶ 여기서" 버튼 제거, "⏯ 단독" 만
         if step_id == -1:
-            run_single_btn = QPushButton("⏯  단독 실행")
+            run_single_btn = QPushButton(tr("ui_v2.step_card.btn_run_initial_alone"))
             run_single_btn.setStyleSheet(
                 f"background-color: {COLORS['info']}; color: {COLORS['bg_base']}; "
                 f"font-weight: bold; padding: 4px 12px;"
@@ -780,17 +795,17 @@ class StepCardV2(QFrame):
             run_single_btn.clicked.connect(lambda: self.run_single_requested.emit(self.step_id))
             footer.addWidget(run_single_btn)
         elif step_id > 0:
-            run_single_btn = QPushButton("⏯ 단독")
+            run_single_btn = QPushButton(tr("ui_v2.step_card.btn_run_alone"))
             run_single_btn.clicked.connect(lambda: self.run_single_requested.emit(self.step_id))
             footer.addWidget(run_single_btn)
 
         if step_id == 0:
             # 라이브러리: ▶ 재초기화
-            run_btn = QPushButton("▶  재초기화")
+            run_btn = QPushButton(tr("ui_v2.step_card.btn_run_reinit"))
             run_btn.clicked.connect(lambda: self.run_from_here_requested.emit(0))
             footer.addWidget(run_btn)
         elif step_id > 0:
-            run_btn = QPushButton("▶  여기서")
+            run_btn = QPushButton(tr("ui_v2.step_card.btn_run_here"))
             run_btn.setStyleSheet(
                 f"background-color: {COLORS['success']}; color: {COLORS['bg_base']}; "
                 f"font-weight: bold;"
@@ -822,12 +837,19 @@ class StepCardV2(QFrame):
         각 issue 의 kind / line / message 를 한 줄씩 표시. 사용자가 한눈에 보고
         "재생성" 버튼으로 warnings 인용 prompt 로 AI 재호출 (G7-D), 또는 닫기.
         """
-        lines = [f"Step {self.step_id} 코드 검사 경고 {len(self._validation_warnings)}건\n"]
+        lines = [
+            tr(
+                "ui_v2.validation.header_line",
+                step_id=self.step_id,
+                count=len(self._validation_warnings),
+            )
+            + "\n"
+        ]
         kind_label = {
-            "syntax": "문법 오류",
-            "redefined_var": "변수 재정의",
-            "missing_try": "try/except 누락",
-            "import_misplaced": "import 위치 위반",
+            "syntax": tr("ui_v2.validation.kind_syntax"),
+            "redefined_var": tr("ui_v2.validation.kind_redefined_var"),
+            "missing_try": tr("ui_v2.validation.kind_missing_try"),
+            "import_misplaced": tr("ui_v2.validation.kind_import_misplaced"),
         }
         for idx, w in enumerate(self._validation_warnings, start=1):
             kind = w.get("kind", "?")
@@ -837,15 +859,17 @@ class StepCardV2(QFrame):
             msg = w.get("message", "")
             lines.append(f"{idx}. [{label}]{line_str} {msg}")
         lines.append("")
-        lines.append("'재생성' 클릭 시 위 문제를 AI 에게 알리고 같은 요청으로 다시 생성합니다.")
+        lines.append(tr("ui_v2.validation.regenerate_hint"))
 
         # G7-D: Retry 버튼 — 클릭 시 새 signal emit (MainWindow 가 받아서 재생성).
         msg_box = QMessageBox(self)
         msg_box.setIcon(QMessageBox.Icon.Warning)
-        msg_box.setWindowTitle(f"Step {self.step_id} 코드 검사 경고")
+        msg_box.setWindowTitle(tr("ui_v2.validation.dialog_title", step_id=self.step_id))
         msg_box.setText("\n".join(lines))
-        regenerate_btn = msg_box.addButton("재생성", QMessageBox.ButtonRole.ActionRole)
-        msg_box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
+        regenerate_btn = msg_box.addButton(
+            tr("ui_v2.validation.btn_regenerate"), QMessageBox.ButtonRole.ActionRole
+        )
+        msg_box.addButton(tr("ui_v2.validation.btn_close"), QMessageBox.ButtonRole.RejectRole)
         msg_box.exec()
         if msg_box.clickedButton() is regenerate_btn:
             self.regenerate_with_warnings_requested.emit(self.step_id)
@@ -889,7 +913,7 @@ class StepCardV2(QFrame):
         self._code_edit.setReadOnly(False)
         self._code_edit.setStyleSheet(self._editing_style)
         self._code_edit.setFixedHeight(self._editing_height)
-        self.edit_btn.setText("✅ 저장")
+        self.edit_btn.setText(tr("ui_v2.step_card.btn_save"))
         self.edit_btn.setStyleSheet(
             f"background-color: {COLORS['success']}; color: {COLORS['bg_base']}; "
             f"font-weight: bold; padding: 4px 10px;"
@@ -902,7 +926,7 @@ class StepCardV2(QFrame):
         self._code_edit.setReadOnly(True)
         self._code_edit.setStyleSheet(self._readonly_style)
         self._code_edit.setFixedHeight(self._readonly_height)
-        self.edit_btn.setText("✏️ 수정")
+        self.edit_btn.setText(tr("ui_v2.step_card.btn_edit"))
         self.edit_btn.setStyleSheet(
             f"background-color: {COLORS['bg_overlay']}; color: {COLORS['text_base']}; "
             f"padding: 4px 10px;"
@@ -1158,10 +1182,10 @@ class MainWindowV2(QMainWindow):
             f"background-color: {COLORS['bg_surface']}; color: {COLORS['text_muted']};"
         )
         self.setStatusBar(self._status_bar)
-        self._status_bar.showMessage("준비")
+        self._status_bar.showMessage(tr("ui_v2.action_bar.status_ready"))
         # 콘솔 토글 버튼 — 사용자 보고 (5/5): 기본 회색이라 안 보임. 명확한 텍스트 + 색상.
-        self._toggle_console_btn = QPushButton("📟 콘솔")
-        self._toggle_console_btn.setToolTip("콘솔 토글 (Ctrl+`)")
+        self._toggle_console_btn = QPushButton(tr("ui_v2.action_bar.btn_toggle_console"))
+        self._toggle_console_btn.setToolTip(tr("ui_v2.action_bar.tooltip_console_toggle"))
         self._toggle_console_btn.setStyleSheet(
             f"background-color: {COLORS['bg_overlay']}; color: {COLORS['text_base']}; "
             f"border: 1px solid #45475a; border-radius: 4px; "
@@ -1178,11 +1202,11 @@ class MainWindowV2(QMainWindow):
         # D20: 사이드바 toggle (Ctrl+B)
         self.sidebar_toggle_btn = QToolButton()
         self.sidebar_toggle_btn.setText("☰")
-        self.sidebar_toggle_btn.setToolTip("사이드바 토글 (Ctrl+B)")
+        self.sidebar_toggle_btn.setToolTip(tr("ui_v2.action_bar.tooltip_sidebar_toggle"))
         self.sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
         bar.addWidget(self.sidebar_toggle_btn)
 
-        run_all_btn = QPushButton("▶  전체 실행")
+        run_all_btn = QPushButton(tr("ui_v2.action_bar.btn_run_all"))
         run_all_btn.setStyleSheet(
             f"background-color: {COLORS['success']}; color: {COLORS['bg_base']}; "
             f"font-weight: bold; padding: 4px 14px;"
@@ -1191,19 +1215,19 @@ class MainWindowV2(QMainWindow):
         bar.addWidget(run_all_btn)
 
         stop_btn = QPushButton("⏹")
-        stop_btn.setToolTip("강제 중지 (F9)")
+        stop_btn.setToolTip(tr("ui_v2.action_bar.tooltip_stop"))
         stop_btn.clicked.connect(self._on_stop)
         bar.addWidget(stop_btn)
 
-        kernel_btn = QPushButton("🔄 커널")
-        kernel_btn.setToolTip("커널 재시작")
+        kernel_btn = QPushButton(tr("ui_v2.action_bar.btn_kernel"))
+        kernel_btn.setToolTip(tr("ui_v2.action_bar.tooltip_kernel_restart"))
         kernel_btn.clicked.connect(self._on_kernel_reset)
         bar.addWidget(kernel_btn)
 
         # 전체 펼치기/접기 — 모든 카드 코드 영역 일괄 토글
         expand_all_btn = QToolButton()
-        expand_all_btn.setText("▼ 모두 펼치기")
-        expand_all_btn.setToolTip("모든 카드의 코드 영역 펼치기")
+        expand_all_btn.setText(tr("ui_v2.action_bar.btn_expand_all"))
+        expand_all_btn.setToolTip(tr("ui_v2.action_bar.tooltip_expand_all"))
         expand_all_btn.setStyleSheet(
             f"color: {COLORS['text_muted']}; background: transparent; "
             f"border: none; padding: 4px 8px;"
@@ -1212,8 +1236,8 @@ class MainWindowV2(QMainWindow):
         bar.addWidget(expand_all_btn)
 
         collapse_all_btn = QToolButton()
-        collapse_all_btn.setText("▶ 모두 접기")
-        collapse_all_btn.setToolTip("모든 카드의 코드 영역 접기")
+        collapse_all_btn.setText(tr("ui_v2.action_bar.btn_collapse_all"))
+        collapse_all_btn.setToolTip(tr("ui_v2.action_bar.tooltip_collapse_all"))
         collapse_all_btn.setStyleSheet(
             f"color: {COLORS['text_muted']}; background: transparent; "
             f"border: none; padding: 4px 8px;"
@@ -1223,7 +1247,7 @@ class MainWindowV2(QMainWindow):
 
         bar.addSpacing(20)
 
-        bar.addWidget(QLabel("엔진:"))
+        bar.addWidget(QLabel(tr("ui_v2.action_bar.label_engine")))
         self.engine_combo = QComboBox()
         engines = self.app_service.list_ai_engines()
         for e in engines:
@@ -1234,7 +1258,7 @@ class MainWindowV2(QMainWindow):
 
         bar.addStretch()
 
-        new_session_btn = QPushButton("📄 새 세션")
+        new_session_btn = QPushButton(tr("ui_v2.action_bar.btn_new_session"))
         new_session_btn.clicked.connect(self._on_new_session)
         bar.addWidget(new_session_btn)
 
@@ -1707,7 +1731,7 @@ class MainWindowV2(QMainWindow):
 
         capture_btn = QToolButton()
         capture_btn.setText("📷")
-        capture_btn.setToolTip("화면 캡처 — 다음 메시지에 첨부")
+        capture_btn.setToolTip(tr("ui_v2.chat.tooltip_capture"))
         capture_btn.setFixedSize(40, 40)
         capture_btn.setStyleSheet(attach_btn_style)
         capture_btn.clicked.connect(self._on_capture)
@@ -1715,23 +1739,21 @@ class MainWindowV2(QMainWindow):
 
         elempick_btn = QToolButton()
         elempick_btn.setText("🎯")
-        elempick_btn.setToolTip("요소 선택 — 다음 메시지에 컨텍스트 추가")
+        elempick_btn.setToolTip(tr("ui_v2.chat.tooltip_elempick"))
         elempick_btn.setFixedSize(40, 40)
         elempick_btn.setStyleSheet(attach_btn_style)
         elempick_btn.clicked.connect(self._on_elempick)
         input_row.addWidget(elempick_btn)
 
         self.message_edit = MessageInput()
-        self.message_edit.setPlaceholderText(
-            "다음 작업 요청...  (Enter: 전송, Shift+Enter: 줄바꿈, Ctrl+Enter: 전송)"
-        )
+        self.message_edit.setPlaceholderText(tr("ui_v2.chat.placeholder"))
         self.message_edit.setMaximumHeight(70)
         # Enter / Ctrl+Enter → 전송 (Shift+Enter 는 기본 줄바꿈 유지)
         self.message_edit.send_requested.connect(self._on_send_message)
         input_row.addWidget(self.message_edit)
 
         # 전송 / 중지 토글 버튼 — _set_send_state 가 텍스트/색상 변환
-        self.send_btn = QPushButton("전송 ▶")
+        self.send_btn = QPushButton(tr("ui_v2.chat.btn_send"))
         self.send_btn.setMinimumWidth(80)
         self.send_btn.clicked.connect(self._on_send_message)
         input_row.addWidget(self.send_btn)
@@ -2301,19 +2323,19 @@ class MainWindowV2(QMainWindow):
         """
         self._is_generating = generating
         if generating:
-            self.send_btn.setText("⏹ 중지")
+            self.send_btn.setText(tr("ui_v2.chat.btn_stop"))
             self.send_btn.setStyleSheet(
                 f"background-color: {COLORS['error']}; color: {COLORS['bg_base']}; "
                 f"font-weight: bold; padding: 6px 16px;"
             )
-            self.send_btn.setToolTip("AI 응답 중지")
+            self.send_btn.setToolTip(tr("ui_v2.chat.tooltip_stop"))
         else:
-            self.send_btn.setText("전송 ▶")
+            self.send_btn.setText(tr("ui_v2.chat.btn_send"))
             self.send_btn.setStyleSheet(
                 f"background-color: {COLORS['primary']}; color: {COLORS['bg_base']}; "
                 f"font-weight: bold; padding: 6px 16px;"
             )
-            self.send_btn.setToolTip("메시지 전송 (Enter / Ctrl+Enter)")
+            self.send_btn.setToolTip(tr("ui_v2.chat.tooltip_send"))
 
     def _on_capture(self) -> None:
         """v1 ScreenCaptureOverlay 재사용 — UI 컴포넌트는 ADR 우회 OK."""

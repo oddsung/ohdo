@@ -4347,9 +4347,10 @@ if __name__ == "__main__":
         )
 
         # 7) _show_validation_dialog 에 재생성 버튼 + emit
+        # i18n 도입 후 button text 는 tr key 로 분기 (C-2b-1).
         dialog_src = inspect.getsource(StepCardV2._show_validation_dialog)
         for pattern, desc in (
-            ('addButton("재생성"', "QMessageBox '재생성' 버튼 추가"),
+            ('addButton(\n            tr("ui_v2.validation.btn_regenerate")', "재생성 버튼 tr key"),
             ("regenerate_with_warnings_requested.emit", "재생성 클릭 시 signal emit"),
             ("clickedButton() is regenerate_btn", "재생성 버튼 클릭 분기"),
         ):

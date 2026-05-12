@@ -673,10 +673,10 @@ class ScenariosTest(TestCase):
             "_is_generating 상태 변수 보유 필수",
         )
 
-        # 토글 텍스트 — assertion 메시지에 ⏹ 직접 사용 X (cp949 미지원)
+        # 토글 텍스트 — i18n 도입 후 tr key 검색으로 검증 (값은 catalog 분기).
         self.assert_true(
-            '"⏹ 중지"' in src and '"전송 ▶"' in src,
-            "send_btn 텍스트가 stop/send 사이 토글 필수",
+            'tr("ui_v2.chat.btn_stop")' in src and 'tr("ui_v2.chat.btn_send")' in src,
+            "send_btn 텍스트가 stop/send tr key 사이 토글 필수",
         )
 
         # _on_send_message 가 generating 상태에서 cancel_ai 분기
@@ -738,10 +738,11 @@ class ScenariosTest(TestCase):
             encoding="utf-8"
         )
 
-        # 액션바 전체 펼치기/접기 버튼
+        # 액션바 전체 펼치기/접기 버튼 — i18n 도입 후 tr key 검색.
         self.assert_true(
-            "모두 펼치기" in src and "모두 접기" in src,
-            "[액션바] 모두 펼치기/접기 버튼 텍스트 필수",
+            'tr("ui_v2.action_bar.btn_expand_all")' in src
+            and 'tr("ui_v2.action_bar.btn_collapse_all")' in src,
+            "[액션바] 모두 펼치기/접기 버튼 tr key 필수",
         )
         self.assert_true(
             "self._set_all_cards_expanded(True)" in src
