@@ -1,4 +1,5 @@
 # Phase 0 sub-phase 4 (5/8) — GitHub Actions CI 매트릭스.
+# 5/12 — PySide6 (LGPL) 메인 전환 반영 (handoff §20).
 #
 # 트리거: push / PR (모든 브랜치). main 머지 전 회귀 가드.
 #
@@ -10,7 +11,8 @@
 # 보류:
 #   - ai_integration suite — Gemini CLI 셋업 + API key secret 필요. 로컬 수동 유지.
 #   - GUI 자동화 suite (notepad/calculator/browser) — Windows GUI 환경 필수.
-#   - pyside6_port — venv 미설치 (사용자 수동 셋업). CI 미포함.
+#   - legacy_pyqt6/ — deprecated, lint 대상 외 (pyproject.toml `extend-exclude`).
+#     실행 검증 필요 시 `uv sync --extra legacy-pyqt6`.
 
 name: CI
 
@@ -47,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     env:
-      # PyQt6 wheel 은 Qt binaries 포함하지만 platform plugin 은 X server 가 없으면
+      # PySide6 wheel 은 Qt binaries 포함하지만 platform plugin 은 X server 가 없으면
       # 실패 → headless CI 에선 offscreen 사용. tests/test_core.py 는 module import
       # 만 하지만 일부 scenarios 가 ui_v2 클래스 import → Qt 모듈 로드.
       QT_QPA_PLATFORM: offscreen
