@@ -4953,6 +4953,50 @@ if __name__ == "__main__":
             f"[C-2] ko.json 에 누락된 tr key {len(missing_ko)} 개: {missing_ko[:5]}",
         )
 
+    def test_109_c2_locale_auto_detect_at_startup(self):
+        """[Phase 1.9 C-2 final] main.py startup locale 자동 감지.
+
+        UI import 전에 core.i18n.set_locale 호출 — tr() 가 올바른 catalog
+        로 분기하도록 보장.
+
+        가드:
+        1. main._detect_and_set_locale 함수 존재 + callable
+        2. main() 시작부에 _detect_and_set_locale() 호출 sentinel
+        3. helper 함수 안 핵심 패턴 — set_locale 호출 + settings.ui.language
+           우선 + ko/en 분기 + 시스템 locale fallback
+        """
+        import inspect as _inspect
+
+        import main as main_mod
+
+        # 1) 함수 존재
+        self.assert_true(
+            callable(getattr(main_mod, "_detect_and_set_locale", None)),
+            "[C-2 final] main._detect_and_set_locale 함수 callable 필수",
+        )
+
+        # 2) main() 안 호출 sentinel
+        main_src = _inspect.getsource(main_mod.main)
+        self.assert_true(
+            "_detect_and_set_locale" in main_src,
+            "[C-2 final] main() 시작부에 _detect_and_set_locale() 호출 필수",
+        )
+
+        # 3) helper 함수 핵심 패턴
+        fn_src = _inspect.getsource(main_mod._detect_and_set_locale)
+        for pattern, desc in (
+            ("set_locale", "core.i18n.set_locale 호출"),
+            ("ui", "settings.ui.language 키 참조"),
+            ("language", "language 키 참조"),
+            ('"ko"', "ko locale 분기"),
+            ('"en"', "en fallback"),
+            ("getlocale", "시스템 locale 감지"),
+        ):
+            self.assert_true(
+                pattern in fn_src,
+                f"[C-2 final] _detect_and_set_locale 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 

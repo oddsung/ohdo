@@ -54,7 +54,7 @@
     "theme": "dark",
     "console_visible": true,
     "font_size": 11,
-    "language": "ko",
+    "language": "auto",
     "hint_run_shown": false
   },
   "output_project": {

@@ -129,12 +129,47 @@ def request_admin_and_restart():
         print(f"[WARNING] 관리자 권한 재시작 중 오류: {e}")
 
 
+def _detect_and_set_locale() -> str:
+    # Phase 1.9 C-2 final — startup 시 locale 결정 + core.i18n.set_locale 호출.
+    # 우선순위: settings.json ui.language ("ko"/"en") → 시스템 locale → "en".
+    import json as _json
+    import locale as _locale
+
+    from core.i18n import set_locale
+
+    cfg_lang = "auto"
+    for cfg_name in ("settings.json", "default_settings.json"):
+        cfg_path = Path(__file__).parent / "config" / cfg_name
+        if cfg_path.exists():
+            try:
+                data = _json.loads(cfg_path.read_text(encoding="utf-8"))
+                cfg_lang = data.get("ui", {}).get("language", "auto")
+                break
+            except Exception:
+                continue
+
+    if cfg_lang in ("ko", "en"):
+        set_locale(cfg_lang)
+        return cfg_lang
+
+    try:
+        sys_locale = _locale.getlocale()[0] or ""
+    except Exception:
+        sys_locale = ""
+    detected = "ko" if sys_locale.lower().startswith(("ko", "korean")) else "en"
+    set_locale(detected)
+    return detected
+
+
 def main():
     """메인 진입점 - PySide6 GUI를 실행합니다.
 
     `--ui v2` 인수로 redesign PoC 윈도우 (ui_v2) 를 실행할 수 있습니다.
     기본은 v1 (ui.main_window.MainWindow).
     """
+    # Phase 1.9 C-2 final — UI import 전에 locale 설정 (tr() 호출 시 올바른 catalog).
+    _detect_and_set_locale()
+
     # --ui v2 분기 (UI redesign 결정 D1~D26 반영, ADR 0001 wrap-first 정책)
     use_v2 = False
     if "--ui" in sys.argv:
