@@ -1830,20 +1830,20 @@ class MainWindowV2(QMainWindow):
 
         if not self.current_session:
             self._show_empty_state(
-                "세션을 선택하거나 새로 만드세요",
-                "좌측 사이드바에서 더블클릭, 또는 우측 상단 '📄 새 세션' 클릭.",
+                tr("ui_v2.empty.no_session_title"),
+                tr("ui_v2.empty.no_session_desc"),
             )
             return
 
         if not self.current_session.steps:
             # D25: 빈 상태 안내 + 예시 요청 3개
             self._show_empty_state(
-                f'"{self.current_session.title}" 세션 시작하기',
-                "아래 입력창에 자연어로 작업을 요청하면 AI 가 Python 자동화 코드를 생성합니다.",
+                tr("ui_v2.empty.session_start_title", title=self.current_session.title),
+                tr("ui_v2.empty.session_start_desc"),
                 examples=[
-                    "메모장 열고 '안녕하세요' 입력",
-                    "Chrome 으로 naver.com 접속 후 '삼성전자' 검색",
-                    "현재 활성 윈도우의 제목 출력",
+                    tr("ui_v2.empty.example_notepad"),
+                    tr("ui_v2.empty.example_browser"),
+                    tr("ui_v2.empty.example_window_title"),
                 ],
             )
             return
@@ -1853,7 +1853,7 @@ class MainWindowV2(QMainWindow):
         if lib_code.strip():
             lib_card = StepCardV2(
                 step_id=0,
-                title="라이브러리 (imports + 헬퍼)",
+                title=tr("ui_v2.card.library_title"),
                 code=lib_code,
                 expanded=True,
             )
@@ -1865,7 +1865,7 @@ class MainWindowV2(QMainWindow):
         if init_code.strip():
             init_card = StepCardV2(
                 step_id=-1,
-                title="Initial (변수/setup)",
+                title=tr("ui_v2.card.initial_title"),
                 code=init_code,
                 expanded=True,
             )
@@ -1957,7 +1957,7 @@ class MainWindowV2(QMainWindow):
 
         if examples:
             v.addSpacing(8)
-            ex_title = QLabel("추천 시나리오")
+            ex_title = QLabel(tr("ui_v2.empty.examples_section_title"))
             ex_title.setStyleSheet(f"color: {COLORS['text_muted']}; border: none; font-size: 11px;")
             ex_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
             v.addWidget(ex_title)
@@ -2006,7 +2006,7 @@ class MainWindowV2(QMainWindow):
     # ── 액션 핸들러 ──────────────────────────────────────────
 
     def _on_run_all(self) -> None:
-        self._start_run(start_from=1, stop_after=None, label="전체 실행")
+        self._start_run(start_from=1, stop_after=None, label=tr("ui_v2.run.label_all"))
 
     def _on_stop(self) -> None:
         self.app_service.stop_blocks()
@@ -2028,7 +2028,9 @@ class MainWindowV2(QMainWindow):
     def _on_run_initial(self, _step_id: int) -> None:
         """Initial 단독 실행 — AppService.run_initial_block_sync 사용 (Phase 2.5 contract)."""
         if not self.current_session:
-            QMessageBox.information(self, "안내", "세션이 없습니다.")
+            QMessageBox.information(
+                self, tr("ui_v2.dialog.info_title"), tr("ui_v2.dialog.no_session")
+            )
             return
         # 카드 텍스트 가져오기
         init_code = ""
@@ -2038,12 +2040,20 @@ class MainWindowV2(QMainWindow):
                 init_code = w.get_code()
                 break
         if not init_code.strip():
-            QMessageBox.information(self, "안내", "Initial 블럭 코드가 비어있습니다.")
+            QMessageBox.information(
+                self,
+                tr("ui_v2.dialog.info_title"),
+                tr("ui_v2.dialog.no_initial_code"),
+            )
             return
 
         kernel = self._get_or_create_kernel()
         if kernel is None:
-            QMessageBox.warning(self, "오류", "커널 생성 실패")
+            QMessageBox.warning(
+                self,
+                tr("ui_v2.dialog.error_title"),
+                tr("ui_v2.dialog.kernel_create_failed"),
+            )
             return
 
         self._log("⏯ Initial 블럭 단독 실행 시작")
@@ -2070,10 +2080,18 @@ class MainWindowV2(QMainWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_run_single(self, step_id: int) -> None:
-        self._start_run(start_from=step_id, stop_after=step_id, label=f"Step {step_id} 단독")
+        self._start_run(
+            start_from=step_id,
+            stop_after=step_id,
+            label=tr("ui_v2.run.label_step_alone", step_id=step_id),
+        )
 
     def _on_run_from(self, step_id: int) -> None:
-        self._start_run(start_from=step_id, stop_after=None, label=f"Step {step_id} 부터")
+        self._start_run(
+            start_from=step_id,
+            stop_after=None,
+            label=tr("ui_v2.run.label_step_from", step_id=step_id),
+        )
 
     def _start_run(self, start_from: int, stop_after: Optional[int], label: str) -> None:
         """run_blocks 백그라운드 실행 — _on_run_all / _on_run_single / _on_run_from 공통.
@@ -2082,19 +2100,29 @@ class MainWindowV2(QMainWindow):
         완료 후에만 카드 재구성 (_refresh_step_cards) — 매 step rebuild 회피.
         """
         if not self.current_session:
-            QMessageBox.information(self, "안내", "세션이 없습니다.")
+            QMessageBox.information(
+                self, tr("ui_v2.dialog.info_title"), tr("ui_v2.dialog.no_session")
+            )
             return
         if not self.current_session.steps:
-            QMessageBox.information(self, "안내", "실행할 step 이 없습니다.")
+            QMessageBox.information(
+                self,
+                tr("ui_v2.dialog.info_title"),
+                tr("ui_v2.dialog.no_steps"),
+            )
             return
 
         kernel = self._get_or_create_kernel()
         if kernel is None:
-            QMessageBox.warning(self, "오류", "커널 생성 실패")
+            QMessageBox.warning(
+                self,
+                tr("ui_v2.dialog.error_title"),
+                tr("ui_v2.dialog.kernel_create_failed"),
+            )
             return
 
         self._log(f"▶ {label} 실행 시작")
-        self._status_bar.showMessage(f"{label} 실행 중...")
+        self._status_bar.showMessage(tr("ui_v2.run.status_running", label=label))
         self.lower()
 
         def worker():
@@ -2118,9 +2146,13 @@ class MainWindowV2(QMainWindow):
                 )
                 loop.close()
                 msg = (
-                    f"실행 완료: {report.successful_steps}/{report.executed_steps} 성공"
+                    tr(
+                        "ui_v2.run.status_done_summary",
+                        ok=report.successful_steps,
+                        total=report.executed_steps,
+                    )
                     if hasattr(report, "successful_steps")
-                    else "실행 완료"
+                    else tr("ui_v2.run.status_done_simple")
                 )
                 # step_done 으로 input 재활성화 + 카드 재구성 + 윈도우 복원 트리거
                 self.signals.step_done.emit(0, True, msg)
@@ -2171,7 +2203,11 @@ class MainWindowV2(QMainWindow):
         if not text:
             return
         if not self.current_session:
-            QMessageBox.information(self, "안내", "세션을 먼저 만드세요.")
+            QMessageBox.information(
+                self,
+                tr("ui_v2.dialog.info_title"),
+                tr("ui_v2.dialog.create_session_first"),
+            )
             return
         # 요소 컨텍스트가 있으면 user_request 앞에 prefix
         element_prefix = ""
@@ -2223,7 +2259,11 @@ class MainWindowV2(QMainWindow):
         다시 읽으면 빈 list 라 element_ctx 만들어지지 않음.
         """
         if not self.current_session:
-            QMessageBox.information(self, "안내", "세션을 먼저 만드세요.")
+            QMessageBox.information(
+                self,
+                tr("ui_v2.dialog.info_title"),
+                tr("ui_v2.dialog.create_session_first"),
+            )
             return
 
         # element 컨텍스트 + browser/desktop 판정 (v1 AICallHandler.call_ai_thread 와 동등)
@@ -2273,11 +2313,16 @@ class MainWindowV2(QMainWindow):
                 loop.close()
 
                 if response.cancelled:
-                    self.signals.step_done.emit(0, False, "사용자 취소")
+                    self.signals.step_done.emit(0, False, tr("ui_v2.step_done.user_canceled"))
                     return
                 if not response.success or step is None:
                     self.signals.step_done.emit(
-                        0, False, f"AI 실패: {response.error or '응답 없음'}"
+                        0,
+                        False,
+                        tr(
+                            "ui_v2.step_done.ai_failed",
+                            error=response.error or tr("ui_v2.step_done.no_response"),
+                        ),
                     )
                     return
 
@@ -2291,18 +2336,24 @@ class MainWindowV2(QMainWindow):
                     self.signals.step_done.emit(
                         step.step_id,
                         True,
-                        f"⚠ AI 응답 잘림 (엔진: {engine_name}): "
-                        f"Step {step.step_id} 코드 불완전 — "
-                        f"카드의 ✏️ 수정으로 보완하거나 사용자 요청 클릭으로 재생성",
+                        tr(
+                            "ui_v2.toast.ai_partial",
+                            engine=engine_name,
+                            step_id=step.step_id,
+                        ),
                     )
                 else:
                     self.signals.step_done.emit(
                         step.step_id,
                         True,
-                        f"Step {step.step_id} 생성 (엔진: {engine_name}, "
-                        f"코드 {len(response.code)}자, "
-                        f"{response.tokens_used} tokens, "
-                        f"{response.response_time_ms}ms)",
+                        tr(
+                            "ui_v2.step_done.step_generated",
+                            step_id=step.step_id,
+                            engine=engine_name,
+                            code_chars=len(response.code),
+                            tokens=response.tokens_used,
+                            ms=response.response_time_ms,
+                        ),
                     )
                     # F1: 옵션 ON 시 step 생성 직후 자동 단독 실행 trigger.
                     # blocks 실행 path 의 step_done 과 분리된 별도 signal 사용 —
@@ -2365,13 +2416,18 @@ class MainWindowV2(QMainWindow):
             self._pending_images.append(str(path))
             self._log(f"📷 캡처 저장: {path.name} ({pil_image.size[0]}x{pil_image.size[1]})")
             self._toast(
-                f"캡처 저장: {path.name} ({pil_image.size[0]}x{pil_image.size[1]})",
+                tr(
+                    "ui_v2.toast.capture_saved",
+                    name=path.name,
+                    w=pil_image.size[0],
+                    h=pil_image.size[1],
+                ),
                 "success",
             )
             self._refresh_chip_area()
         except Exception as e:
             self._log(f"캡처 저장 실패: {e}")
-            self._toast(f"캡처 저장 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.capture_save_failed", error=str(e)), "error")
         finally:
             self._capture_overlay = None
             self.raise_()
@@ -2393,7 +2449,7 @@ class MainWindowV2(QMainWindow):
         try:
             self._element_overlay = ElementPickerOverlay(settings=self._load_settings())
         except Exception as e:  # noqa: BLE001 — overlay 생성 실패 시 안전 복구
-            self._toast(f"요소 선택 초기화 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.elempick_reset_failed", error=str(e)), "error")
             self.raise_()
             self.activateWindow()
             return
@@ -2411,7 +2467,10 @@ class MainWindowV2(QMainWindow):
         ctype = element_info.get("control_type", "?")
         name = element_info.get("name", "")
         self._log(f"🎯 요소 선택: [{ctype}] {name[:40]}")
-        self._toast(f"요소 선택: [{ctype}] {name[:40]}", "success")
+        self._toast(
+            tr("ui_v2.toast.elempick_done", ctype=ctype, name=name[:40]),
+            "success",
+        )
 
         # element rect 영역 자동 캡처
         try:
@@ -2510,10 +2569,10 @@ class MainWindowV2(QMainWindow):
                 self.engine_combo.setCurrentText(self.app_service.get_ai_engine_name() or "")
                 self.engine_combo.blockSignals(False)
                 self._log("✅ 설정 적용 완료")
-                self._toast("설정 저장 완료", "success")
+                self._toast(tr("ui_v2.toast.settings_saved"), "success")
             except Exception as e:
                 self._log(f"설정 적용 중 오류: {e}")
-                self._toast(f"설정 적용 오류: {e}", "error")
+                self._toast(tr("ui_v2.toast.settings_apply_error", error=str(e)), "error")
 
     def _on_command_palette(self) -> None:
         """D8: Ctrl+K → CommandPalette 띄움.
@@ -2525,44 +2584,57 @@ class MainWindowV2(QMainWindow):
         items: list[dict] = []
 
         # 명령
+        cmd_group = tr("ui_v2.command_palette.group_commands")
         items.extend(
             [
                 {
-                    "label": "▶ 전체 실행",
-                    "group": "명령",
+                    "label": tr("ui_v2.command_palette.cmd_run_all"),
+                    "group": cmd_group,
                     "shortcut": "Ctrl+R",
                     "callback": self._on_run_all,
                 },
                 {
-                    "label": "⏹ 강제 중지",
-                    "group": "명령",
+                    "label": tr("ui_v2.command_palette.cmd_stop"),
+                    "group": cmd_group,
                     "shortcut": "F9",
                     "callback": self._on_stop,
                 },
-                {"label": "🔄 커널 재시작", "group": "명령", "callback": self._on_kernel_reset},
                 {
-                    "label": "📄 새 세션",
-                    "group": "명령",
+                    "label": tr("ui_v2.command_palette.cmd_kernel_restart"),
+                    "group": cmd_group,
+                    "callback": self._on_kernel_reset,
+                },
+                {
+                    "label": tr("ui_v2.command_palette.cmd_new_session"),
+                    "group": cmd_group,
                     "shortcut": "Ctrl+N",
                     "callback": self._on_new_session,
                 },
                 {
-                    "label": "⚙ 설정",
-                    "group": "명령",
+                    "label": tr("ui_v2.command_palette.cmd_settings"),
+                    "group": cmd_group,
                     "shortcut": "Ctrl+,",
                     "callback": self._on_open_settings,
                 },
-                {"label": "📷 화면 캡처", "group": "명령", "callback": self._on_capture},
-                {"label": "🎯 요소 선택", "group": "명령", "callback": self._on_elempick},
                 {
-                    "label": "☰ 사이드바 토글",
-                    "group": "명령",
+                    "label": tr("ui_v2.command_palette.cmd_capture"),
+                    "group": cmd_group,
+                    "callback": self._on_capture,
+                },
+                {
+                    "label": tr("ui_v2.command_palette.cmd_elempick"),
+                    "group": cmd_group,
+                    "callback": self._on_elempick,
+                },
+                {
+                    "label": tr("ui_v2.command_palette.cmd_toggle_sidebar"),
+                    "group": cmd_group,
                     "shortcut": "Ctrl+B",
                     "callback": self._toggle_sidebar,
                 },
                 {
-                    "label": "` 콘솔 토글",
-                    "group": "명령",
+                    "label": tr("ui_v2.command_palette.cmd_toggle_console"),
+                    "group": cmd_group,
                     "shortcut": "Ctrl+`",
                     "callback": self._toggle_console,
                 },
@@ -2570,12 +2642,13 @@ class MainWindowV2(QMainWindow):
         )
 
         # 세션
+        sessions_group = tr("ui_v2.command_palette.group_sessions")
         try:
             for s in self.app_service.list_sessions():
                 items.append(
                     {
                         "label": f"  {s.title}  ({s.completed_steps}/{s.total_steps})",
-                        "group": "세션",
+                        "group": sessions_group,
                         "callback": (lambda sid=s.session_id: self._load_session(sid)),
                     }
                 )
@@ -2583,12 +2656,13 @@ class MainWindowV2(QMainWindow):
             pass
 
         # AI 엔진
+        engines_group = tr("ui_v2.command_palette.group_engines")
         for e in self.app_service.list_ai_engines():
             mark = "✓" if e.get("is_current") else "  "
             items.append(
                 {
                     "label": f"{mark} {e.get('display_name', e['name'])}",
-                    "group": "AI 엔진",
+                    "group": engines_group,
                     "callback": (lambda n=e["name"]: self._switch_ai_engine_from_palette(n)),
                 }
             )
@@ -2604,9 +2678,9 @@ class MainWindowV2(QMainWindow):
             self.engine_combo.blockSignals(True)
             self.engine_combo.setCurrentText(name)
             self.engine_combo.blockSignals(False)
-            self._toast(f"AI 엔진 전환: {name}", "success")
+            self._toast(tr("ui_v2.toast.engine_switched", name=name), "success")
         except Exception as e:  # noqa: BLE001
-            self._toast(f"엔진 전환 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.engine_switch_failed", error=str(e)), "error")
 
     def _on_step_done(self, step_id: int, success: bool, message: str) -> None:
         icon = "✅" if success else "❌"
@@ -2688,9 +2762,9 @@ class MainWindowV2(QMainWindow):
             self._send_request(user_request, images=None, elements=elems)
 
         self._toast(
-            f'이 요청으로 다시 생성? — "{preview}"',
+            tr("ui_v2.toast.regenerate_confirm", preview=preview),
             level="warning",
-            action_label="재생성",
+            action_label=tr("ui_v2.validation.btn_regenerate"),
             action_callback=do_regenerate,
         )
 
@@ -2713,13 +2787,13 @@ class MainWindowV2(QMainWindow):
                 target_step = sd_dict
                 break
         if target_step is None:
-            self._toast(f"Step {step_id} 을 찾을 수 없습니다", "error")
+            self._toast(tr("ui_v2.toast.step_not_found", step_id=step_id), "error")
             return
         user_request = target_step.get("user_request", "") or self._extract_user_msg(
             target_step.get("conversation", [])
         )
         if not user_request:
-            self._toast(f"Step {step_id} 의 user_request 가 비어 재생성 불가", "warning")
+            self._toast(tr("ui_v2.toast.empty_user_request", step_id=step_id), "warning")
             return
         warnings = list(target_step.get("validation_warnings", []) or [])
         self._log(f"Step {step_id} 재생성 (코드 검사 경고 {len(warnings)}건 인용)")
@@ -2739,15 +2813,15 @@ class MainWindowV2(QMainWindow):
         try:
             ok = self.app_service.move_step(sid, step_id, direction)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"이동 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.move_failed", error=str(e)), "error")
             return
         if not ok:
-            self._toast("더 이상 이동할 수 없습니다", "warning")
+            self._toast(tr("ui_v2.toast.move_not_possible"), "warning")
             return
         try:
             self.current_session = self.app_service.get_session(sid)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"세션 재로드 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.session_reload_failed", error=str(e)), "error")
             return
         self._refresh_step_cards()
         arrow = "⬆" if direction == "up" else "⬇"
@@ -2762,10 +2836,7 @@ class MainWindowV2(QMainWindow):
         if not self.current_session:
             return
         if step_id == -1:
-            self._toast(
-                "Initial 블럭 직접 편집은 후속 슬라이스 — 현재는 첫 step 의 코드를 수정해주세요",
-                "warning",
-            )
+            self._toast(tr("ui_v2.toast.initial_edit_unsupported"), "warning")
             return
         sid = self.current_session.session_id
         try:
@@ -2779,7 +2850,7 @@ class MainWindowV2(QMainWindow):
                 },
             )
         except Exception as e:  # noqa: BLE001
-            self._toast(f"코드 저장 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.code_save_failed", error=str(e)), "error")
             return
         # 세션 재로드 → 카드 재구성 (다른 위젯들과 동기화)
         try:
@@ -2787,7 +2858,7 @@ class MainWindowV2(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
         self._refresh_step_cards()
-        self._toast(f"Step {step_id} 코드 저장됨", "success")
+        self._toast(tr("ui_v2.toast.step_code_saved", step_id=step_id), "success")
 
     def _on_step_reorder_to(self, from_step_id: int, target_step_id: int) -> None:
         """D23 drag-drop: from_step_id 를 target_step_id 위치로 이동."""
@@ -2797,14 +2868,14 @@ class MainWindowV2(QMainWindow):
         try:
             ok = self.app_service.reorder_step(sid, from_step_id, target_step_id)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"이동 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.move_failed", error=str(e)), "error")
             return
         if not ok:
             return
         try:
             self.current_session = self.app_service.get_session(sid)
         except Exception as e:  # noqa: BLE001
-            self._toast(f"세션 재로드 실패: {e}", "error")
+            self._toast(tr("ui_v2.toast.session_reload_failed", error=str(e)), "error")
             return
         self._refresh_step_cards()
         self._log(f"Step {from_step_id} → Step {target_step_id} 자리로 이동")

@@ -2747,11 +2747,15 @@ class ScenariosTest(TestCase):
             "def _on_command_palette_stub" not in src,
             "옛 stub 제거 필수",
         )
-        # items 에 3 그룹 모두 등장
-        for group in ('"명령"', '"세션"', '"AI 엔진"'):
+        # items 에 3 그룹 모두 등장 — i18n 도입 후 tr key 검색.
+        for group_key in (
+            "ui_v2.command_palette.group_commands",
+            "ui_v2.command_palette.group_sessions",
+            "ui_v2.command_palette.group_engines",
+        ):
             self.assert_true(
-                group in src,
-                f"[D8] palette items 에 {group} 그룹 포함 필수",
+                f'tr("{group_key}")' in src,
+                f"[D8] palette items 에 '{group_key}' tr key 그룹 포함 필수",
             )
 
     def test_36_d14_onboarding_wizard(self):

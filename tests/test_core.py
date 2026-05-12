@@ -3448,9 +3448,11 @@ if __name__ == "__main__":
         from ui_v2.main_window_v2 import MainWindowV2
 
         send_src = inspect.getsource(MainWindowV2._send_request)
+        # i18n 도입 후 "엔진:" literal 은 catalog 로 이동 — tr key 검색
+        # (ruff format multi-line 분리 대응 — key string 만 검사).
         self.assert_true(
-            "get_ai_engine_name" in send_src and "엔진:" in send_src,
-            "[B2] ui_v2 _send_request 의 step_done 메시지에 엔진명 prefix 필수",
+            "get_ai_engine_name" in send_src and '"ui_v2.step_done.step_generated"' in send_src,
+            "[B2] ui_v2 _send_request 의 step_done 메시지에 엔진명 prefix 필수 (tr key)",
         )
 
         # ── B4 — legacy main_window ───────────────────────────────────
