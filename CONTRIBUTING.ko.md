@@ -40,7 +40,7 @@ CI 가 매 push / PR 마다 lint + ubuntu/windows 테스트 실행 ([`.github/wo
 - **`ruff` 가 lint + format 의 진실의 원천**. commit 전 `ruff format` — pre-commit 이 어차피 강제.
 - **test/log/print 메시지에 em-dash X** — Windows `cp949` 콘솔 인코딩이 처리 못 함. hyphen 사용. (Markdown / docstring 은 OK.)
 - **`ui/` 의 모든 파일은 `from core.app_service import …` 단일 진입점만** — `core.session_manager`, `core.ai_engine`, `core.execution_kernel`, `core.workflow_engine`, `core.import_manager`, `core.prompt_builder`, `core.win_inspector`, `core.storage.*` 직접 import 는 test_80 / test_84 / test_85 에서 차단.
-- **PySide6 port sync** — `core/` 또는 `ui/` 변경 시 `pyside6_port/` 에 mirror (`cp` for `core/`, `sed` PyQt6→PySide6 for `ui/`). 정확한 절차는 `CLAUDE.md`.
+- **`legacy_pyqt6/` 는 freeze 상태** — 2026-05-12 PySide6 메인 전환 이후 PyQt6 코드는 참고용으로만 보존. 새 변경 mirror 하지 마세요.
 
 ## 커밋 sign-off (DCO)
 
@@ -63,7 +63,6 @@ git commit -s -m "Fix the thing"
 - [ ] `ruff check .` + `ruff format --check .` 로컬 통과.
 - [ ] `tests/test_runner.py --suite core` + `--suite scenarios` 로컬 통과.
 - [ ] 새 동작에 회귀 테스트 (`tests/test_core.py` 또는 `tests/test_scenarios.py`).
-- [ ] `ui/`, `core/`, `tests/` 변경 시 `pyside6_port/` 에 mirror.
 - [ ] 모든 commit 에 `Signed-off-by:` 라인.
 - [ ] PR description 이 *what* 이 아니라 *why* 설명.
 

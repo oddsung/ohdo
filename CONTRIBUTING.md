@@ -40,7 +40,7 @@ CI runs lint + ubuntu/windows test suites on every push and PR (see [`.github/wo
 - **`ruff` is the source of truth** for lint and format. Run `ruff format` before committing; pre-commit will enforce it anyway.
 - **No `em-dash` in test/log/print messages** — Windows `cp949` console encoding can't handle it. Use a hyphen. (Markdown / docstrings are fine.)
 - **One `from core.app_service import …`** in any `ui/` file — direct imports of `core.session_manager`, `core.ai_engine`, `core.execution_kernel`, `core.workflow_engine`, `core.import_manager`, `core.prompt_builder`, `core.win_inspector`, or `core.storage.*` are blocked by tests `test_80` / `test_84` / `test_85`.
-- **PySide6 port sync** — when you change `core/` or `ui/`, mirror the change to `pyside6_port/` (`cp` for `core/`, `sed` PyQt6→PySide6 for `ui/`). See `CLAUDE.md` for the exact recipe.
+- **`legacy_pyqt6/` is frozen** — the previous PyQt6 codebase is preserved for reference only since 2026-05-12 (PySide6 main switch). Do not mirror new changes there.
 
 ## Sign your commits (DCO)
 
@@ -63,7 +63,6 @@ For larger / structural contributions we may ask you to also sign a per-contribu
 - [ ] `ruff check .` and `ruff format --check .` pass locally.
 - [ ] `tests/test_runner.py --suite core` and `--suite scenarios` pass locally.
 - [ ] New behavior has a regression test in `tests/test_core.py` or `tests/test_scenarios.py`.
-- [ ] If you touched `ui/`, `core/`, or `tests/`, the change is mirrored in `pyside6_port/`.
 - [ ] Every commit has a `Signed-off-by:` line.
 - [ ] PR description explains the *why*, not just the *what*.
 

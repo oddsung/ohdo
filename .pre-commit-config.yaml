@@ -3,7 +3,7 @@
 # 매뉴얼 실행: `pre-commit run --all-files` (모든 파일 검사).
 #
 # ruff 가 lint + format 을 모두 cover (black 대체). mypy 는 Phase 1 의
-# core/* 타입힌트 도입 시점에 추가 (현 PyQt6 30K 라인에 strict mypy 시 수천 에러).
+# core/* 타입힌트 도입 시점에 추가 (현 30K 라인 UI 코드에 strict mypy 시 수천 에러).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.12

@@ -1,12 +1,12 @@
 # ohdo.ai 장기 로드맵
 
-> PyQt6 데스크톱 RPA 도구 ohdo.ai 를 오픈소스 커뮤니티 기반 SaaS 로 확장하기 위한 단계적 계획입니다.
+> PySide6 데스크톱 RPA 도구 ohdo.ai 를 오픈소스 커뮤니티 기반 SaaS 로 확장하기 위한 단계적 계획입니다.
 >
 > 이 문서는 **Living Document** 입니다. 계획·아키텍처·우선순위 변경 시 반드시 함께 수정하고, 변경 이유를 §10 변경 로그에 한 줄로 남기세요.
 
 ## 0. 문서 메타
 
-- **마지막 업데이트**: 2026-05-10 (**Phase 0 + Phase 1 모두 100% 완료**. Phase 1 sub-task 2 Chunk B (ui/ legacy 정리) 5/9 마무리 → KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족. Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정. **5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 11 unit — handoff §16 참조. baseline 85→96**)
+- **마지막 업데이트**: 2026-05-12 (**Phase 0 + Phase 1 모두 100% 완료**. Phase 1 sub-task 2 Chunk B (ui/ legacy 정리) 5/9 마무리 → KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족. Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정. **5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 11 unit — handoff §16 참조. baseline 85→96**. **5/12 PySide6 (LGPL) 메인 전환 완료 — handoff §19/§20 — 이전 PyQt6 코드는 legacy_pyqt6/ 보관**)
 - **Owner**: @toytiger (dohahado22@gmail.com)
 - **타깃 시장**: B2C 개인 개발자 (**글로벌 + 한국 dual-locale**, 오픈코어 전략) — *2026-05-09 사용자 결정으로 한국 niche → 글로벌 우선 + 한국 동시 진행으로 확장*
 - **관련 문서**:
@@ -55,7 +55,7 @@
 │  │ - adapters        │  │        │  │ Stripe/Toss        │  │
 │  │ - agent bridge    │  │        │  └────────────────────┘  │
 │  └───────────────────┘  │        │  ┌────────────────────┐  │
-│  (PyQt6 UI 는 선택)     │        │  │ Next.js 웹 대시보드│  │
+│  (PySide6 UI 는 선택)   │        │  │ Next.js 웹 대시보드│  │
 └─────────────────────────┘        │  └────────────────────┘  │
                                    └──────────────────────────┘
 ```
@@ -86,7 +86,7 @@
 
 - [x] `pyproject.toml` + **`uv`** 도입 (`requirements.txt` 병행 유지) — 2026-05-07
 - [x] `.devcontainer/devcontainer.json` (Python 3.12 + uv + Qt deps) — 2026-05-08. `docker-compose.dev.yml` 은 Phase 2 backend 진입 시점에 추가 예정.
-- [x] `pre-commit` + `ruff` (lint + format, black 대체) — 2026-05-07. **mypy 는 Phase 1 의 type hint 작업과 묶음** (legacy PyQt6 30K 라인 strict mypy 시 수천 에러).
+- [x] `pre-commit` + `ruff` (lint + format, black 대체) — 2026-05-07. **mypy 는 Phase 1 의 type hint 작업과 묶음** (legacy 30K 라인 UI 코드에 strict mypy 시 수천 에러).
 - [x] GitHub Actions CI 매트릭스 — 2026-05-08:
   - `lint` (ubuntu-latest): ruff check + format check
   - `test-ubuntu`: core + scenarios (Qt deps + offscreen)
@@ -199,7 +199,7 @@ agent/
 
 ### Phase 3: 웹 대시보드 (2~3개월)
 
-브라우저에서 세션 편집·모니터링·실행 트리거. PyQt6 UI 를 점진적으로 웹으로 이관.
+브라우저에서 세션 편집·모니터링·실행 트리거. PySide6 UI 를 점진적으로 웹으로 이관.
 
 - [ ] `packages/web/` (Next.js 14 App Router, TypeScript, Tailwind, shadcn/ui)
   - 세션 목록/편집 (좌측 스텝 리스트 + 중앙 Monaco 에디터 + 우측 프롬프트/캡처)
@@ -335,7 +335,7 @@ B2C 우선 재배열. 마켓플레이스·템플릿 공유를 SSO/엔터프라�
 
 ### 7.1 GitHub 만으로 충분한가?
 
-**아닙니다.** GitHub 은 소스 동기화만 해결합니다. ohdo 는 (a) Python 3.x + PyQt6 + Windows 네이티브 API + (b) 향후 Node.js + PostgreSQL + Redis 가 섞여 **환경 재현**이 본질 과제입니다. 신입 기여자·여러 머신을 오가는 자신의 개발 흐름 모두 환경 설치에 몇 시간~며칠이 걸릴 수 있습니다.
+**아닙니다.** GitHub 은 소스 동기화만 해결합니다. ohdo 는 (a) Python 3.x + PySide6 + Windows 네이티브 API + (b) 향후 Node.js + PostgreSQL + Redis 가 섞여 **환경 재현**이 본질 과제입니다. 신입 기여자·여러 머신을 오가는 자신의 개발 흐름 모두 환경 설치에 몇 시간~며칠이 걸릴 수 있습니다.
 
 ### 7.2 권장 스택 (Phase 0 에 도입)
 
@@ -349,7 +349,7 @@ B2C 우선 재배열. 마켓플레이스·템플릿 공유를 SSO/엔터프라�
 - **주의**: Windows 자동화는 DevContainer (Linux) 에서 실행 불가 → **2분할 전략**:
   1. **코어 개발 환경** (cross-platform): Codespaces / WSL2 / Mac 에서 `core/`, `backend/`, `web/` 개발. `test_core` + `test_prompt_quality` 실행.
   2. **Windows 자동화 테스트 환경**: 개인 Windows PC 또는 GitHub Actions `windows-latest` 러너에서 `test_ai_integration` / `test_notepad` / `test_calculator` 실행.
-- Nix/devbox 는 PyQt6 Qt 바인딩 빌드 까다로움 → 현재는 비추천. Phase 2 이후 backend 전용 고려 가능.
+- Nix/devbox 는 PySide6 Qt 바인딩 빌드 까다로움 → 현재는 비추천. Phase 2 이후 backend 전용 고려 가능.
 
 **레이어 3 — 품질 자동화**
 - `pre-commit`: `ruff` (lint+format, black 대체), `mypy`, `prettier` (TS), `sqlfluff` (SQL)
@@ -368,7 +368,7 @@ B2C 우선 재배열. 마켓플레이스·템플릿 공유를 SSO/엔터프라�
 ohdo/
 ├── packages/
 │   ├── core/           # 현 core/ 이동 (순수 Python 라이브러리)
-│   ├── desktop/        # 현 ui/ + main.py (PyQt6 앱)
+│   ├── desktop/        # 현 ui/ + main.py (PySide6 앱)
 │   ├── agent/          # 경량 트레이 에이전트
 │   ├── backend/        # FastAPI (Phase 2)
 │   └── web/            # Next.js (Phase 3)
@@ -431,3 +431,4 @@ Phase 0~1 착수 시 가장 먼저 손대야 할 파일 (프로젝트 루트 기
 | 2026-05-09 | Phase 1 sub-task 2 Chunk B 완결 — ui/ legacy (main_window + 4 handler/panel) 의 banned core import 모두 제거, 모든 import 가 `core.app_service` 단일 진입점 경유. AppService 인터페이스 보강 (클래스/상수/pure 함수 re-export + workflow_engine/prompt_builder property+setter). KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족, test_83/84/85 (interface + main_window + ui/ 전체) 3중 가드. core 82→85, scenarios 73 유지. **Phase 1 100% 완료** — Phase 2 진입은 commercial_review.md GO/NO-GO 게이트 통과 후 결정. |
 | 2026-05-09 | **시장 타깃 글로벌 확장 결정** — 한국 niche → 글로벌 우선 + 한국 dual-locale 양립으로 사용자 결정. 근거: 글로벌 SAM (50-100M USD/yr) 이 한국 (5-10M) 의 10배 + Computer Use 와 시간 경쟁. 차별성 재평가: "한국어 UI" 단일 항목 → "i18n (영어 + 한국어) + Plain Python + Local-first" 조합 niche 로 재포지셔닝. 영어 README + 사용자 facing UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. commercial_review.md §3/§5/§7 동기화 갱신. |
 | 2026-05-09~10 | **Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프** — 사용자 일상 사용 중 발견 갭 11건 fix (settings dialog Test connection / reload_ai / current_engine 속성명 / ui_v2 step_done 메타 / ai.selected persist / 콘솔 가시성 settings / system_context prompt inject (P1a) / system role 분리 (P1b) / 가이드 #3+#5 강화 (P3) / element_context 템플릿 그대로 사용 강제 (G2) / library 블럭 essential imports prepend (G5) / element_context 템플릿 import 라인 제거 (G2.5)). baseline 85→96 (+11 회귀 가드 test_86~96). 자세한 내용: handoff.md §16. 잔존 갭 (DeepSeek 의 가이드 따르기 한계 — step 3/4 의 변수 재정의 + try/except 누락 + 들여쓰기 깨짐) 은 G6/G7 (정적 분석) 후속으로 보류. |
+| 2026-05-12 | **PySide6 (LGPL) 메인 전환 완료 — Plan 1** — 2026-05-02 PySide6 port 추가 이후 양쪽 sync 부담 + PyQt6 (GPL/Riverbank commercial) 라이선스 마찰 해소를 위한 결정. `pyside6_port/` → root promotion (`ui/`, `ui_v2/`, `main.py`, `core/visual_overlay.py`, `core/environment_scanner.py` 의 PySide6 카피로 swap), 이전 PyQt6 코드는 `legacy_pyqt6/` 에 보존 (삭제 X — 사용자 명시 요청), PyQt6 의존성은 `[project.optional-dependencies] legacy-pyqt6` 로 격리. baseline 회귀 0 (core 107 + scenarios 73 그린, PySide6 단독 .venv). 자세한 단계: handoff.md §20. |

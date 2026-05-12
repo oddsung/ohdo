@@ -1,7 +1,7 @@
 [project]
 name = "ohdo"
 version = "0.1.0"
-description = "AI(Gemini CLI)와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성·실행하는 PyQt6 기반 RPA 솔루션."
+description = "AI(Gemini CLI)와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성·실행하는 PySide6 기반 RPA 솔루션."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [
     { name = "oddsung", email = "oddsung@gmail.com" },
 ]
-keywords = ["rpa", "automation", "ai", "gemini", "pyqt6", "desktop"]
+keywords = ["rpa", "automation", "ai", "gemini", "pyside6", "desktop"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -91,7 +91,7 @@ package = false
 #   W    : 경고 (whitespace 등)
 #   I    : isort (import 정렬)
 # 추가 ruleset (예: B/UP/SIM) 은 Phase 1 의 type hint 도입 시점에 점진 추가.
-# 30K 라인 legacy PyQt6 코드에 너무 엄격하게 켜면 수천 위반 → 도구 효과 X.
+# 30K 라인 legacy 코드에 너무 엄격하게 켜면 수천 위반 → 도구 효과 X.
 [tool.ruff]
 line-length = 100
 target-version = "py312"
@@ -135,15 +135,12 @@ known-first-party = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 # tests 와 ui/main_window.py 는 sys.path.insert(0, PROJECT_ROOT) 패턴 후 import 가
-# 필수 — E402 false positive. 양쪽 (parent + pyside6_port) 모두 적용.
+# 필수 — E402 false positive.
 "tests/*" = ["E402"]
-"pyside6_port/tests/*" = ["E402"]
 "ui/main_window.py" = ["E402"]
-"pyside6_port/ui/main_window.py" = ["E402"]
 # element_picker 의 pywinauto/Desktop import 는 _pywinauto_available 플래그용 —
 # 직접 참조는 안 되지만 try/except 안에서 import 자체가 availability check 역할.
 "ui/element_picker.py" = ["F401"]
-"pyside6_port/ui/element_picker.py" = ["F401"]
 # agent/ws_client 의 try-except import 도 같은 패턴 (선택적 의존성).
 "agent/ws_client.py" = ["F401"]
 

@@ -163,7 +163,7 @@ def collect_environment() -> dict:
     for pkg_name, import_name in [
         ("pyautogui", "pyautogui"),
         ("pywinauto", "pywinauto"),
-        ("PyQt6", "PyQt6"),
+        ("PySide6", "PySide6"),
         ("selenium", "selenium"),
         ("Pillow", "PIL"),
     ]:

@@ -1,15 +1,16 @@
 # ohdo.ai
 
-AI(Gemini CLI)와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성·실행하는 PyQt6 기반 RPA 솔루션.
+AI(Gemini CLI)와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성·실행하는 PySide6 기반 RPA 솔루션.
 
-> **2026-05-02**: PySide6 포팅 버전이 [pyside6_port/](pyside6_port/) 에 추가됨 (라이선스 유연성 — LGPL).
-> 원본 PyQt6 는 그대로 유지. 양쪽 같은 `data/` (junction) 공유. 자세한 차이/실행법은 [pyside6_port/README.md](pyside6_port/README.md) 참조.
+> **2026-05-12**: PySide6 (LGPL) 메인 전환 완료. 이전 PyQt6 (GPL) 코드는
+> [legacy_pyqt6/](legacy_pyqt6/) 에 deprecated 로 보관 (실행은 `uv sync --extra legacy-pyqt6` 후 가능).
+> 자세한 결정 배경은 [docs/handoff.md](docs/handoff.md) §19/§20 참조.
 
 ## 프로젝트 구조
 
 ```
 ai_rpa_solution/
-├── main.py                          # 진입점 (PyQt6 앱)
+├── main.py                          # 진입점 (PySide6 앱)
 ├── config/
 │   ├── settings.json               # 런타임 설정
 │   ├── default_settings.json       # 기본값
@@ -24,7 +25,7 @@ ai_rpa_solution/
 │   └── adapters/
 │       ├── base_adapter.py         # AI 어댑터 추상 클래스
 │       └── gemini_cli_adapter.py   # Gemini CLI 어댑터
-├── ui/                              # PyQt6 UI 컴포넌트
+├── ui/                              # PySide6 UI 컴포넌트
 │   ├── main_window.py              # 메인 윈도우
 │   ├── chat_panel.py               # 채팅 패널
 │   ├── code_viewer.py              # 코드/워크플로우 뷰어

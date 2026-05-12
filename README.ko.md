@@ -90,15 +90,15 @@ pip install -r requirements.txt
 
 ```
 ohdo/
-├── main.py                # 진입점 (PyQt6 앱)
+├── main.py                # 진입점 (PySide6 앱)
 ├── core/                  # AI 엔진 / 워크플로우 / 세션 / Windows inspector
-├── ui/                    # PyQt6 메인 윈도우 + step 카드 + 콘솔
+├── ui/                    # PySide6 메인 윈도우 + step 카드 + 콘솔
 ├── ui_v2/                 # UI redesign v2 PoC (별도 진입)
 ├── tests/                 # core / scenarios / ai_integration / GUI 테스트
 ├── config/                # settings.json / prompts.json
 ├── docs/                  # ROADMAP, handoff, 상업 검토, 와이어프레임
 ├── data/                  # 세션, 캡처, 로그 (git-ignored)
-└── pyside6_port/          # PySide6 포팅 (LGPL 유연성 — 자체 README 참조)
+└── legacy_pyqt6/          # Deprecated PyQt6 코드 (실행 시 `uv sync --extra legacy-pyqt6`)
 ```
 
 자세한 구조: [`CLAUDE.md`](CLAUDE.md) 와 [`docs/handoff.md`](docs/handoff.md).
@@ -133,7 +133,7 @@ ohdo 는 오픈코어 전략 하 SaaS 확장 단계로 진행 중: Phase 0 (인�
 **오픈코어 전략** ([`docs/ROADMAP.md`](docs/ROADMAP.md) §1):
 - **데스크톱 (이 저장소)**: AGPL-3.0. 자유 사용·수정·재배포 가능. 단, 수정본을 네트워크 서비스 (SaaS) 로 제공하는 경우 소스 공개 의무.
 - **Hosted SaaS / Pro 기능**: 향후 별도 라이선스 (폐쇄 소스) 운영 예정. 저작권 보유자가 dual-licensing 가능.
-- **PyQt6 ↔ PySide6**: 원본 PyQt6 는 저장소 루트, LGPL 친화 PySide6 포트는 [`pyside6_port/`](pyside6_port/) 별도 유지.
+- **PySide6 메인 (LGPL) 2026-05-12 이후**: 데스크톱 UI 는 PySide6 (Qt for Python, LGPL — 재배포 시 상업 Qt 라이선스 불필요) 로 동작. 이전 PyQt6 코드는 [`legacy_pyqt6/`](legacy_pyqt6/) 에 보관 (참고용); 실행 시 `uv sync --extra legacy-pyqt6`.
 
 상업 / 비-AGPL 라이선스 문의: 이슈 또는 `pyproject.toml` 의 contact 으로.
 

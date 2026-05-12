@@ -54,7 +54,8 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         # 데스크톱 앱 전용 대형 의존성은 Agent 번들에서 제외 (용량 절감)
-        "PyQt6",
+        "PySide6",
+        "PyQt6",  # legacy_pyqt6/ 코드 잔재 방어
         "selenium",
         "opencv",
         "opencv-python",
@@ -64,7 +65,7 @@ a = Analysis(
         "uiautomation",
         "pytesseract",
         # M2.7: 이하 core 모듈은 runner 가 사용하지 않음. 번들에서 제외해
-        # 트랜지티브 의존성 (PyQt6 등) 이 딸려오는 것 방지.
+        # 트랜지티브 의존성 (PySide6/PyQt6 등) 이 딸려오는 것 방지.
         "core.adapters",
         "core.adapters.base_adapter",
         "core.adapters.gemini_cli_adapter",

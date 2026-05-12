@@ -94,15 +94,15 @@ Click the Codespaces badge above, or open the repo in VS Code with the **Dev Con
 
 ```
 ohdo/
-├── main.py                # PyQt6 app entry point
+├── main.py                # PySide6 app entry point
 ├── core/                  # AI engine / workflow / sessions / Windows inspector
-├── ui/                    # PyQt6 main window + step cards + console
+├── ui/                    # PySide6 main window + step cards + console
 ├── ui_v2/                 # UI redesign v2 PoC (separate entry)
 ├── tests/                 # core / scenarios / ai_integration / GUI suites
 ├── config/                # settings.json / prompts.json
 ├── docs/                  # ROADMAP, handoff notes, commercial review, wireframes
 ├── data/                  # Sessions, captures, logs (git-ignored)
-└── pyside6_port/          # PySide6 port (LGPL flexibility — see its own README)
+└── legacy_pyqt6/          # Deprecated PyQt6 codebase (run via `uv sync --extra legacy-pyqt6`)
 ```
 
 Detailed structure: [`CLAUDE.md`](CLAUDE.md) and [`docs/handoff.md`](docs/handoff.md).
@@ -137,7 +137,7 @@ The desktop client and core libraries are released under the **GNU Affero Genera
 **Open-core strategy** ([`docs/ROADMAP.md`](docs/ROADMAP.md) §1):
 - **Desktop (this repo)**: AGPL-3.0. Free to use, modify, redistribute. If you offer a modified version as a network service (SaaS), you must release your source under AGPL-3.0 too.
 - **Hosted SaaS / Pro features**: planned as separately licensed (closed source). The copyright holder retains the right to dual-license.
-- **PyQt6 ↔ PySide6**: the original PyQt6 codebase lives at the repo root; an LGPL-friendly PySide6 port is maintained at [`pyside6_port/`](pyside6_port/).
+- **PySide6 main (LGPL) since 2026-05-12**: the desktop UI now runs on PySide6 (Qt for Python, LGPL — no commercial Qt license needed for redistribution). The previous PyQt6 codebase is preserved at [`legacy_pyqt6/`](legacy_pyqt6/) for reference; install with `uv sync --extra legacy-pyqt6` if you need to run it.
 
 Commercial / non-AGPL licensing inquiries: please open an issue or reach out via the contact details in `pyproject.toml`.
 

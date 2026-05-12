@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
-PyQt6 메인 윈도우
+PySide6 메인 윈도우
 
 3패널 레이아웃: 세션 목록 | 대화 패널 | 코드+캡처 뷰어
 하단: 콘솔/로그 패널
@@ -1147,7 +1147,7 @@ class MainWindow(QMainWindow):
             "<h2>AI RPA Solution v2.0</h2>"
             "<p>AI와 대화하면서 Python RPA 자동화 코드를"
             " 단계별로 생성·실행하는 솔루션입니다.</p>"
-            "<p><b>기술 스택:</b> PyQt6, Gemini CLI, PyAutoGUI, Selenium</p>"
+            "<p><b>기술 스택:</b> PySide6, Gemini CLI, PyAutoGUI, Selenium</p>"
             "<hr>"
             "<p>© 2025 AI RPA Solution</p>",
         )

@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-12 (5/4~5/12 작업 — 자세한 변경은 §5 변경 이력 + §11/§12/§13/§14/§15/§16/§17/§18/§19 인계 노트 참조). baseline: **core 107/107 + scenarios 73/73 그린** (PyQt6 venv 기준; PySide6 검증은 새 세션 venv 셋업 후). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12: Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 새 세션에서 Plan 1 (디렉터리 swap + PyQt6 deprecate + PySide6 venv 셋업) 진행 예정.** 자세한 §19.
+> 마지막 업데이트: 2026-05-12 (5/4~5/12 작업 — 자세한 변경은 §5 변경 이력 + §11~§20 인계 노트 참조). baseline: **core 107/107 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준, 5/12 Plan 1 완료 후). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + C6/C7 진행 중). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1135,9 +1135,49 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
 14. Computer Use 최근 메이저 업데이트 추적
 15. 데이터 확보 후 Phase 2 GO/NO-GO 재평가 — commercial_review.md §7 게이트 4개 재검사
 
+## 20. 5/12 Plan 1 완료 — PySide6 (LGPL) 메인 전환
+
+**컨텍스트**: §19 의 5/12 결정 ("최종 PySide6 만 사용, PyQt6 보관") 실행. 새 세션에서 Plan 1 (6 step) 진행. 핵심: 디렉터리 swap (history 보존) + PyQt6 dep 격리 + 문서/CI 갱신 + baseline 회귀 0.
+
+### Plan 1 commit 분할 (총 7 commits)
+
+| # | Commit | 내용 |
+|---|---|---|
+| C1 | `16d5349 chore: untrack tests/results/latest_result.json` | `git rm --cached` — 이미 `.gitignore` 패턴에 포함 (handoff §19 step 6). |
+| C2 | `072dd39 feat(deps): add PySide6, keep PyQt6 (dual import phase)` | swap 직후 import 깨짐 회피용 dual phase. `.venv` 에 PySide6 추가, PyQt6 유지. |
+| C3 | `833174a refactor: move PyQt6 sources to legacy_pyqt6/ (history preserved)` | `git mv ui legacy_pyqt6/ui` 등 24 file rename **single source → single destination** (rename detection 명확). 100% similarity. + pyproject.toml `legacy_pyqt6` exclude + `known-first-party` 명시 (ruff source-layout 자동 추론 swap 안정성 ↑). |
+| C4 | `f759ebb refactor: promote pyside6_port/ to main location (PySide6 메인 전환)` | `git mv pyside6_port/ui ui` 등 24 file rename + 107 deletion + 2 modification. environment_scanner.py PyQt6→PySide6 string. `tests/test_scenarios.py:2361` sentinel `from PyQt6.QtGui` → `from PySide6.QtGui` (handoff §19 PySide6 catch-up 누락분). ruff format 일괄 — Windows autocrlf 가 swap 후 CRLF 만든 25 files LF 정규화. |
+| C5 | `d6642f0 feat(deps): scope PyQt6 to optional extra [legacy-pyqt6]` | `dependencies` 에서 PyQt6 제거, `[project.optional-dependencies] legacy-pyqt6` 추가. `uv sync --extra legacy-pyqt6` 로만 설치. |
+| C6 | (이 commit) `docs: rewrite all docs for PySide6 main + add handoff §20` | CLAUDE.md / README*.md / CONTRIBUTING*.md / ROADMAP §10 / pyproject metadata / .pre-commit-config 주석 / .devcontainer / tests/test_runner / ui/main_window / agent/build.spec / requirements.txt 의 PyQt6 mention → PySide6. handoff §0 갱신 + §20 추가. 회고 문서 (triage, feature_catalog, wireframes, saas/*) 보존 (과거 시점 사실). |
+| C7 | (다음) CI 갱신 — `.github/workflows/ci.yml` 의 PyQt6 → PySide6, pyside6_port mention 제거. |
+
+### 핵심 함정 + 해결 (다음 swap 시 참고)
+
+1. **git mv rename detection 의 cross-match**: C3+C4 합본 commit 으로 시도하면 두 source (PyQt6 ↔ PySide6 카피) 의 similarity 가 거의 100% — git 이 어느 source 가 어느 destination 으로 갔는지 매칭 결과가 **의도와 반대**로 나옴 (예: `R  pyside6_port/ui/main_window.py -> legacy_pyqt6/ui/main_window.py` — legacy 가 pyside6_port history 를 가져감, 원본 PyQt6 history 끊김). 해결: **분할 commit (C3 단독, C4 단독)** — 각 commit 안에 source 1, destination 1 → 매칭 모호성 0.
+2. **`reset --hard HEAD` 의 untracked 빈 디렉터리 잔류**: revert 후 `legacy_pyqt6/ui/`, `legacy_pyqt6/ui_v2/` 가 빈 디렉터리로 남음 (mkdir 로 만들었기에 untracked). 다음 `git mv ui legacy_pyqt6/ui` 가 destination 디렉터리 존재 인식 → `legacy_pyqt6/ui/ui/` 이중 path. 해결: revert 후 `rm -rf legacy_pyqt6/` 로 working tree 청소.
+3. **ruff `source-layout` 자동 추론 깨짐**: swap 중간 상태에서 `ui/__init__.py` 가 root 에 일시적으로 없으면 ruff 가 `ui` 모듈을 third-party 로 잘못 분류 → isort 순서 위반 false positive. 해결: pyproject.toml `[tool.ruff.lint.isort]` 에 `known-first-party` 명시.
+4. **Windows autocrlf + ruff `line-ending = "lf"` 충돌**: swap 후 working tree 파일이 CRLF — ruff format 이 reformat 요청. 해결: `ruff format .` 실행으로 LF 정규화. 다음 checkout 시 autocrlf 가 다시 CRLF — **후속 작업: `.gitattributes` 도입 (`*.py text eol=lf`) 검토**.
+5. **PyQt6 sentinel string 잔재**: `tests/test_scenarios.py:2361` 의 `from PyQt6.QtGui import QSyntaxHighlighter` 가 swap 후 PySide6 의 `QSyntaxHighlighter` 와 binding 충돌 → `issubclass` 검증 fail (test_43). swap 책임 외 sentinel sync 누락. C4 안에 부수 fix 포함.
+
+### 검증 결과 (PySide6 단독 `.venv`)
+
+- core: 107 passed / 0 failed
+- scenarios: 73 passed / 0 failed
+- ruff check + format: 0 issue
+- PyQt6 uninstalled — PySide6 만 import
+
+### 다음 세션 출발점 (C7 + follow-up)
+
+- **C7 진행 중**: `.github/workflows/ci.yml` 의 PyQt6 → PySide6, pyside6_port mention 제거.
+- **follow-up 후보**:
+  - `.gitattributes` 추가 (`*.py text eol=lf`) — autocrlf 와 ruff line-ending 충돌 항구 해결.
+  - C2 ~ C6 모두 origin/main 으로 push (현재 6 commits ahead, push 안 됨).
+  - C-2 ~ C-6 (Phase 1.9 i18n) — ui_v2 사용자 노출 문자열 추출 + locale catalogue 채움.
+  - 저장소 public 공개 (commercial_review.md GO/NO-GO 게이트 #1 측정 시작점).
+
 ## 9. 자주 하는 실수 / 주의사항
 
-- **메서드 직접 추가 시**: PyQt6 원본만 수정하고 PySide6 포트 sync 잊으면 양쪽 불일치. 항상 양쪽 확인. core/ 변경은 `cp` 로 복사 (라이브러리 의존성 없음), ui/ 변경은 sed 로 `PyQt6` → `PySide6` 치환.
+- **`legacy_pyqt6/` 는 freeze 상태**: 5/12 PySide6 메인 전환 이후 PyQt6 코드는 참고용으로 보존. 새 기능 mirror 하지 X. ruff `extend-exclude` 로 lint 대상 제외. 실행 필요 시 `uv sync --extra legacy-pyqt6`.
 - **test 메시지에 em-dash 사용**: cp949 인코딩 에러로 test runner 가 ERROR 표시. hyphen 사용. (docstring/markdown 은 OK)
 - **delta 추출 fallback**: `.strip()` 사용하면 첫 라인 indent 잘려 `_smart_dedent` 가 못 풀어줌. 사용 금지.
 - **wait UI signal**: `valueChanged` 사용하면 매 키 입력마다 emit → 카드 재생성 → 포커스 손실. `editingFinished` 만 사용.
