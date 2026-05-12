@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-12 (5/4~5/12 작업 — 자세한 변경은 §5 변경 이력 + §11~§20 인계 노트 참조). baseline: **core 107/107 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준, 5/12 Plan 1 완료 후). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + C6/C7 진행 중). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.**
+> 마지막 업데이트: 2026-05-12 (5/4~5/12 작업 — 자세한 변경은 §5 변경 이력 + §11~§21 인계 노트 참조). baseline: **core 109/109 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준, 5/12 Phase 1.9 C-2 완료 후). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1168,12 +1168,70 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
 
 ### 다음 세션 출발점 (C7 + follow-up)
 
-- **C7 진행 중**: `.github/workflows/ci.yml` 의 PyQt6 → PySide6, pyside6_port mention 제거.
-- **follow-up 후보**:
-  - `.gitattributes` 추가 (`*.py text eol=lf`) — autocrlf 와 ruff line-ending 충돌 항구 해결.
-  - C2 ~ C6 모두 origin/main 으로 push (현재 6 commits ahead, push 안 됨).
-  - C-2 ~ C-6 (Phase 1.9 i18n) — ui_v2 사용자 노출 문자열 추출 + locale catalogue 채움.
-  - 저장소 public 공개 (commercial_review.md GO/NO-GO 게이트 #1 측정 시작점).
+- **C7 완료**: 50b3115 ci: switch CI comments to PySide6, scope legacy_pyqt6 out.
+- **follow-up 완료**:
+  - `.gitattributes` 추가 (b8ce57f) — §21 참조.
+  - C-2 i18n 본격 작업 완료 (§21 참조).
+- **잔여**: 저장소 public 공개 (사용자 action), `ui/` v1 i18n (별도 작업).
+
+## 21. 5/12 Phase 1.9 C-2 완료 — ui_v2 i18n + startup locale 감지
+
+**컨텍스트**: §20 Plan 1 (PySide6 메인 전환) 완료 후 진입. C-1 (5/12 오전) 의 i18n 인프라 (core/i18n.py + locale/{en,ko}.json 샘플 3 키) 와 dual-locale 결정 (5/9) 의 마무리 작업. ui_v2 의 사용자 노출 한국어 literal 을 `tr("ns.key")` 호출 + locale catalogue 로 분리.
+
+### C-2 commit 분할 (총 8 commits)
+
+| # | Commit | 내용 | 신규 catalog 키 |
+|---|---|---|---|
+| pre | `b8ce57f chore: add .gitattributes` | `*.py/.md/...` LF, `*.ps1/.bat/.cmd` CRLF, 바이너리 명시. autocrlf 와 ruff `line-ending=lf` 충돌 항구 해결. renormalize 변경 0 (ruff format 가 이미 정규화). | - |
+| C-2a | `4b5e99f feat(i18n): extract ui_v2 user-facing strings (small files)` | onboarding.py (14 키) + command_palette.py (2 키). SCENARIOS class attribute → `_scenarios()` staticmethod (import-time 평가 회피). | 20 |
+| C-2b-1 | `20113b4 feat(i18n): extract ui_v2 main_window strings (action bar/step card/chat)` | action_bar (14) + step_card (15) + validation dialog (9) + chat input (7). chat 영역은 처음 분할 안 누락 — 매일 보는 핵심이라 1차 sub-commit 에 포함. | 44 |
+| C-2b-2 | `7490d9c feat(i18n): extract ui_v2 tab/sidebar menus + workflow + toasts` | tab/sidebar 컨텍스트 메뉴 (15) + session dialog (5) + workflow export/import (2) + scenarios data (6) + toast format (12). | 38 |
+| C-2b-3 | `4502325 feat(i18n): extract ui_v2 remaining strings (empty/dialog/palette/toasts)` | empty state (8) + library/initial card title (2) + run labels (6) + QMessageBox dialog (7) + step_done emit (4) + command palette items + 잔여 toast (24). | 51 |
+| C-2c | `e081335 feat(i18n): extract ui_v2 log/console messages + remaining literals` | self._log() 22 호출 + step_done emit 3 + 새 세션 title format + validation tooltip overflow. handoff §19 C-5 "로그/콘솔 영어 통일" 는 dual-locale 으로 확장 처리. | 30 |
+| guard | `5d9cb82 test: add test_108 i18n call site / catalogue sync guard` | ui_v2/*.py 안 `tr("ns.key")` 호출 정규식 추출 → en+ko 양쪽 catalog 존재 검증. raw key 화면 노출 사고 방지. | - |
+| final | `2d9cece feat(i18n): startup locale auto-detect + settings integration` | main.py 에 `_detect_and_set_locale()` 추가 + main() 시작부 호출 (UI import 전). 우선순위: settings.ui.language → 시스템 locale → "en" fallback. default_settings.json `ui.language` "ko" → "auto". test_109 회귀 가드. | - |
+
+총 신규 catalog 키 **183** (en/ko 양쪽 동일 — test_107 sync 가드).
+
+### 핵심 영향 받은 회귀 가드 (sentinel → tr key 검색 전환)
+
+| Test | 기존 sentinel | 새 sentinel |
+|---|---|---|
+| test_36 | `OnboardingWizard.SCENARIOS` 직접 참조 | `OnboardingWizard._scenarios()` method 호출 |
+| test_100 | `addButton("재생성"` | `addButton(\n            tr("ui_v2.validation.btn_regenerate")` |
+| test_678 | `'"⏹ 중지"' in src and '"전송 ▶"' in src` | `'tr("ui_v2.chat.btn_stop")' in src and 'tr("ui_v2.chat.btn_send")' in src` |
+| test_743 | `"모두 펼치기" in src and "모두 접기" in src` | `'tr("ui_v2.action_bar.btn_expand_all")' in src and ...` |
+| test_1667 | `"워크플로우 가져오기" in src` | `'tr("ui_v2.tab.menu_import_workflow")' in src` |
+| test_2336 | `"세션 영구 삭제" in src` | `'tr("ui_v2.tab.menu_delete")' in src` |
+| test_2662 | `"💡 템플릿" in src or "템플릿" in src` | `'tr("ui_v2.tab.menu_templates")' in src` |
+| test_2750 | `for group in ('"명령"', '"세션"', '"AI 엔진"')` | `for group_key in ('ui_v2.command_palette.group_commands', ...)` |
+| test_88 | `"엔진:" in send_src` | `'"ui_v2.step_done.step_generated"' in send_src` (ruff multi-line 분리 대응 — key string 만) |
+
+신규 가드:
+- **test_108** — i18n call site / catalogue sync: ui_v2/ 의 모든 `tr("...")` key 가 en+ko 양쪽 catalogue 에 존재 검증.
+- **test_109** — startup locale 자동 감지: main._detect_and_set_locale 존재 + main() 호출 sentinel + 함수 안 핵심 패턴.
+
+### 핵심 함정 + 해결 (다음 세션 참고)
+
+1. **Parallel Edit 충돌**: 같은 파일에 동시 Edit tool 호출 시 첫 성공 후 mtime 변경 → 나머지 22개 fail (`File has been modified since read`). 해결: **sequential Edit only** — multi-edit 같은 파일은 한 번에 1개 호출.
+2. **ruff format multi-line tr() 분리**: tr() 인자가 많으면 ruff format 가 `tr(\n            "ui_v2..."` 형태로 분리. sentinel 이 `'tr("ui_v2..."'` literal substring 검사면 fail. 해결: **key string 만 검사** (`'"ui_v2..."'` in src).
+3. **SCENARIOS class attribute import-time 평가**: tr() 호출이 class attribute 안에 있으면 module import 시 평가 — `set_locale()` 호출 전이라 fallback (en) 결과로 고정. 해결: **method 로 변환** (`@staticmethod _scenarios()`) — 인스턴스 생성 시점에 평가.
+4. **cp949 stdout 한글/emoji 출력**: Python -c 또는 print 로 한글/emoji 출력 시 Windows terminal cp949 인코딩 충돌. 해결: `PYTHONIOENCODING=utf-8 .venv\Scripts\python.exe -X utf8 ...` + `sys.stdout.reconfigure(encoding='utf-8')`.
+5. **test sentinel = 한국어 literal**: i18n 도입 전 회귀 가드들이 한국어 literal 을 직접 검사 (예: `"⏹ 중지" in src`). i18n 치환 후 source code 에서 사라짐 → 가드 fail. 해결: **tr key 검색으로 갱신** (예: `'tr("ui_v2.chat.btn_stop")' in src`).
+
+### 검증 결과 (PySide6 단독 `.venv`)
+
+- core: **109 passed** / 0 failed (test_108 + test_109 추가)
+- scenarios: 73 passed / 0 failed
+- ruff check + format: 0 issue
+- test_108 측정: ui_v2/*.py 안 tr() 호출 모든 key 가 en+ko catalog 양쪽 존재 (0 missing)
+
+### 다음 세션 출발점 (사용자 결정 대기)
+
+- **GUI 실제 검증 (한국어 ↔ 영어 토글)**: 사용자 직접 — `python main.py --ui v2` 실행. settings.json 의 `ui.language` 를 `"en"` 으로 변경 → 영어 UI 보기 → 다시 `"ko"` 복원.
+- **저장소 public 공개**: 사용자 action — commercial_review.md GO/NO-GO 게이트 #1 측정 시작점.
+- **ui/ (v1) i18n** (선택): 처음 분할 안에서 C-2 범위 외였지만, dual-locale 완성도 위해 추후 작업 가능. handoff §19 의 C-2 plan 은 ui_v2 만 명시했으므로 별도 sub-task.
+- **영어 catalogue 검토**: 영어 초안은 Claude 작성. 자연스러움 다듬기 필요 (특히 "Web search" 같은 일반화된 시나리오 라벨이 한국 사용자의 "네이버 검색" 직역과 다른 의도임).
 
 ## 9. 자주 하는 실수 / 주의사항
 
@@ -1185,6 +1243,11 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
 - **handler 분해 시 회귀 테스트**: `inspect.getsource(MainWindow._method)` 로 검사하던 테스트는 메서드가 handler 로 옮겨가면 fail. 검사 대상을 `Handler.method` 로 변경 + `self.xxx` → `mw.xxx` 변환된 패턴으로 assertion 갱신 필수.
 - **코드 편집 핸들러는 두 필드 동시 업데이트**: `step_code` 와 `generated_code` 가 desync 되면 `extract_step_delta_code` (실행/화면) 가 stale 한 쪽 우선해 사용자 수정 무시 회귀 발생 (§4.8).
 - **subprocess 의 SendInput 으로 ForegroundLock 이전**: pyautogui 같은 input 시뮬레이션 사용 시 권한이 subprocess 로 이동 — `OHDO_PARENT_PID` + `AllowSetForegroundWindow` 패턴 깨면 회귀 (§4.5).
+- **i18n tr() 의 parallel Edit 충돌**: 같은 파일에 다발 Edit 호출 시 첫 성공 후 mtime 변경 → 나머지 fail. 한 번에 1개 sequential edit 만 가능 (§21).
+- **i18n class attribute import-time 평가**: tr() 가 class attribute 안에 있으면 `set_locale()` 호출 전 평가됨 — method 로 노출 (§21).
+- **i18n 회귀 가드 한국어 literal sentinel**: `"⏹ 중지" in src` 같은 sentinel 은 i18n 후 fail. tr key 검색으로 갱신 (§21). 새 i18n 작업 시 영향 받는 sentinel 미리 식별.
+- **i18n ruff multi-line 분리**: 인자 많은 tr() 는 multi-line 으로 분리됨. sentinel 은 key string 만 검사 (`'"ui_v2.xxx"'` in src) — 다행히 multi-line 호환.
+- **i18n catalog 누락 시 raw key 노출**: tr() 가 missing key 면 key 자체 반환 → 화면에 `ui_v2.xxx.yyy` 그대로 표시. test_108 으로 강제 — 새 tr() 추가 시 catalog 동시 추가.
 
 ## 10. 사용자에게 빠르게 물어볼 후보
 
