@@ -2358,7 +2358,7 @@ class ScenariosTest(TestCase):
         """[Syntax highlighting + 코드 편집] PythonHighlighter 5 카테고리 +
         StepCardV2 의 ✏️ 수정 토글 + code_edited signal + MainWindowV2 핸들러.
         """
-        from PyQt6.QtGui import QSyntaxHighlighter
+        from PySide6.QtGui import QSyntaxHighlighter
 
         from ui_v2.main_window_v2 import (
             MainWindowV2,

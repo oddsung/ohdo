@@ -24,7 +24,7 @@ class EnvironmentScanner:
 
     # 필수 패키지 목록 (패키지명, import명)
     _COMMON_PACKAGES = [
-        ("PyQt6", "PyQt6"),
+        ("PySide6", "PySide6"),
         ("pyautogui", "pyautogui"),
         ("Pillow", "PIL"),
         ("mss", "mss"),
