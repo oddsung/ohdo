@@ -499,6 +499,8 @@ class StepCardV2(QFrame):
     # G7-D: ⚠ 다이얼로그의 재생성 버튼 → MainWindow 가 step lookup + warnings 인용 prompt
     # 으로 generate_step 재호출. (regenerate_requested 와 분리 — warnings 인용 path 명시)
     regenerate_with_warnings_requested = Signal(int)  # step_id
+    # 2026-05-12: step 삭제 — wireframe spec line 110, 123 명시. v1 패턴 (BlockCard).
+    delete_requested = Signal(int)  # step_id
 
     def __init__(
         self,
@@ -759,19 +761,22 @@ class StepCardV2(QFrame):
             footer.addWidget(self.wait_combo)
 
             # D23: ⬆⬇ 버튼 (drag-drop fallback / 접근성)
+            # 2026-05-12 사용자 보고 (1차): ⬆⬇ 가 옆 ✏️ 수정 버튼 대비 너무 작고
+            # 두 버튼 사이 간격이 너무 벌어짐. QPushButton + bg_overlay 스타일로 통일.
+            # 2026-05-12 사용자 보고 (2차): sub-layout spacing=0 은 두 버튼이 너무
+            # 붙음. footer 기본 spacing (✏️ ↔ 🗑 사이 간격) 과 동일하게 보이도록
+            # sub-layout 제거 — footer 에 직접 addWidget.
             reorder_style = (
-                f"background: transparent; color: {COLORS['text_muted']}; "
-                f"border: none; padding: 2px 6px;"
+                f"background-color: {COLORS['bg_overlay']}; color: {COLORS['text_base']}; "
+                f"padding: 4px 8px;"
             )
-            up_btn = QToolButton()
-            up_btn.setText("⬆")
+            up_btn = QPushButton("⬆")
             up_btn.setToolTip(tr("ui_v2.step_card.btn_up_tooltip"))
             up_btn.setStyleSheet(reorder_style)
             up_btn.clicked.connect(lambda: self.reorder_requested.emit(self.step_id, "up"))
             footer.addWidget(up_btn)
 
-            down_btn = QToolButton()
-            down_btn.setText("⬇")
+            down_btn = QPushButton("⬇")
             down_btn.setToolTip(tr("ui_v2.step_card.btn_down_tooltip"))
             down_btn.setStyleSheet(reorder_style)
             down_btn.clicked.connect(lambda: self.reorder_requested.emit(self.step_id, "down"))
@@ -787,6 +792,18 @@ class StepCardV2(QFrame):
             self.edit_btn.setToolTip(tr("ui_v2.step_card.btn_edit_tooltip"))
             self.edit_btn.clicked.connect(self._toggle_edit)
             footer.addWidget(self.edit_btn)
+
+        # 🗑 삭제 버튼 — wireframe spec (line 110, 123) 명시. step_id > 0 만.
+        # Library (0) / Initial (-1) 은 삭제 대상 아님 (정의상 1 개 고정).
+        if step_id > 0:
+            delete_btn = QPushButton(tr("ui_v2.step_card.btn_delete"))
+            delete_btn.setStyleSheet(
+                f"background-color: {COLORS['bg_overlay']}; color: {COLORS['error']}; "
+                f"padding: 4px 10px;"
+            )
+            delete_btn.setToolTip(tr("ui_v2.step_card.btn_delete_tooltip"))
+            delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.step_id))
+            footer.addWidget(delete_btn)
 
         footer.addStretch()
 
@@ -1585,7 +1602,7 @@ class MainWindowV2(QMainWindow):
             session = self.app_service.get_session(session_id)
             safe_name = _re.sub(r'[<>:"/\\|?*]', "_", session.title or "ohdo_export")
             target = _P(out_path) / f"{safe_name}_{session_id[:8]}"
-            output_settings = (self.settings or {}).get("output_project", {})
+            output_settings = self._load_settings().get("output_project", {})
             project_dir = self.app_service.export_workflow(
                 session_id=session_id,
                 output_dir=target,
@@ -1922,6 +1939,7 @@ class MainWindowV2(QMainWindow):
             card.regenerate_requested.connect(self._on_regenerate)
             card.regenerate_with_warnings_requested.connect(self._on_regenerate_with_warnings)
             card.reorder_requested.connect(self._on_step_reorder)
+            card.delete_requested.connect(self._on_step_delete)
             card.code_edited.connect(self._on_block_code_edited)
             self._insert_card(card)
 
@@ -2259,6 +2277,7 @@ class MainWindowV2(QMainWindow):
         images: Optional[list[str]] = None,
         elements: Optional[list[dict]] = None,
         previous_warnings: Optional[list[dict]] = None,
+        replaces_step_id: Optional[int] = None,
     ) -> None:
         """AI 호출 worker — _on_send_message + _on_regenerate (D17) 공통.
 
@@ -2328,6 +2347,7 @@ class MainWindowV2(QMainWindow):
                         element_context=element_ctx,
                         is_browser_element=is_browser_elem,
                         previous_warnings=previous_warnings,
+                        replaces_step_id=replaces_step_id,
                     )
                 )
                 loop.close()
@@ -2379,7 +2399,9 @@ class MainWindowV2(QMainWindow):
                     # blocks 실행 path 의 step_done 과 분리된 별도 signal 사용 —
                     # 실행 완료 후 또 자동 실행되는 무한 루프 회피.
                     if (
-                        self.settings.get("execution", {}).get("auto_run_on_step_create", False)
+                        self._load_settings()
+                        .get("execution", {})
+                        .get("auto_run_on_step_create", False)
                         and step.step_id > 0
                     ):
                         self.signals.request_auto_run.emit(step.step_id)
@@ -2469,14 +2491,20 @@ class MainWindowV2(QMainWindow):
     def _on_elempick(self) -> None:
         """v1 ElementPickerOverlay 재사용. settings 통째로 전달 (overlay 내부에서
         element_picker 섹션 추출). 사용자 보고 (5/5): kwarg 로 잘못 전달해 강제종료.
+
+        2026-05-12 사용자 보고: 단순 Z-order 내림 (lower) 은 메인 윈도우가 화면
+        에 보임. F3 wait (3초) 후 picker 가 다시 떠도 메인 윈도우가 가시 영역에
+        그대로 남아 picker overlay 의 transparent 영역으로 노출. v1 패턴
+        (ui_inspection_handler.py:46) 처럼 showMinimized() 로 완전 minimize.
         """
         from ui.element_picker import ElementPickerOverlay
 
-        self.lower()
+        self.showMinimized()
         try:
             self._element_overlay = ElementPickerOverlay(settings=self._load_settings())
         except Exception as e:  # noqa: BLE001 — overlay 생성 실패 시 안전 복구
             self._toast(tr("ui_v2.toast.elempick_reset_failed", error=str(e)), "error")
+            self.showNormal()
             self.raise_()
             self.activateWindow()
             return
@@ -2547,11 +2575,13 @@ class MainWindowV2(QMainWindow):
 
         self._refresh_chip_area()
         self._element_overlay = None
+        self.showNormal()
         self.raise_()
         self.activateWindow()
 
     def _on_element_cancel(self) -> None:
         self._element_overlay = None
+        self.showNormal()
         self.raise_()
         self.activateWindow()
         self._log(tr("ui_v2.log.elempick_canceled"))
@@ -2723,7 +2753,8 @@ class MainWindowV2(QMainWindow):
 
         # F2: step 첫 생성 시 실행 방법 힌트 토스트 — 영구 dismiss
         if success and step_id > 0:
-            ui_cfg = self.settings.setdefault("ui", {})
+            s = self._load_settings()
+            ui_cfg = s.setdefault("ui", {})
             if not ui_cfg.get("hint_run_shown", False):
                 self._toast(
                     "💡 ▶ Ctrl+R 또는 카드의 ⏯ 단독 버튼으로 실행 (다시 안 보임)",
@@ -2731,7 +2762,7 @@ class MainWindowV2(QMainWindow):
                 )
                 ui_cfg["hint_run_shown"] = True
                 try:
-                    self._save_settings(self.settings)
+                    self._save_settings(s)
                 except Exception:
                     # 영구화 실패해도 토스트 동작은 유지
                     pass
@@ -2825,11 +2856,15 @@ class MainWindowV2(QMainWindow):
         warnings = list(target_step.get("validation_warnings", []) or [])
         self._log(tr("ui_v2.log.step_regenerate_warnings", step_id=step_id, count=len(warnings)))
         elems = list(self._pending_elements) if self._pending_elements else None
+        # 2026-05-12 사용자 보고 (메모장테스트): 재생성 = in-place 대체 (직관과 일치).
+        # 기존 step 그대로 두고 새 step 추가 path 는 같은 user_request 중복 → 실행
+        # 시 회귀 발생. replaces_step_id 로 generate_step 가 update_step 분기.
         self._send_request(
             user_request,
             images=None,
             elements=elems,
             previous_warnings=warnings,
+            replaces_step_id=step_id,
         )
 
     def _on_step_reorder(self, step_id: int, direction: str) -> None:
@@ -2853,6 +2888,43 @@ class MainWindowV2(QMainWindow):
         self._refresh_step_cards()
         arrow = "⬆" if direction == "up" else "⬇"
         self._log(f"{arrow} Step {step_id} {direction}")
+
+    def _on_step_delete(self, step_id: int) -> None:
+        """🗑 버튼 → 확인 다이얼로그 → AppService.delete_step → 세션 재로드.
+
+        2026-05-12 추가: v1 (ui/main_window.py:_on_step_delete) 와 wireframe_v2
+        spec line 110, 123 의 step 삭제 기능. v2 PoC 구현 시 누락된 항목.
+        destructive 작업이므로 QMessageBox.question 으로 modal confirm (D9 결정).
+        """
+        if not self.current_session:
+            return
+        sid = self.current_session.session_id
+        # destructive — modal confirm
+        reply = QMessageBox.question(
+            self,
+            tr("ui_v2.dialog.step_delete_title"),
+            tr("ui_v2.dialog.step_delete_confirm", step_id=step_id),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            ok = self.app_service.delete_step(sid, step_id)
+        except Exception as e:  # noqa: BLE001
+            self._toast(tr("ui_v2.toast.step_delete_failed", error=str(e)), "error")
+            return
+        if not ok:
+            self._toast(tr("ui_v2.toast.step_delete_not_found", step_id=step_id), "warning")
+            return
+        try:
+            self.current_session = self.app_service.get_session(sid)
+        except Exception as e:  # noqa: BLE001
+            self._toast(tr("ui_v2.toast.session_reload_failed", error=str(e)), "error")
+            return
+        self._refresh_step_cards()
+        self._log(tr("ui_v2.log.step_deleted", step_id=step_id))
+        self._toast(tr("ui_v2.toast.step_deleted", step_id=step_id), "warning")
 
     def _on_block_code_edited(self, step_id: int, new_code: str) -> None:
         """카드 ✏️ 수정 → ✅ 저장 시 호출. AppService.update_step 위임.

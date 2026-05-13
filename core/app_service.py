@@ -293,8 +293,76 @@ class AppService:
         self._repo.update_step(session, step_id, updates)
 
     def delete_step(self, session_id: str, step_id: int) -> bool:
+        """step 삭제 + cumulative generated_code chain 재구성.
+
+        2026-05-12 사용자 보고 버그: 단순 `_repo.delete_step` 은 session.steps
+        에서 대상만 빼고 step_id 만 renumber. 각 step 의 generated_code 는
+        **cumulative** (library + 이전 step 들의 코드 누적) 이므로 삭제 후에도
+        후속 step 의 generated_code 에 삭제된 step 의 코드가 잔존 → 전체 실행
+        시 삭제된 코드가 그대로 실행됨.
+
+        Fix: `reorder_step` 의 step_code 사전 추출 + chain 재구성 패턴 동일 적용.
+        1. 삭제 전 모든 step 의 step_code 추출 (chain 정상 시점).
+        2. step_code + manually_edited=True 마킹 (downstream 우선순위 0).
+        3. 대상 step 제거.
+        4. 새 순서대로 generated_code 재구성 (library + step_code 누적).
+        5. renumber + save.
+        """
         session = self._repo.load_session(session_id)
-        return self._repo.delete_step(session, step_id)
+        steps = session.steps
+
+        target_idx = None
+        for i, s in enumerate(steps):
+            sid = s.get("step_id") if isinstance(s, dict) else getattr(s, "step_id", 0)
+            if sid == step_id:
+                target_idx = i
+                break
+        if target_idx is None:
+            return False
+
+        # 1. 모든 step 의 step_code 사전 추출 (재정렬 전 — chain 정상 시점).
+        from core.workflow_engine import (
+            extract_library_block,
+            extract_step_delta_code,
+        )
+
+        library_code = extract_library_block(session)
+        prev = None
+        for s in steps:
+            if not isinstance(s, dict):
+                prev = s
+                continue
+            if s.get("manually_edited") and s.get("step_code", "").strip():
+                pass
+            else:
+                sc = extract_step_delta_code(s, prev)
+                s["step_code"] = sc
+                s["manually_edited"] = True
+            prev = s
+
+        # 2. 대상 step 제거
+        steps.pop(target_idx)
+
+        # 3. 새 순서대로 generated_code 재구성 (library + step_code 누적)
+        accumulated = library_code
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            sc = s.get("step_code", "")
+            if accumulated.strip() and sc.strip():
+                accumulated = accumulated + "\n\n" + sc
+            elif sc.strip():
+                accumulated = sc
+            s["generated_code"] = accumulated
+
+        # 4. renumber + save
+        for i, s in enumerate(steps):
+            if isinstance(s, dict):
+                s["step_id"] = i + 1
+            else:
+                s.step_id = i + 1
+        self._repo.save_session(session)
+        return True
 
     def insert_step(
         self,
@@ -578,6 +646,7 @@ class AppService:
         window_context: Optional[str] = None,
         is_browser_element: bool = False,
         previous_warnings: Optional[list[dict]] = None,
+        replaces_step_id: Optional[int] = None,
     ) -> tuple[Optional[Step], "AIResponse"]:
         """사용자 요청 → 프롬프트 구성 → AI 호출 → Step 생성 + 세션에 추가.
 
@@ -688,8 +757,12 @@ class AppService:
             steps_for_prev = session.steps
         # 직전 step 이 empty (AI 실패) 면 더 거슬러 올라가 last-non-empty step 사용.
         # 그렇지 않으면 prev_body="" 가 되어 delta = 전체 body → 중복 driver init 등 회귀.
+        # replaces_step_id 가 주어지면 그 step 은 skip — 재생성 path 에서 자기 자신
+        # 의 stale 코드를 prev 로 인식하면 delta=0 또는 잘못된 delta 회귀.
         for ls_data in reversed(steps_for_prev):
             ls = ls_data if isinstance(ls_data, dict) else {}
+            if replaces_step_id is not None and ls.get("step_id") == replaces_step_id:
+                continue
             prev_full = (ls.get("generated_code") or "").strip()
             if prev_full:
                 prev_imports = list(ls.get("step_imports", []) or [])
@@ -722,7 +795,7 @@ class AppService:
             # 정적 분석 실패는 step 생성을 막지 않음
             pass
 
-        # Step 생성 + 세션 추가 — D6: 첨부 이미지가 있으면 captures 에 보존
+        # Step 생성 — D6: 첨부 이미지가 있으면 captures 에 보존
         # (카드 thumbnail 표시 + 디버깅 추적용)
         step = Step(
             status="pending",
@@ -735,7 +808,29 @@ class AppService:
             step_imports=delta_imports,
             validation_warnings=validation_warnings,
         )
-        self.add_step(session.session_id, step)
+
+        # replaces_step_id 가 주어지면 in-place update — 새 step 추가 X.
+        # 사용자 직관: ⚠ 재생성 = "이 step 의 문제 해결" → 기존 step 갱신.
+        # 사용자 보고 (2026-05-12 메모장테스트): 재생성 path 가 add_step 으로
+        # 새 step 추가 → 같은 user_request 두 개 존재 → 전체 실행 시 작업 2번
+        # 또는 잘못된 step1 실패로 step2 도달 불가 회귀.
+        if replaces_step_id is not None:
+            updates = {
+                "user_request": user_request,
+                "ai_description": response.description or "",
+                "generated_code": full_code,
+                "required_packages": list(response.packages or []),
+                "captures": list(images) if images else [],
+                "step_code": delta_body,
+                "step_imports": delta_imports,
+                "validation_warnings": validation_warnings,
+                "status": "pending",
+                "execution_result": None,  # 이전 실행 결과 무효화
+            }
+            self.update_step(session.session_id, replaces_step_id, updates)
+            step.step_id = replaces_step_id
+        else:
+            self.add_step(session.session_id, step)
         return step, response
 
     def _safe_get_ai_engine_name(self) -> str:

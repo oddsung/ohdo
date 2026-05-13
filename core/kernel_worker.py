@@ -72,13 +72,13 @@ def _run_loop():
             break
 
         if is_ping:
-            sys.stdout.write(PONG_RESP + "\n" + RESULT_DONE + "\n")
+            sys.stdout.write("\n" + PONG_RESP + "\n" + RESULT_DONE + "\n")
             sys.stdout.flush()
             continue
 
         code = "".join(lines)
         if not code.strip():
-            sys.stdout.write(RESULT_SUCCESS + "\n" + RESULT_DONE + "\n")
+            sys.stdout.write("\n" + RESULT_SUCCESS + "\n" + RESULT_DONE + "\n")
             sys.stdout.flush()
             continue
 
@@ -98,7 +98,11 @@ def _run_loop():
                 combined += ("\n" if combined else "") + err
             combined = combined.rstrip()
 
-            sys.stdout.write(RESULT_SUCCESS + "\n")
+            # 마커 라인 분리 보장: exec() 안 subprocess (cmd.exe 등) 가 trailing
+            # newline 없이 fd 1 에 직접 쓰면, RESULT 마커가 그 partial line 과
+            # 합쳐져 parent (execution_kernel) 의 literal 비교가 fail → success
+            # 오보고. 항상 "\n" prefix 로 새 라인 보장.
+            sys.stdout.write("\n" + RESULT_SUCCESS + "\n")
             if combined:
                 sys.stdout.write(combined + "\n")
             sys.stdout.write(RESULT_DONE + "\n")
@@ -108,7 +112,7 @@ def _run_loop():
             err_trace = traceback.format_exc()
             combined_out = out.rstrip()
 
-            sys.stdout.write(RESULT_ERROR + "\n")
+            sys.stdout.write("\n" + RESULT_ERROR + "\n")
             if combined_out:
                 sys.stdout.write(combined_out + "\n")
             sys.stdout.write(err_trace.rstrip() + "\n")

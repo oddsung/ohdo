@@ -4711,13 +4711,15 @@ if __name__ == "__main__":
         )
 
         # 2) F2: _on_step_done 의 hint 토스트 + 영구화
+        # 2026-05-12: self.settings → self._load_settings() 로 교체 (#112 버그 fix).
         step_done_src = _inspect.getsource(MainWindowV2._on_step_done)
         for pattern, desc in (
             ("hint_run_shown", "ui.hint_run_shown 플래그 사용"),
             ("Ctrl+R", "Ctrl+R 단축키 안내"),
             ("⏯ 단독", "단독 버튼 안내"),
             ('ui_cfg["hint_run_shown"] = True', "영구 dismiss 플래그 설정"),
-            ("_save_settings(self.settings)", "settings.json 영구 저장"),
+            ("self._load_settings()", "settings fresh load (self.settings 사용 X)"),
+            ("self._save_settings(s)", "settings.json 영구 저장 (mutated dict)"),
         ):
             self.assert_true(
                 pattern in step_done_src,
@@ -4995,6 +4997,370 @@ if __name__ == "__main__":
             self.assert_true(
                 pattern in fn_src,
                 f"[C-2 final] _detect_and_set_locale 에 '{desc}' 패턴 필수: '{pattern}'",
+            )
+
+    def test_116_delete_step_rebuilds_generated_code_chain(self):
+        """[회귀] AppService.delete_step 후 후속 step 의 generated_code 에 삭제된
+        step 의 코드가 잔존하지 않음.
+
+        Bug (2026-05-12 사용자 보고, 메모장테스트 step 삭제 후):
+        각 step 의 generated_code 는 cumulative (library + 이전 step 누적). 단순
+        delete + renumber 만 하면 후속 step 의 generated_code 가 삭제된 step 의
+        코드 포함된 채 그대로 → 전체 실행 시 삭제된 코드 실행.
+
+        Fix: reorder_step 패턴 동일 적용 — step_code 사전 추출 + 새 순서 재구성.
+
+        가드: in-memory session 으로 step1 (code_A) + step2 (code_A + code_B) +
+        step3 (code_A + code_B + code_C) 만들고 step1 삭제 후 새 step1/step2 의
+        generated_code 가 code_A 를 포함하지 않는지 검증.
+        """
+        from core.app_service import AppService
+        from core.storage import InMemoryRepository
+
+        repo = InMemoryRepository()
+        svc = AppService(session_repo=repo)
+
+        session = svc.create_session(title="t116_delete_chain", project_type="desktop")
+        sid = session.session_id
+
+        # step1: code_A, step2: code_A+code_B, step3: code_A+code_B+code_C
+        from core.models import Step
+
+        s1 = Step(
+            status="completed",
+            generated_code="code_A = 1",
+            step_code="code_A = 1",
+            step_imports=[],
+        )
+        s2 = Step(
+            status="completed",
+            generated_code="code_A = 1\n\ncode_B = 2",
+            step_code="code_B = 2",
+            step_imports=[],
+        )
+        s3 = Step(
+            status="completed",
+            generated_code="code_A = 1\n\ncode_B = 2\n\ncode_C = 3",
+            step_code="code_C = 3",
+            step_imports=[],
+        )
+        svc.add_step(sid, s1)
+        svc.add_step(sid, s2)
+        svc.add_step(sid, s3)
+
+        # step1 삭제 — chain 재구성 기대
+        ok = svc.delete_step(sid, 1)
+        self.assert_true(ok, "[#116] delete_step 가 True 반환 (성공)")
+
+        session_after = svc.get_session(sid)
+        self.assert_true(
+            len(session_after.steps) == 2,
+            f"[#116] 삭제 후 step 개수 2 기대, 실제 {len(session_after.steps)}",
+        )
+
+        # 새 step1 (구 step2): generated_code 에 code_A 없어야 함
+        new_step1 = (
+            session_after.steps[0]
+            if isinstance(session_after.steps[0], dict)
+            else session_after.steps[0].__dict__
+        )
+        new_step1_gen = new_step1.get("generated_code", "")
+        self.assert_true(
+            "code_A" not in new_step1_gen,
+            f"[#116] 새 step1 의 generated_code 에 삭제된 code_A 잔존: '{new_step1_gen}'",
+        )
+        self.assert_true(
+            "code_B" in new_step1_gen,
+            f"[#116] 새 step1 의 generated_code 에 code_B 보존 필수: '{new_step1_gen}'",
+        )
+
+        # 새 step2 (구 step3): code_A 없어야 함, code_B + code_C 있어야 함
+        new_step2 = (
+            session_after.steps[1]
+            if isinstance(session_after.steps[1], dict)
+            else session_after.steps[1].__dict__
+        )
+        new_step2_gen = new_step2.get("generated_code", "")
+        self.assert_true(
+            "code_A" not in new_step2_gen,
+            f"[#116] 새 step2 의 generated_code 에 삭제된 code_A 잔존: '{new_step2_gen}'",
+        )
+        self.assert_true(
+            "code_B" in new_step2_gen and "code_C" in new_step2_gen,
+            f"[#116] 새 step2 의 generated_code 에 code_B + code_C 보존 필수: '{new_step2_gen}'",
+        )
+
+        # step_id renumber 확인
+        self.assert_true(
+            new_step1.get("step_id") == 1 and new_step2.get("step_id") == 2,
+            f"[#116] step_id 재정렬 — 1,2 기대, "
+            f"실제 {new_step1.get('step_id')},{new_step2.get('step_id')}",
+        )
+
+    def test_115_v2_step_card_has_delete_button(self):
+        """[회귀] v2 StepCardV2 에 🗑 삭제 버튼 + 핸들러 + AppService 연결.
+
+        2026-05-12 사용자 보고: v1 의 step 삭제 기능이 v2 카드에서 누락 (의도
+        제거 아님 — wireframe_v2.md line 110, 123 spec 에 명시).
+
+        Fix:
+        - StepCardV2 에 delete_requested = Signal(int) 추가
+        - 카드 푸터에 🗑 삭제 버튼 (step_id > 0 만)
+        - MainWindowV2._on_step_delete 핸들러 — QMessageBox 확인 + delete_step + refresh
+        - signal 연결 (_refresh_step_cards 안)
+        - locale catalog (en+ko) 에 btn_delete / btn_delete_tooltip / dialog /
+          toast / log 키 추가
+        - 부수: ⬆⬇ 를 QPushButton + bg_overlay 로 통일 + sub-layout spacing=0
+          으로 두 버튼 붙여 표시 (사용자 보고: 옆 ✏️ 와 비례 안 맞고 간격 큼)
+        """
+        import inspect as _inspect
+
+        from ui_v2 import main_window_v2 as _mwv2
+
+        # 1) signal 정의
+        self.assert_true(
+            hasattr(_mwv2.StepCardV2, "delete_requested"),
+            "[#115] StepCardV2.delete_requested signal 필수",
+        )
+
+        # 2) 카드 푸터 코드에 삭제 버튼 생성 + connect
+        init_src = _inspect.getsource(_mwv2.StepCardV2.__init__)
+        for pattern, desc in (
+            ('tr("ui_v2.step_card.btn_delete")', "btn_delete tr key 사용"),
+            ('tr("ui_v2.step_card.btn_delete_tooltip")', "btn_delete_tooltip tr key 사용"),
+            ("self.delete_requested.emit(self.step_id)", "삭제 버튼 클릭 → delete_requested emit"),
+        ):
+            self.assert_true(
+                pattern in init_src,
+                f"[#115] StepCardV2.__init__ 에 '{desc}' 필수: '{pattern}'",
+            )
+
+        # 3) 핸들러 존재 + AppService.delete_step 호출
+        self.assert_true(
+            callable(getattr(_mwv2.MainWindowV2, "_on_step_delete", None)),
+            "[#115] MainWindowV2._on_step_delete 핸들러 필수",
+        )
+        handler_src = _inspect.getsource(_mwv2.MainWindowV2._on_step_delete)
+        for pattern, desc in (
+            ("self.app_service.delete_step(", "AppService.delete_step 호출"),
+            ("QMessageBox.question", "destructive confirm 다이얼로그"),
+            ("self._refresh_step_cards()", "삭제 후 카드 재구성"),
+        ):
+            self.assert_true(
+                pattern in handler_src,
+                f"[#115] _on_step_delete 에 '{desc}' 필수: '{pattern}'",
+            )
+
+        # 4) signal 연결 (_refresh_step_cards 안)
+        refresh_src = _inspect.getsource(_mwv2.MainWindowV2._refresh_step_cards)
+        self.assert_true(
+            "card.delete_requested.connect(self._on_step_delete)" in refresh_src,
+            "[#115] _refresh_step_cards 가 card.delete_requested 를 _on_step_delete 에 연결 필수",
+        )
+
+    def test_114_v2_element_picker_uses_show_minimized(self):
+        """[회귀] v2 element picker 시작 시 main window 완전 minimize.
+
+        사용자 보고 (2026-05-12 메모장테스트 후속): F3 일시정지 (3초) 후 picker
+        가 다시 떠도 main window 가 화면에 보임. 원인: _on_elempick 가 self.lower()
+        만 호출 — Z-order 만 내려가고 가시 영역에 그대로 남아 picker overlay 의
+        transparent 영역으로 노출.
+
+        Fix: v1 패턴 (ui_inspection_handler.py:46 mw.showMinimized()) 와 통일.
+        - _on_elempick: self.lower() → self.showMinimized()
+        - _on_element_picked / _on_element_cancel: self.raise_() 앞에 self.showNormal()
+
+        가드: 3개 메서드 모두 의도된 패턴 사용.
+        """
+        import inspect as _inspect
+
+        from ui_v2 import main_window_v2 as _mwv2
+
+        elempick_src = _inspect.getsource(_mwv2.MainWindowV2._on_elempick)
+        self.assert_true(
+            "self.showMinimized()" in elempick_src,
+            "[#114] _on_elempick 가 self.showMinimized() 호출 필수 (self.lower() X)",
+        )
+        # F3 wait 후 main window 가시 회귀 방지: lower() 단독 호출 금지
+        self.assert_true(
+            elempick_src.count("self.lower()") == 0,
+            "[#114] _on_elempick 에 self.lower() 단독 호출 금지 — showMinimized() 사용",
+        )
+
+        picked_src = _inspect.getsource(_mwv2.MainWindowV2._on_element_picked)
+        self.assert_true(
+            "self.showNormal()" in picked_src,
+            "[#114] _on_element_picked 가 self.showNormal() 호출 필수 (minimize 복원)",
+        )
+
+        cancel_src = _inspect.getsource(_mwv2.MainWindowV2._on_element_cancel)
+        self.assert_true(
+            "self.showNormal()" in cancel_src,
+            "[#114] _on_element_cancel 가 self.showNormal() 호출 필수 (minimize 복원)",
+        )
+
+    def test_113_regenerate_replaces_step_in_place(self):
+        """[회귀] 재생성 (G7-D) 은 in-place 대체 — 새 step 추가 X.
+
+        사용자 보고 (2026-05-12 메모장테스트): step1 이 잘못된 코드여도 재생성
+        클릭하면 새 step2 가 생성됨 (step1 보존) → 같은 user_request 가 두 개
+        존재. step1 이 오류 안 나면 전체 실행 시 작업이 두 번 시도되거나, step1
+        실패하면 step2 도달 불가 회귀.
+
+        Fix: generate_step() 에 replaces_step_id 옵션 추가.
+        - prev_body 계산 시 그 step 은 skip (자기 자신의 stale 코드 prev 인식 회피)
+        - 마지막에 add_step 대신 update_step 분기 → step_id 보존, in-place 갱신
+        - 재생성 path (_on_regenerate_with_warnings) 가 step_id 를 전달
+
+        가드:
+        1) generate_step 시그니처에 replaces_step_id 파라미터 존재
+        2) prev_body 루프 안 replaces_step_id skip 패턴 존재
+        3) update_step 분기 + execution_result=None reset 패턴 존재
+        4) _on_regenerate_with_warnings 가 replaces_step_id 를 _send_request 에 전달
+        5) _send_request 시그니처에 replaces_step_id 존재
+        """
+        import inspect as _inspect
+
+        from core import app_service as _as
+        from ui_v2 import main_window_v2 as _mwv2
+
+        # 1) generate_step 시그니처
+        sig = _inspect.signature(_as.AppService.generate_step)
+        self.assert_true(
+            "replaces_step_id" in sig.parameters,
+            "[#113] AppService.generate_step 시그니처에 replaces_step_id 파라미터 필수",
+        )
+
+        # 2) prev_body skip 패턴
+        gen_src = _inspect.getsource(_as.AppService.generate_step)
+        for pattern, desc in (
+            (
+                'replaces_step_id is not None and ls.get("step_id") == replaces_step_id',
+                "prev_body skip 로직",
+            ),
+            ("if replaces_step_id is not None:", "update_step 분기"),
+            ("self.update_step(session.session_id, replaces_step_id", "update_step 호출"),
+            ('"execution_result": None', "이전 실행 결과 무효화"),
+            ("step.step_id = replaces_step_id", "반환 step 의 step_id 보존"),
+        ):
+            self.assert_true(
+                pattern in gen_src,
+                f"[#113] generate_step 에 '{desc}' 필수: '{pattern}'",
+            )
+
+        # 3) _on_regenerate_with_warnings 가 replaces_step_id 전달
+        regen_src = _inspect.getsource(_mwv2.MainWindowV2._on_regenerate_with_warnings)
+        self.assert_true(
+            "replaces_step_id=step_id" in regen_src,
+            "[#113] _on_regenerate_with_warnings 가 replaces_step_id=step_id 전달 필수",
+        )
+
+        # 4) _send_request 시그니처
+        send_sig = _inspect.signature(_mwv2.MainWindowV2._send_request)
+        self.assert_true(
+            "replaces_step_id" in send_sig.parameters,
+            "[#113] _send_request 시그니처에 replaces_step_id 파라미터 필수",
+        )
+
+        # 5) _send_request 가 generate_step 에 전달
+        send_src = _inspect.getsource(_mwv2.MainWindowV2._send_request)
+        self.assert_true(
+            "replaces_step_id=replaces_step_id" in send_src,
+            "[#113] _send_request worker 가 generate_step 에 replaces_step_id 전달 필수",
+        )
+
+    def test_112_main_window_v2_uses_load_settings_not_self_settings(self):
+        """[회귀] MainWindowV2 는 self.settings 속성 사용 금지 — 항상 _load_settings().
+
+        Bug (2026-05-12 사용자 보고, v2-새세션-160554 step 2 실행 후):
+        ```
+        File "ui_v2/main_window_v2.py", line 2726, in _on_step_done
+            ui_cfg = self.settings.setdefault("ui", {})
+        AttributeError: 'MainWindowV2' object has no attribute 'settings'
+        ```
+        MainWindowV2 는 __init__ 에서 self.settings 를 저장하지 않고, 매번
+        self._load_settings() 로 fresh load. F2 (auto_run hint 토스트) 추가 시
+        잘못된 self.settings 패턴이 들어가 step 실행 후마다 AttributeError 발생.
+        export 워크플로우 (line 1588), F1 auto-run (line 2382) 도 같은 버그.
+
+        Fix: 4곳 모두 self._load_settings() 로 교체. mutate + save 경로는
+        `s = self._load_settings(); ...; self._save_settings(s)` 패턴.
+
+        가드: ui_v2/main_window_v2.py 에 `self.settings` 패턴이 존재하지 않음.
+        """
+        path = Path(__file__).parent.parent / "ui_v2" / "main_window_v2.py"
+        src = path.read_text(encoding="utf-8")
+        # `self.settings` 직접 attribute 접근 검색.
+        # `self._save_settings`, `self._load_settings` 같은 메서드는 제외 — 정규식으로 word boundary 사용.
+        import re as _re
+
+        matches = _re.findall(r"\bself\.settings\b", src)
+        self.assert_true(
+            len(matches) == 0,
+            f"[회귀 #112] MainWindowV2 는 self.settings 속성 사용 금지 — "
+            f"항상 self._load_settings(). 발견 횟수: {len(matches)}",
+        )
+
+    def test_111_prompt_builder_windows_console_launch_rule(self):
+        """[회귀] Windows 가이드에 console 앱 launch 시 CREATE_NEW_CONSOLE 규칙.
+
+        Bug (2026-05-12 사용자 보고, v2-새세션-153705):
+        AI 가 `subprocess.Popen(['cmd.exe'])` 생성 → kernel_worker 는 콘솔 없는
+        piped subprocess 라 자식이 부모 stdio 상속 → CMD 윈도우 생성 X → 부모
+        파이프로 banner 만 출력 → 후속 `Application().connect(title_re='.*명령
+        프롬프트', timeout=10)` 가 영원히 윈도우 못 찾아 TimeoutError.
+
+        Fix: prompt_builder.py 의 Windows subprocess 가이드에 콘솔 앱 (cmd /
+        powershell / wt) 실행 시 `creationflags=subprocess.CREATE_NEW_CONSOLE`
+        명시 규칙 추가. GUI 앱 (notepad, chrome 등) 은 불필요 명시.
+
+        가드: 핵심 키워드들이 prompt_builder.py 의 Windows 가이드 영역에
+        존재하는지 정적 검사.
+        """
+        from core import prompt_builder as pb_mod
+
+        src = Path(pb_mod.__file__).read_text(encoding="utf-8")
+
+        for pattern, desc in (
+            ("CREATE_NEW_CONSOLE", "CREATE_NEW_CONSOLE 플래그 명시"),
+            ("cmd.exe", "cmd.exe 예시"),
+            ("powershell", "powershell 예시"),
+            ("kernel_worker", "kernel_worker 콘솔 없는 subprocess 컨텍스트 언급"),
+        ):
+            self.assert_true(
+                pattern in src,
+                f"[회귀 #111] prompt_builder.py 의 Windows 가이드에 "
+                f"'{desc}' 필수 (콘솔 앱 launch 규칙). 패턴: '{pattern}'",
+            )
+
+    def test_110_kernel_worker_result_markers_isolated_with_newline_prefix(self):
+        """[회귀] kernel_worker RESULT 마커는 항상 "\\n" prefix 로 새 라인 보장.
+
+        Bug (2026-05-12 사용자 보고, v2-새세션-153705):
+        AI 생성 코드가 `subprocess.Popen(['cmd.exe'])` 호출 → cmd.exe 가 부모
+        의 piped stdout 상속 → 마지막 프롬프트 라인 `C:\\Users\\...>` 가 trailing
+        newline 없이 fd 1 로 출력 → kernel_worker 가 이어서 `<<<ERROR>>>\\n` 쓰
+        면 한 라인으로 합쳐짐 (`C:\\Users\\...><<<ERROR>>>`).
+        parent (execution_kernel) 의 `line == "<<<ERROR>>>"` 리터럴 비교 fail
+        → success=True 유지 → 실패한 스텝이 ✅ 로 오보고.
+
+        Fix: RESULT_SUCCESS / RESULT_ERROR / PONG 모두 "\\n" prefix 로 write —
+        subprocess 가 trailing newline 없이 남긴 partial line 과 분리되어
+        marker 가 독립 라인으로 보장됨.
+
+        가드: kernel_worker.py 의 각 마커 write 가 "\\n" + MARKER + "\\n" 패턴
+        을 사용하는지 정적 검사.
+        """
+        worker_path = Path(__file__).parent.parent / "core" / "kernel_worker.py"
+        src = worker_path.read_text(encoding="utf-8")
+
+        for marker_const in ("RESULT_SUCCESS", "RESULT_ERROR", "PONG_RESP"):
+            pattern = f'"\\n" + {marker_const}'
+            self.assert_true(
+                pattern in src,
+                f"[회귀 #110] kernel_worker.py 가 {marker_const} 쓸 때 "
+                f"앞에 '\\n' prefix 필수 (subprocess partial line 분리). "
+                f"패턴: '{pattern}'",
             )
 
     def test_72_codeviewer_clear_resets_block_view(self):

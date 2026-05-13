@@ -514,6 +514,21 @@ class PromptBuilder:
             parts.append(
                 "   - 메모장(notepad.exe) 같은 Windows 기본 프로그램은 cwd 없이도 실행 가능합니다."
             )
+            parts.append(
+                "   - 🌟중요(콘솔 앱 — cmd.exe / powershell.exe / pwsh.exe / wt.exe): ohdo 의 kernel_worker 는 콘솔 없는 piped subprocess 이므로 `subprocess.Popen(['cmd.exe'])` 만 호출하면 자식이 부모의 stdio 를 상속 → **윈도우가 생성되지 않고** banner 만 부모 파이프에 출력됩니다. pywinauto/`Application().connect()` 가 영원히 못 찾으니 반드시 `creationflags=subprocess.CREATE_NEW_CONSOLE` 을 추가하세요:"
+            )
+            parts.append("     ```python")
+            parts.append("     import subprocess")
+            parts.append(
+                "     subprocess.Popen(['cmd.exe'], creationflags=subprocess.CREATE_NEW_CONSOLE)"
+            )
+            parts.append(
+                "     # PowerShell: subprocess.Popen(['powershell.exe'], creationflags=subprocess.CREATE_NEW_CONSOLE)"
+            )
+            parts.append("     ```")
+            parts.append(
+                "   - GUI 앱 (notepad, calc, mspaint, chrome 등) 은 자체 윈도우를 생성하므로 이 플래그 불필요."
+            )
 
         return parts
 
