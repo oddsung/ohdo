@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-12 (5/4~5/12 작업 — 자세한 변경은 §5 변경 이력 + §11~§21 인계 노트 참조). baseline: **core 109/109 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준, 5/12 Phase 1.9 C-2 완료 후). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.**
+> 마지막 업데이트: 2026-05-13 (5/4~5/13 작업 — 자세한 변경은 §5 변경 이력 + §11~§22 인계 노트 참조). baseline: **core 116/116 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준, 5/12 GUI 핵심기능 테스트 세션 후 — **미커밋, 다음 세션에서 commit**). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1233,6 +1233,50 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
 - **ui/ (v1) i18n** (선택): 처음 분할 안에서 C-2 범위 외였지만, dual-locale 완성도 위해 추후 작업 가능. handoff §19 의 C-2 plan 은 ui_v2 만 명시했으므로 별도 sub-task.
 - **영어 catalogue 검토**: 영어 초안은 Claude 작성. 자연스러움 다듬기 필요 (특히 "Web search" 같은 일반화된 시나리오 라벨이 한국 사용자의 "네이버 검색" 직역과 다른 의도임).
 
+## 22. 5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 7 fix (test_110~116)
+
+**컨텍스트**: §21 완료 후 사용자가 ohdo 를 직접 띄워 (`python main.py --ui v2`) cmd 실행 / 메모장 / element picker / step 관리 시나리오를 반복 테스트. 매 보고마다 Claude 가 root cause 분석 → fix → 회귀 가드 추가 루프 진행. **미커밋 — 다음 세션에서 commit 권장** (working tree: `core/app_service.py`, `core/kernel_worker.py`, `core/locale/{en,ko}.json`, `core/prompt_builder.py`, `tests/test_core.py`, `ui_v2/main_window_v2.py`. commit 전 `ruff check` + `ruff format` 한 번 더).
+
+### Fix 목록
+
+| # | Test | 문제 (사용자 보고) | Fix |
+|---|---|---|---|
+| 1 | test_110 | 실패한 step 이 ✅ 로 오보고 (v2-새세션-153705). subprocess (cmd.exe) 가 trailing newline 없이 fd1 에 출력 → `kernel_worker` 의 `<<<ERROR>>>` 마커가 그 partial line 과 한 라인으로 합쳐짐 → `execution_kernel` 의 `line == "<<<ERROR>>>"` literal 비교 fail → success 유지 | `core/kernel_worker.py` — `RESULT_SUCCESS` / `RESULT_ERROR` / `PONG_RESP` / 빈 코드 success 4곳 모두 `"\n" + MARKER + "\n"` prefix 로 새 라인 보장 |
+| 2 | test_111 | AI 가 `subprocess.Popen(['cmd.exe'])` 만 생성 — `kernel_worker` 는 콘솔 없는 piped subprocess 라 자식이 부모 stdio 상속 → CMD 윈도우 미생성, banner 만 파이프로 출력 → `Application().connect(title_re='.*명령 프롬프트')` 영원히 못 찾아 TimeoutError | `core/prompt_builder.py` Windows 가이드 — 콘솔 앱 (cmd/powershell/pwsh/wt) 실행 시 `creationflags=subprocess.CREATE_NEW_CONSOLE` 필수 규칙 추가. GUI 앱 (notepad/chrome) 은 불필요 명시 |
+| 3 | test_112 | `AttributeError: 'MainWindowV2' object has no attribute 'settings'` (메모장테스트 step 실행 후). F2 (auto_run hint 토스트) 추가 시 `self.settings` 잘못 사용 — `MainWindowV2` 는 `self.settings` 없음 (항상 `self._load_settings()`). export (line 1588) / F1 (line 2382) 도 같은 버그 복붙 | `ui_v2/main_window_v2.py` 4곳 → `self._load_settings()`. mutate+save 는 `s = self._load_settings(); ...; self._save_settings(s)` |
+| 4 | test_113 | 재생성 (G7-D) 이 새 step 추가 — 같은 user_request 두 개 존재. step1 잘못된 코드면 전체 실행 시 step1 실패 → step2 도달 불가, 또는 작업 2번 시도 (메모장테스트). 사용자 직관: ⚠ 재생성 = "이 step 의 문제 해결" → in-place 대체가 맞음 | `core/app_service.py` `generate_step()` 에 `replaces_step_id` 파라미터 — prev_body 계산 시 그 step skip (자기 코드 prev 인식 회피) + `add_step` 대신 `update_step` 분기 (`execution_result=None` reset 포함) + 반환 step.step_id 보존. `ui_v2/main_window_v2.py` `_send_request` + `_on_regenerate_with_warnings` 가 step_id 전달 |
+| 5 | test_114 | F3 일시정지 (3초) 후 picker 다시 떠도 main window 가 화면에 보임. `_on_elempick` 가 `self.lower()` 만 — Z-order 만 내려가고 가시 영역 잔존, picker overlay 의 transparent 영역으로 노출 | `ui_v2/main_window_v2.py` — v1 패턴 (`ui_inspection_handler.py:46`) 처럼 `showMinimized()`. picked/cancel 시 `showNormal()` 로 복원 |
+| 6 | test_115 | v1 의 step 삭제 기능이 v2 카드에서 누락 (의도 제거 아님 — `wireframes_v2.md` line 110, 123 spec 명시). 또한 ⬆⬇ 버튼이 ✏️ 대비 작고 간격 큼 | `ui_v2/main_window_v2.py` — `StepCardV2.delete_requested = Signal(int)` + 푸터 🗑 버튼 (step_id > 0 만 — Library/Initial 제외) + `MainWindowV2._on_step_delete` (QMessageBox.question confirm → `AppService.delete_step` → 세션 재로드 → `_refresh_step_cards`) + signal 연결. ⬆⬇ → QPushButton + bg_overlay 스타일 통일 (✏️ 와 동일 높이) + footer 기본 spacing (✏️↔🗑 간격과 동일). locale (en+ko) 5쌍 키: `btn_delete` / `btn_delete_tooltip` / `dialog.step_delete_title` / `dialog.step_delete_confirm` / `toast.step_deleted` 외 |
+| 7 | test_116 | step 삭제 후 후속 step 의 `generated_code` 에 삭제된 step 코드 잔존 → 전체 실행 시 실행됨. `generated_code` 는 cumulative (library + 이전 step 누적) 인데 `session_manager.delete_step` 은 session.steps 에서 빼고 step_id 만 renumber, chain 정리 안 함. `reorder_step` 은 이미 같은 fix 됨 (5/5) — `delete_step` 만 누락 | `core/app_service.py` `delete_step()` 을 chain 재구성 패턴으로 교체 (reorder_step 동일): ① 삭제 전 모든 step 의 step_code 사전 추출 (`extract_step_delta_code`, chain 정상 시점) + `manually_edited=True` 마킹 ② 대상 step 제거 ③ 새 순서대로 generated_code 재구성 (library + step_code 누적) ④ renumber + save. test_116 은 in-memory session 으로 runtime 검증 (삭제 후 후속 step gen 에 삭제 코드 0회) |
+
+### 검증 결과 (PySide6 단독 `.venv`)
+- core: **116 passed** / 0 failed (test_110~116 추가)
+- scenarios: 73 passed / 0 failed
+- ruff: commit 전 한 번 더 돌릴 것 (이번 세션에서 미실행)
+
+### 다음 세션 출발점
+
+**A. GUI 핵심기능 테스트 계속** (사용자 직접 — Claude 는 결과 paste 받아 분석/fix 담당. 오늘 모델: 이 워크플로우가 잘 작동했음):
+- 1순위: 다이얼로그/모달 (메모장 Ctrl+S → 저장 다이얼로그 → 파일명 → 덮어쓰기 확인 Y — system_context #18 가이드 실전 검증) / 한글·CJK 텍스트 입력 (`pyautogui.write` silent skip → `pyperclip`+Ctrl+V 분기, #13) / 다중 윈도우 + found_index (#12)
+- 2순위: Excel 셀 자동화 (EFP/owner-drawn, §4.1) / AutoCAD (사용자 도메인 — ohdo 실수익 시나리오, owner-drawn UI 많음)
+- 3순위: 클립보드 cross-app 이동 / 우클릭 컨텍스트 메뉴 / 파일 다운로드 + 후처리
+- 4순위: UWP 계산기 (`wait('ready')` 환각 빈도, #14c) / 단축키 시퀀스 (`'control'` silent skip 환각, #19)
+
+**B. 재생성/삭제 UX 후속** (선택):
+- 재생성/삭제 시 kernel state stale — 기존 step 의 globals 변수 (driver/app 등) 잔존. 큰 영향 시 사용자 수동 kernel restart. 자동 restart 옵션 추가 후보.
+- `manually_edited=True` step 도 재생성으로 덮어씀 — 확인 다이얼로그 추가 후보.
+- `_on_capture` 의 `self.lower()` 도 element picker 와 동일 UX 이슈 가능 — 사용자 보고 시 `showMinimized()` 적용.
+
+**C. AI 환각 대응** (DeepSeek-chat 모델 한계 — Gemini 는 그나마 잘 함):
+- 관찰: title_re 과도한 escape (`r'.*관리자:\ C:\\\\WINDOWS\\\\SYSTEM32\\\\cmd\.exe'`), "이전 스텝에서 import됨" 거짓 단정 → try 안에 import, "지침 숙지...준비됐습니다" 메타-acknowledgment 응답 (메모장테스트 첫 step — 메모장 코드 X, print 한 줄만)
+- 후보: 모델별 prompt template 분기 / Gemini 기본 권장 / `test_ai_integration.py` 에 환각 빈도 정량 가드 / AI 메타-acknowledgment 검출 (ai_description 메타 키워드 + generated_code 가 print 한 줄) 후 ⚠ 표시 (false positive 위험 — "Hello World 출력" 같은 진짜 print 요청 구분 필요)
+
+**D. 원래 로드맵 (핵심기능 무관)**:
+- 저장소 public 공개 — commercial_review.md GO/NO-GO 게이트 #1 측정 시작점
+- ui/ (v1) i18n — dual-locale 완성도 (handoff §19 C-2 plan 은 ui_v2 만 명시 — 별도 sub-task)
+- 영어 catalogue 검토 — Claude 초안 자연스러움 다듬기
+- handoff §7 우선순위 4~10 (baseline UI 스크린샷 / 와이어프레임 / AI prompt 효과 측정 / Phase 0 본격 진입 / SaaS M3.2+ / AI 자동 에러 복구)
+
 ## 9. 자주 하는 실수 / 주의사항
 
 - **`legacy_pyqt6/` 는 freeze 상태**: 5/12 PySide6 메인 전환 이후 PyQt6 코드는 참고용으로 보존. 새 기능 mirror 하지 X. ruff `extend-exclude` 로 lint 대상 제외. 실행 필요 시 `uv sync --extra legacy-pyqt6`.
@@ -1248,6 +1292,12 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
 - **i18n 회귀 가드 한국어 literal sentinel**: `"⏹ 중지" in src` 같은 sentinel 은 i18n 후 fail. tr key 검색으로 갱신 (§21). 새 i18n 작업 시 영향 받는 sentinel 미리 식별.
 - **i18n ruff multi-line 분리**: 인자 많은 tr() 는 multi-line 으로 분리됨. sentinel 은 key string 만 검사 (`'"ui_v2.xxx"'` in src) — 다행히 multi-line 호환.
 - **i18n catalog 누락 시 raw key 노출**: tr() 가 missing key 면 key 자체 반환 → 화면에 `ui_v2.xxx.yyy` 그대로 표시. test_108 으로 강제 — 새 tr() 추가 시 catalog 동시 추가.
+- **step 삭제/이동 시 generated_code chain 재구성** (§22 #7): 각 step 의 `generated_code` 는 cumulative (library + 이전 step 코드 누적). `session_manager.delete_step`/`move_step` 단독 호출은 step_id 만 renumber 하고 chain 정리 안 함 → 삭제/이동된 step 코드 잔존 → 전체 실행 회귀. `app_service.delete_step` / `reorder_step` 의 사전 step_code 추출 + 새 순서 재구성 path 를 거쳐야 함. UI 는 항상 AppService 경유하므로 OK 지만, 새 step 조작 path 추가 시 이 패턴 필수.
+- **ui_v2 MainWindowV2 는 self.settings 없음** (§22 #3): 항상 `self._load_settings()` 로 fresh load. mutate+save 는 `s = self._load_settings(); ...; self._save_settings(s)`. test_112 가 `self.settings` 패턴 0회 강제. (cf. v1 `MainWindow` 은 `self.settings` 보유 — v2 와 다름. SettingsDialog 도 `self.settings` 보유 — 별개)
+- **콘솔 앱 launch 시 CREATE_NEW_CONSOLE** (§22 #2): `kernel_worker` 는 콘솔 없는 piped subprocess. AI 생성 코드가 `subprocess.Popen(['cmd.exe'])` 만 호출하면 자식이 부모 stdio 상속 → 윈도우 미생성. `prompt_builder` Windows 가이드에 규칙 박힘 (test_111). GUI 앱 (notepad/chrome) 은 불필요.
+- **kernel IPC RESULT 마커는 항상 "\n" prefix** (§22 #1): `kernel_worker` 가 `RESULT_SUCCESS`/`RESULT_ERROR`/`PONG_RESP` 쓸 때 `"\n" + MARKER + "\n"`. subprocess 가 trailing newline 없이 fd1 에 남긴 partial line 과 합쳐지면 `execution_kernel` 의 literal 비교 fail → success/error 오분류. test_110.
+- **재생성 (G7-D) 은 in-place 대체** (§22 #4): `generate_step(replaces_step_id=...)` — `add_step` 대신 `update_step`, prev_body 계산 시 그 step skip, step_id 보존. 새 step 추가 X. test_113.
+- **v2 element picker 는 showMinimized** (§22 #5): `_on_elempick` 가 `self.showMinimized()` (not `self.lower()`). picked/cancel 시 `showNormal()`. F3 wait 후 main window 가시 회귀 방지. test_114. (cf. `_on_capture` 는 아직 `self.lower()` — 추후 동일 fix 후보)
 
 ## 10. 사용자에게 빠르게 물어볼 후보
 
