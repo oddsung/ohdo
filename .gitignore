@@ -81,6 +81,16 @@ step?_*.txt
 *.pfx
 *credentials*
 *secret*
+# ADR 0003 (PR-1~10) — 시크릿 처리 소스 코드 모듈은 ignore 예외.
+# 위 `*secret*` / `*credentials*` 는 .env, secrets.json, credentials.json 같은
+# 설정/데이터 파일 차단 의도 — 소스 코드는 commit 되어야 함.
+!core/secrets.py
+!core/secrets_*.py
+!core/windows_credentials.py
+!ui/windows_credentials_*.py
+!ui_v2/secret_*.py
+# ADR/architecture 문서 (파일명에 'secrets' 포함) 도 commit 대상
+!docs/**/*secrets*.md
 # 디버깅·대화 로그 (ohdo 가 generate_step 마다 prompt+code 를 tmp/conversations/ 에 저장)
 tmp/
 

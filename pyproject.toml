@@ -54,6 +54,10 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     # Environment Config
     "python-dotenv>=1.0.0",
+    # Secrets Vault — ADR 0003 Phase 2. cross-platform (Windows Credential Manager /
+    # macOS Keychain / Linux Secret Service). 헤드리스/CI 환경은 Phase 3 의
+    # EncryptedFileVault fallback 으로 처리 예정.
+    "keyring>=24.0.0",
 ]
 
 [project.optional-dependencies]

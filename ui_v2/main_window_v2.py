@@ -872,6 +872,7 @@ class StepCardV2(QFrame):
             "redefined_var": tr("ui_v2.validation.kind_redefined_var"),
             "missing_try": tr("ui_v2.validation.kind_missing_try"),
             "import_misplaced": tr("ui_v2.validation.kind_import_misplaced"),
+            "hardcoded_secret": tr("ui_v2.validation.kind_hardcoded_secret"),
         }
         for idx, w in enumerate(self._validation_warnings, start=1):
             kind = w.get("kind", "?")
@@ -1729,13 +1730,17 @@ class MainWindowV2(QMainWindow):
         input_layout = QVBoxLayout(input_frame)
         input_layout.setContentsMargins(12, 8, 12, 8)
 
-        chip_row = QHBoxLayout()
-        self.chip_area = QLabel("(요소 칩 영역 — 선택 시 표시)")
-        self.chip_area.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        # PR-10c — chip 컨테이너 (이미지/element 별 widget chip).
+        # _refresh_chip_area 가 chip_layout 의 children 교체.
+        self.chip_area = QWidget()
+        self.chip_area.setStyleSheet("background-color: transparent;")
+        chip_h = QHBoxLayout(self.chip_area)
+        chip_h.setContentsMargins(0, 0, 0, 0)
+        chip_h.setSpacing(6)
+        chip_h.addStretch()  # 좌측 정렬
+        self._chip_layout = chip_h
         self.chip_area.hide()
-        chip_row.addWidget(self.chip_area)
-        chip_row.addStretch()
-        input_layout.addLayout(chip_row)
+        input_layout.addWidget(self.chip_area)
 
         input_row = QHBoxLayout()
         # 입력 영역 도구 버튼 — 사용자 보고 (5/5): 기본 transparent 라 안 보임.
@@ -1777,6 +1782,8 @@ class MainWindowV2(QMainWindow):
         self.message_edit.setMaximumHeight(70)
         # Enter / Ctrl+Enter → 전송 (Shift+Enter 는 기본 줄바꿈 유지)
         self.message_edit.send_requested.connect(self._on_send_message)
+        # ADR 0003 PR-9 — '@' 자동완성 hook (옵션 B)
+        self.message_edit.textChanged.connect(self._on_message_text_changed)
         input_row.addWidget(self.message_edit)
 
         # 전송 / 중지 토글 버튼 — _set_send_state 가 텍스트/색상 변환
@@ -2241,6 +2248,56 @@ class MainWindowV2(QMainWindow):
                 tr("ui_v2.dialog.create_session_first"),
             )
             return
+
+        # ADR 0003 PR-10e — 사용자 메시지의 {{el:label}} 검증 + 치환.
+        # 1) 미매핑 라벨 (chip 영역에 그 라벨의 element 없음) → 차단 + 모달
+        # 2) 통과 시 → prompt 에 ``📌 [label]`` 자연어 reference 로 치환
+        from core.element_placeholders import find_unresolved, replace_with_references
+
+        unresolved = find_unresolved(text, list(self._pending_elements))
+        if unresolved:
+            QMessageBox.warning(
+                self,
+                tr("ui_v2.dialog.element_unresolved_title"),
+                tr("ui_v2.dialog.element_unresolved_body").format(
+                    labels=", ".join(f"'{lab}'" for lab in unresolved)
+                ),
+            )
+            return
+        text = replace_with_references(text)
+
+        # ADR 0003 Phase 2-c (PR-4) — 비밀 정보 감지 advisory.
+        # PR-7 — picker 가 잡은 elements 도 같이 전달 → element 가 password field
+        # (HTML type="password" / UIA Edit + password-hint automation_id) 이면
+        # 사용자가 PW 키워드 안 써도 advisory 발동.
+        from ui_v2.secret_advisory_dialog import prepare_outgoing_text
+
+        vault = getattr(self.app_service, "secrets_vault", None)
+        processed_text, new_labels = prepare_outgoing_text(
+            text,
+            vault,
+            parent=self,
+            elements=list(self._pending_elements) if self._pending_elements else None,
+        )
+        if processed_text is None:
+            # 사용자가 취소 — 채팅창은 그대로 두고 종료
+            return
+        text = processed_text
+        if new_labels:
+            self._toast(
+                tr("ui_v2.toast.secret_registered_count").format(count=len(new_labels)),
+                "success",
+            )
+            # ADR 0003 PR-6 — kernel 이 매 execute_block 직전 vault 시크릿을 IPC 로
+            # hot reload 하므로 재시작 불필요. 활성 kernel 들에 즉시 push 도 가능 —
+            # 한 번 더 보장 (다음 실행 전 race 회피).
+            for _kernel in self._kernels.values():
+                try:
+                    _kernel.push_secrets()
+                except Exception:  # noqa: BLE001 — push 실패해도 다음 실행 시 자동 retry
+                    pass
+            self._toast(tr("ui_v2.toast.secret_auto_applied"), "info")
+
         # 요소 컨텍스트가 있으면 user_request 앞에 prefix
         element_prefix = ""
         if self._pending_elements:
@@ -2435,6 +2492,51 @@ class MainWindowV2(QMainWindow):
             )
             self.send_btn.setToolTip(tr("ui_v2.chat.tooltip_send"))
 
+    # ADR 0003 PR-9 + PR-10d — placeholder 삽입 ('@' 자동완성, 시크릿 + element 통합)
+    def _get_secret_popup(self):
+        """lazy 생성 — vault 또는 pending elements 가 있을 때 의미 있음.
+
+        elements_provider 가 self._pending_elements 를 lambda 로 노출 — popup 이
+        매번 fresh 한 chip 라벨 목록 본다.
+        """
+        vault = getattr(self.app_service, "secrets_vault", None)
+        # vault 와 elements 둘 다 없으면 popup 의미 없음 — 그래도 vault 가 None
+        # 이어도 elements 만으로 trigger 되도록 popup 자체는 생성 가능.
+        if not hasattr(self, "_secret_popup") or self._secret_popup is None:
+            from ui_v2.secret_insert_popup import SecretInsertPopup
+
+            self._secret_popup = SecretInsertPopup(
+                vault,
+                self.message_edit,
+                parent=self,
+                elements_provider=lambda: list(self._pending_elements),
+            )
+        return self._secret_popup
+
+    def _on_message_text_changed(self) -> None:
+        """'@' 자동완성 trigger (옵션 B).
+
+        ``@`` 가 공백/줄 시작 뒤에 있고 cursor 가 그 ``@`` 또는 이어진 영문/숫자/_ 영역
+        안이면 popup 열림. 이미 열려있으면 prefix 만 갱신. 영역 벗어나면 닫음.
+        """
+        from ui_v2.secret_insert_popup import find_at_trigger
+
+        popup = self._get_secret_popup()
+        if popup is None:
+            return
+        cursor = self.message_edit.textCursor()
+        text = self.message_edit.toPlainText()
+        trigger = find_at_trigger(text, cursor.position())
+        if trigger is None:
+            if popup.isVisible():
+                popup.hide()
+            return
+        at_pos, prefix = trigger
+        if popup.isVisible():
+            popup.update_filter(prefix)
+        else:
+            popup.open_from_at(at_pos, prefix)
+
     def _on_capture(self) -> None:
         """v1 ScreenCaptureOverlay 재사용 — UI 컴포넌트는 ADR 우회 OK."""
         from ui.screen_capture import ScreenCaptureOverlay
@@ -2587,22 +2689,80 @@ class MainWindowV2(QMainWindow):
         self._log(tr("ui_v2.log.elempick_canceled"))
 
     def _refresh_chip_area(self) -> None:
-        """pending images + elements 를 chip 영역에 텍스트로 표시 (PoC 단순)."""
-        parts = []
+        """pending images + elements 를 chip widget 으로 재구성.
+
+        PR-10c — 각 element chip 에 라벨 (자동 추론) + 클릭 inline edit. element 의
+        ``_ohdo_label`` 키에 라벨 저장 — 채팅 ``{{el:label}}`` 매핑 + popup
+        autocomplete 에서 참조.
+        """
+        from core.element_labels import suggest_element_label
+        from ui_v2.chip_widgets import ElementChip, ImageChip
+
+        # 기존 chip 모두 제거 (마지막 stretch 는 보존)
+        while self._chip_layout.count() > 1:
+            item = self._chip_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        # 이미지 chip (단일 — 개수만 표시)
         if self._pending_images:
-            parts.append(f"📷 {len(self._pending_images)} 이미지")
-        if self._pending_elements:
-            elem_summaries = []
-            for e in self._pending_elements:
-                ctype = e.get("control_type", "?")
-                name = e.get("name", "")[:20]
-                elem_summaries.append(f"[{ctype}]{':' + name if name else ''}")
-            parts.append(f"🎯 {' '.join(elem_summaries)}")
-        if parts:
-            self.chip_area.setText("  |  ".join(parts) + "    (전송 후 자동 비움)")
-            self.chip_area.show()
-        else:
-            self.chip_area.hide()
+            img_chip = ImageChip(len(self._pending_images))
+            img_chip.remove_requested.connect(self._on_chip_images_remove)
+            # stretch 직전 위치 (= 마지막에서 1번째) 에 삽입
+            self._chip_layout.insertWidget(self._chip_layout.count() - 1, img_chip)
+
+        # Element chips — 각각 별도 widget. 라벨 자동 추론 (이미 부여된 라벨 보존).
+        used: set[str] = set()
+        for elem in self._pending_elements:
+            existing = elem.get("_ohdo_label")
+            if not isinstance(existing, str) or not existing:
+                # 자동 추론 — 중복 회피
+                label = suggest_element_label(elem, used_labels=used)
+                elem["_ohdo_label"] = label
+            label = elem["_ohdo_label"]
+            used.add(label)
+
+            chip = ElementChip(
+                label=label,
+                control_type=elem.get("control_type", "?"),
+                name=elem.get("name", "") or "",
+            )
+            chip.label_changed.connect(
+                lambda old, new, _chip=chip: self._on_chip_element_label_changed(_chip, old, new)
+            )
+            chip.remove_requested.connect(lambda _chip=chip: self._on_chip_element_remove(_chip))
+            self._chip_layout.insertWidget(self._chip_layout.count() - 1, chip)
+
+        # 표시 / 숨김
+        any_chips = bool(self._pending_images) or bool(self._pending_elements)
+        self.chip_area.setVisible(any_chips)
+
+    def _on_chip_images_remove(self) -> None:
+        self._pending_images = []
+        self._refresh_chip_area()
+
+    def _on_chip_element_remove(self, chip) -> None:
+        target_label = chip.label
+        self._pending_elements = [
+            e for e in self._pending_elements if e.get("_ohdo_label") != target_label
+        ]
+        self._refresh_chip_area()
+
+    def _on_chip_element_label_changed(self, chip, old_label: str, new_label: str) -> None:
+        # 중복 검사 — 이미 다른 chip 이 사용 중인 라벨이면 거부
+        for e in self._pending_elements:
+            if e.get("_ohdo_label") == new_label and e.get("_ohdo_label") != old_label:
+                # 충돌 — 옛 라벨로 복원 + 토스트
+                chip.set_label(old_label)
+                self._toast(f"라벨 '{new_label}' 이미 사용 중 — 복원됨", "warning")
+                return
+
+        # 매칭되는 element 의 _ohdo_label 갱신
+        for e in self._pending_elements:
+            if e.get("_ohdo_label") == old_label:
+                e["_ohdo_label"] = new_label
+                return
 
     def _on_open_settings(self) -> None:
         """v1 SettingsDialog 재사용. apply 후 새 설정으로 AIEngineManager 재초기화."""
@@ -2610,7 +2770,9 @@ class MainWindowV2(QMainWindow):
 
         settings = self._load_settings()
         prompts = self._load_prompts()
-        dialog = SettingsDialog(settings, prompts, self)
+        # ADR 0003 Phase 2-c — vault 주입 시 "🔒 시크릿" 탭 활성
+        vault = getattr(self.app_service, "secrets_vault", None)
+        dialog = SettingsDialog(settings, prompts, self, secrets_vault=vault)
         if dialog.exec():
             new_settings = dialog.get_settings()
             self._save_settings(new_settings)

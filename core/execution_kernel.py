@@ -13,6 +13,7 @@ Jupyter/Colab 방식과 동일하게 한 번 시작된 Python 프로세스를
   - 스레드 안전 실행 (threading.Lock)
 """
 
+import json
 import logging
 import os
 import queue
@@ -22,7 +23,10 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from core.secrets import SecretsVault
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +64,29 @@ class ExecutionKernel:
     _RESULT_DONE = "<<<DONE>>>"
     _PING = "<<<PING>>>"
     _PONG = "<<<PONG>>>"
+    # ADR 0003 Phase 2-c PR-6 — vault 시크릿 hot reload
+    _SET_SECRETS = "<<<SET_SECRETS>>>"
+    _SECRETS_OK = "<<<SECRETS_OK>>>"
 
-    def __init__(self, python_exe: Optional[str] = None, default_timeout: int = 60):
+    def __init__(
+        self,
+        python_exe: Optional[str] = None,
+        default_timeout: int = 60,
+        *,
+        secrets_vault: Optional["SecretsVault"] = None,
+    ):
         """
         Args:
             python_exe: Python 인터프리터 경로. None이면 현재 실행 중인 Python 사용
             default_timeout: execute_block() 기본 타임아웃(초)
+            secrets_vault: ADR 0003 Phase 2-b — start() 시 vault 의 모든 시크릿을
+                ``OHDO_SECRET_<label>`` 환경변수로 subprocess 에 주입. kernel_worker
+                의 ``get_secret()`` helper 가 그 값을 읽음. None 이면 주입 없음
+                (vault 가 없는 환경 — 평문 박힌 코드는 그대로 실행, AI 가이드만 효과).
         """
         self.python_exe = python_exe or sys.executable
         self.default_timeout = default_timeout
+        self._secrets_vault = secrets_vault
 
         self._proc: Optional[subprocess.Popen] = None
         self._output_queue: queue.Queue = queue.Queue()
@@ -84,6 +102,44 @@ class ExecutionKernel:
     # 생명주기
     # ──────────────────────────────────────
 
+    def _build_subprocess_env(self) -> dict:
+        """kernel_worker subprocess 의 환경변수 dict 구성.
+
+        분리된 메서드 — unit test 가 subprocess 시작 없이 env 내용 검증 가능.
+
+        포함:
+          - 부모 환경 전체 copy
+          - ``PYTHONIOENCODING=utf-8``, ``PYTHONUNBUFFERED=1`` (출력 인코딩 / 실시간성)
+          - ``OHDO_PARENT_PID`` (§4.5 Win11 ForegroundLock 우회 — kernel_worker 가
+            매 step 종료 시 ``AllowSetForegroundWindow(parent_pid)`` 호출)
+          - ``OHDO_SECRET_<label>`` (ADR 0003 Phase 2-b — vault 의 모든 시크릿.
+            kernel_worker 의 ``get_secret()`` helper 가 읽음. vault 미주입이면 생략)
+        """
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUNBUFFERED"] = "1"
+        env["OHDO_PARENT_PID"] = str(os.getpid())
+
+        # ADR 0003 Phase 2-b — vault 의 모든 시크릿을 OHDO_SECRET_<label> 환경변수로
+        # 주입. kernel_worker 의 get_secret() helper 가 그 값을 읽어 step 코드에
+        # 평문 노출 없이 사용. start() 시점에 한 번 주입 — 이후 vault 변경은 다음
+        # kernel restart 까지 미반영 (사용자가 시크릿 추가/변경 시 stop + start 권장).
+        if self._secrets_vault is not None:
+            try:
+                all_labels = self._secrets_vault.list(namespace="secret")
+                secret_env = self._secrets_vault.get_for_env(all_labels)
+                env.update(secret_env)
+                if secret_env:
+                    logger.info(
+                        "ExecutionKernel: vault 시크릿 %d개 환경변수 주입 (%s)",
+                        len(secret_env),
+                        ", ".join(sorted(lab.label for lab in all_labels)),
+                    )
+            except Exception as exc:  # noqa: BLE001 — vault 실패가 kernel 시작 막지 X
+                logger.warning("ExecutionKernel: vault 주입 실패 (skip) — %s", exc)
+
+        return env
+
     def start(self) -> None:
         """커널 프로세스를 시작합니다."""
         if self.is_alive:
@@ -98,15 +154,7 @@ class ExecutionKernel:
         self._reader_thread = None
 
         worker_path = Path(__file__).parent / "kernel_worker.py"
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUNBUFFERED"] = "1"
-        # Win11 ForegroundLock 우회: step 코드가 pyautogui.click/write 같은
-        # SendInput 을 호출하면 Windows 의 SetForegroundWindow 권한이 이 subprocess
-        # 로 이전됨. 이후 ohdo (메인 윈도우) 가 raise/activate 시도하면 거부 →
-        # taskbar flash. kernel_worker 가 매 step 종료 시 AllowSetForegroundWindow
-        # 로 부모 PID 에 권한 양도하면 ohdo 의 다음 activateWindow 가 통과.
-        env["OHDO_PARENT_PID"] = str(os.getpid())
+        env = self._build_subprocess_env()
 
         self._proc = subprocess.Popen(
             [self.python_exe, "-u", str(worker_path)],
@@ -222,6 +270,74 @@ class ExecutionKernel:
     # 코드 블럭 실행
     # ──────────────────────────────────────
 
+    def push_secrets(self, timeout: float = 5.0) -> bool:
+        """ADR 0003 PR-6 — vault 의 현재 시크릿을 kernel_worker 의 os.environ 에
+        IPC 로 hot push. 성공 시 True.
+
+        kernel 시작 후 vault.set / delete 가 발생해도 다음 execute_block 에 즉시
+        반영되도록 함 — kernel 재시작 불필요. 호출자:
+          - ``_execute_locked`` 가 매 블럭 실행 직전 자동 호출 (auto-refresh)
+          - ``AppService.refresh_secrets`` 가 명시 호출 (vault.set 직후 등)
+        """
+        if not self.is_alive or self._secrets_vault is None:
+            return False
+        with self._lock:
+            return self._push_secrets_unlocked(timeout)
+
+    def _push_secrets_unlocked(self, timeout: float = 5.0) -> bool:
+        """Lock 보유 상태에서 vault → kernel_worker IPC push 실행.
+
+        IPC: ``<<<SET_SECRETS>>>\\n<json>\\n<<<EXECUTE_END>>>\\n`` →
+             ``<<<SECRETS_OK>>>\\n<<<DONE>>>\\n``
+        """
+        if self._secrets_vault is None or self._proc is None or self._proc.stdin is None:
+            return False
+
+        try:
+            labels = self._secrets_vault.list(namespace="secret")
+            payload = {lab.label: (self._secrets_vault.get(lab) or "") for lab in labels}
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            self._proc.stdin.write(self._SET_SECRETS + "\n")
+            self._proc.stdin.write(payload_json + "\n")
+            self._proc.stdin.write(self._SENTINEL_END + "\n")
+            self._proc.stdin.flush()
+        except (OSError, ValueError, AttributeError) as exc:
+            logger.warning("push_secrets stdin 쓰기 실패: %s", exc)
+            return False
+        except Exception as exc:  # noqa: BLE001 — vault.list/get 실패 시
+            logger.warning("push_secrets payload 생성 실패: %s", exc)
+            return False
+
+        deadline = time.time() + timeout
+        seen_ok = False
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                logger.warning("push_secrets 응답 timeout (%ss)", timeout)
+                return False
+            try:
+                line = self._output_queue.get(timeout=min(remaining, 1.0))
+            except queue.Empty:
+                continue
+            if line is None:
+                # 프로세스 종료 — 더 이상 IPC 불가
+                return False
+            if line == self._SECRETS_OK:
+                seen_ok = True
+            elif line == self._RESULT_DONE:
+                return seen_ok
+            elif line == self._RESULT_ERROR:
+                # kernel 측 에러 — DONE 까지 마저 읽어 큐 비움
+                while True:
+                    try:
+                        rest = self._output_queue.get(timeout=0.5)
+                    except queue.Empty:
+                        break
+                    if rest is None or rest == self._RESULT_DONE:
+                        break
+                return False
+            # 그 외 라인 (예상 외) 은 silently drop
+
     def execute_block(
         self,
         code: str,
@@ -292,6 +408,15 @@ class ExecutionKernel:
 
         # PING 명령이면 코드 대신 PING 센티넬 전송
         actual_code = self._PING if code.strip() == self._PING else code
+
+        # ADR 0003 PR-6 — vault 가 있으면 매 실행 직전 시크릿 hot push.
+        # kernel 시작 후 vault.set 한 시크릿도 다음 블럭에 즉시 반영됨 (재시작 X).
+        # PING 은 스킵 — health check 만으로 시크릿 동기화 부담 X.
+        if self._secrets_vault is not None and actual_code != self._PING:
+            try:
+                self._push_secrets_unlocked(timeout=5.0)
+            except Exception as exc:  # noqa: BLE001 — push 실패해도 실행 진행
+                logger.warning("auto push_secrets 실패 (실행 계속): %s", exc)
 
         try:
             # stdin으로 코드 전송

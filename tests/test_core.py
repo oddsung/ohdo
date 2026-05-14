@@ -15,6 +15,7 @@ GUI나 Windows 환경 없이도 실행 가능한 순수 로직 테스트:
 """
 
 import json
+import os
 import sys
 import tempfile
 from dataclasses import asdict
@@ -1880,12 +1881,21 @@ if __name__ == "__main__":
 
         from core.execution_kernel import ExecutionKernel
 
-        # ExecutionKernel.start 가 OHDO_PARENT_PID 환경변수에 os.getpid() 전달
+        # ExecutionKernel 의 env 구성 path 에 OHDO_PARENT_PID + os.getpid() 보존.
+        # 2026-05-13 (ADR 0003 Phase 2-b): env 구성이 start() 안에서 _build_subprocess_env
+        # 메서드로 추출됨. 둘 중 한 곳에 패턴이 있으면 contract 유지로 본다.
         start_src = inspect.getsource(ExecutionKernel.start)
+        env_src = (
+            inspect.getsource(ExecutionKernel._build_subprocess_env)
+            if hasattr(ExecutionKernel, "_build_subprocess_env")
+            else ""
+        )
+        combined_src = start_src + "\n" + env_src
         self.assert_true(
-            "OHDO_PARENT_PID" in start_src and "getpid()" in start_src,
-            "[회귀] ExecutionKernel.start 가 env['OHDO_PARENT_PID'] = "
-            "str(os.getpid()) 로 부모 PID 전달 필수 (kernel_worker 가 권한 양도용)",
+            "OHDO_PARENT_PID" in combined_src and "getpid()" in combined_src,
+            "[회귀] ExecutionKernel.start 또는 _build_subprocess_env 가 "
+            "env['OHDO_PARENT_PID'] = str(os.getpid()) 로 부모 PID 전달 필수 "
+            "(kernel_worker 가 권한 양도용)",
         )
 
         # kernel_worker.py 가 step 실행 후 AllowSetForegroundWindow 호출
@@ -5362,6 +5372,1671 @@ if __name__ == "__main__":
                 f"앞에 '\\n' prefix 필수 (subprocess partial line 분리). "
                 f"패턴: '{pattern}'",
             )
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 1 — 시크릿 처리 (test_117 ~ test_121)
+    # ──────────────────────────────────────────
+
+    def test_117_secrets_detector_known_patterns(self):
+        """[ADR 0003 Phase 1] secrets_detector.detect 가 명시 토큰 패턴 매칭.
+
+        JWT / AWS / GitHub PAT / OpenAI / Anthropic / Google API / Slack — 각각
+        대표 샘플 1개씩. confidence 0.85+ + kind 정확.
+        """
+        from core.secrets_detector import detect
+
+        samples = {
+            "jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+            "aws_key": "AKIAIOSFODNN7EXAMPLE",
+            "github_pat": "ghp_" + "x" * 36,
+            "openai_key": "sk-" + "A" * 40,
+            "anthropic_key": "sk-ant-" + "x" * 50,
+            "google_api_key": "AIza" + "x" * 35,
+            "slack_token": "xoxb-" + "1" * 20,
+        }
+        for expected_kind, sample in samples.items():
+            self.step(f"detect — {expected_kind}")
+            matches = detect(sample)
+            self.assert_true(
+                any(m.kind == expected_kind and m.confidence >= 0.85 for m in matches),
+                f"[ADR 0003] '{expected_kind}' 샘플 매칭 필수: {sample[:20]}... "
+                f"실제 matches: {[(m.kind, m.confidence) for m in matches]}",
+            )
+
+    def test_118_secrets_detector_false_positive_guard(self):
+        """[ADR 0003 Phase 1] 평범한 한국어 / 영어 문장은 password 매칭 안 됨.
+
+        false-positive 비용 — 사용자가 일반 대화에 "비밀번호" 단어를 언급해도
+        값 부분이 없거나 placeholder 같으면 detect 가 무시해야 함.
+        """
+        from core.secrets_detector import detect
+
+        safe_inputs = [
+            "비밀번호를 까먹었어요. 어떻게 해야 하나요?",
+            "Forgot your password? Try the recovery option.",
+            "password: TODO",  # placeholder 값
+            "pw: none",  # placeholder
+            "그 변수 이름은 password_hash 야",  # 변수명 언급
+        ]
+        for text in safe_inputs:
+            self.step(f"FP guard — {text[:30]}")
+            matches = detect(text)
+            # password_hint 매칭은 0 이어야 함 (high_entropy 는 별도 — 짧아서 안 잡힘)
+            password_matches = [m for m in matches if m.kind == "password_hint"]
+            self.assert_true(
+                len(password_matches) == 0,
+                f"[ADR 0003] 평범한 문장 false-positive: '{text}' → "
+                f"password_hint matches: {password_matches}",
+            )
+
+    def test_119_secrets_detector_entropy_threshold(self):
+        """[ADR 0003 Phase 1] high_entropy 매칭은 임계 이상만 + identifier 스킵.
+
+        - 길이 20+ 의 'aaaa...' 같은 낮은 엔트로피 → skip
+        - 길이 20+ 의 random hex 같은 높은 엔트로피 → match
+        - 길이 20+ 이지만 식별자처럼 보이는 이름 (this_is_a_variable_name) → skip
+        """
+        from core.secrets_detector import detect
+
+        self.step("낮은 엔트로피 — skip")
+        matches = detect("a" * 30)  # 엔트로피 = 0
+        he = [m for m in matches if m.kind == "high_entropy"]
+        self.assert_true(len(he) == 0, f"[ADR 0003] 낮은 엔트로피 skip 필수: {he}")
+
+        self.step("식별자처럼 보이는 영어 단어 시퀀스 — skip")
+        matches = detect("this_is_a_python_variable_name_that_is_long")
+        he = [m for m in matches if m.kind == "high_entropy"]
+        self.assert_true(
+            len(he) == 0,
+            f"[ADR 0003] 식별자 false-positive skip 필수: {he}",
+        )
+
+        self.step("높은 엔트로피 random 토큰 — match")
+        # 무작위 분포 + 특수문자 mix → identifier 검사 통과
+        random_token = "Xq7-vR2/pM9+yB4_zN6=tK8aH3wE1uC5"
+        matches = detect(random_token)
+        he = [m for m in matches if m.kind == "high_entropy"]
+        self.assert_true(
+            len(he) >= 1,
+            f"[ADR 0003] 높은 엔트로피 토큰 match 필수: {random_token} → {matches}",
+        )
+
+    def test_120_prompts_system_context_has_secret_rule(self):
+        """[ADR 0003 Phase 1] system_context 에 규칙 #21 + #8 단서 박힘.
+
+        AI 가 `{{secret:label}}` placeholder 를 평문 박지 않고 `get_secret()` 로
+        참조하도록 prompt 에서 명시. 회귀 시 AI 가 평문 박는 환각 재발.
+        """
+        import json as _json
+
+        prompts_path = Path(__file__).parent.parent / "config" / "prompts.json"
+        cfg = _json.loads(prompts_path.read_text(encoding="utf-8"))
+        ctx = cfg["system_context"]
+
+        self.step("규칙 #21 키워드")
+        self.assert_true(
+            "{{secret:" in ctx,
+            "[ADR 0003] system_context 에 '{{secret:' placeholder 패턴 명시 필수",
+        )
+        self.assert_true(
+            "get_secret" in ctx,
+            "[ADR 0003] system_context 에 'get_secret' helper 사용 패턴 명시 필수",
+        )
+        self.assert_true(
+            "ADR 0003" in ctx,
+            "[ADR 0003] system_context 가 ADR 0003 reference 필수 (추적성)",
+        )
+
+        self.step("규칙 #8 단서")
+        self.assert_true(
+            "규칙 #21 적용" in ctx,
+            "[ADR 0003] 규칙 #8 (사용자 입력값 보존) 에 #21 단서 추가 필수",
+        )
+
+    def test_121_code_validator_emits_hardcoded_secret_warning(self):
+        """[ADR 0003 Phase 1 C2] AI 가 평문 시크릿 박은 코드는 hardcoded_secret warning.
+
+        - 평문 JWT / AWS / OpenAI key 가 문자열 리터럴에 박힌 코드 → warning 발행
+        - placeholder ({{secret:label}}) 만 들어있는 코드 → warning 없음
+        - 일반 문자열 ("hello world") → warning 없음
+        """
+        from core.code_validator import validate_step_code
+
+        self.step("평문 AWS key — warning 필수")
+        code_with_aws = (
+            "try:\n"
+            '    aws_secret = "AKIAIOSFODNN7EXAMPLE"\n'
+            "    print(aws_secret)\n"
+            "except Exception as e:\n"
+            "    print(e)\n"
+        )
+        result = validate_step_code(code_with_aws)
+        secret_issues = result.by_kind("hardcoded_secret")
+        self.assert_true(
+            len(secret_issues) >= 1,
+            f"[ADR 0003 C2] 평문 AWS key → hardcoded_secret warning 필수. "
+            f"실제 issues: {[i.kind for i in result.issues]}",
+        )
+        self.assert_true(
+            "aws_key" in secret_issues[0].message,
+            f"[ADR 0003 C2] warning message 에 'aws_key' kind 명시 필수: "
+            f"{secret_issues[0].message}",
+        )
+
+        self.step("평문 OpenAI key — warning 필수")
+        code_with_openai = (
+            "try:\n"
+            '    api_key = "sk-' + "A" * 40 + '"\n'
+            "    print(api_key)\n"
+            "except Exception as e:\n"
+            "    print(e)\n"
+        )
+        result = validate_step_code(code_with_openai)
+        self.assert_true(
+            len(result.by_kind("hardcoded_secret")) >= 1,
+            "[ADR 0003 C2] 평문 OpenAI key → hardcoded_secret warning 필수",
+        )
+
+        self.step("placeholder 만 — warning 없음")
+        code_with_placeholder = (
+            "try:\n"
+            '    pw = get_secret("gmail_pw")\n'
+            "    pyautogui.write(pw)\n"
+            "except Exception as e:\n"
+            "    print(e)\n"
+        )
+        result = validate_step_code(code_with_placeholder)
+        self.assert_true(
+            len(result.by_kind("hardcoded_secret")) == 0,
+            f"[ADR 0003 C2] get_secret 패턴 코드는 false-positive 0 필수. "
+            f"실제: {[i.message for i in result.by_kind('hardcoded_secret')]}",
+        )
+
+        self.step("일반 문자열 — warning 없음")
+        code_plain = (
+            "try:\n"
+            '    print("hello world")\n'
+            '    name = "ohdo"\n'
+            "except Exception as e:\n"
+            "    print(e)\n"
+        )
+        result = validate_step_code(code_plain)
+        self.assert_true(
+            len(result.by_kind("hardcoded_secret")) == 0,
+            "[ADR 0003 C2] 일반 문자열은 false-positive 0 필수",
+        )
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-a — Vault + Redact (test_122 ~ test_124)
+    # ──────────────────────────────────────────
+
+    def test_122_keyring_vault_roundtrip(self):
+        """[ADR 0003 Phase 2-a] KeyringVault set / get / list / delete round-trip.
+
+        실제 OS keyring (Windows Credential Manager / macOS Keychain) 에 unique
+        service_name 으로 쓰고 finally 에서 정리 — 사용자 keyring 오염 X.
+        인덱스 파일도 임시 디렉토리.
+        """
+        import uuid
+
+        from core.secrets import KeyringVault, SecretLabel
+
+        # 충돌 방지용 unique service_name (test 동시 실행 / 재실행에도 안전)
+        service_name = f"ohdo.test.pr2.{uuid.uuid4().hex[:8]}"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_path = Path(tmpdir) / "vault_index.json"
+            vault = KeyringVault(index_path=index_path, service_name=service_name)
+
+            lab_pw = SecretLabel(label="gmail_pw")
+            lab_api = SecretLabel(label="openai", namespace="apikey")
+
+            try:
+                self.step("초기 상태 — list 비어있음 / get None")
+                self.assert_equal(vault.list(), [])
+                self.assert_equal(vault.list(namespace="apikey"), [])
+                self.assert_true(vault.get(lab_pw) is None)
+
+                self.step("set → get round-trip")
+                vault.set(lab_pw, "MyP@ss!2026")
+                vault.set(lab_api, "sk-test-aaaa")
+                self.assert_equal(vault.get(lab_pw), "MyP@ss!2026")
+                self.assert_equal(vault.get(lab_api), "sk-test-aaaa")
+
+                self.step("list — namespace 별로 분리")
+                secret_list = vault.list(namespace="secret")
+                apikey_list = vault.list(namespace="apikey")
+                self.assert_equal(len(secret_list), 1)
+                self.assert_equal(secret_list[0].label, "gmail_pw")
+                self.assert_equal(secret_list[0].namespace, "secret")
+                self.assert_equal(len(apikey_list), 1)
+                self.assert_equal(apikey_list[0].label, "openai")
+                self.assert_equal(apikey_list[0].namespace, "apikey")
+
+                self.step("overwrite — set 두 번째 호출은 값 교체")
+                vault.set(lab_pw, "NewPass!")
+                self.assert_equal(vault.get(lab_pw), "NewPass!")
+                # list 중복 X — 같은 label 은 인덱스에 1회만
+                self.assert_equal(len(vault.list()), 1)
+
+                self.step("get_for_env — runtime 주입 환경변수 매핑")
+                env = vault.get_for_env([lab_pw, lab_api])
+                self.assert_equal(env.get("OHDO_SECRET_gmail_pw"), "NewPass!")
+                self.assert_equal(env.get("OHDO_SECRET_openai"), "sk-test-aaaa")
+
+                self.step("delete → get None, list 에서 빠짐")
+                self.assert_true(vault.delete(lab_pw))
+                self.assert_true(vault.get(lab_pw) is None)
+                self.assert_equal(vault.list(), [])
+
+                self.step("이미 삭제된 label 재삭제 — False (raise 안 됨)")
+                self.assert_true(vault.delete(lab_pw) is False)
+
+                self.step("인덱스 파일 — keyring 값 X (값은 인덱스에 저장 안 됨)")
+                index_content = index_path.read_text(encoding="utf-8")
+                self.assert_true("sk-test-aaaa" not in index_content)
+                self.assert_true("NewPass" not in index_content)
+                self.assert_true("MyP@ss" not in index_content)
+
+            finally:
+                # cleanup — keyring 잔여 정리 (실패해도 무시)
+                for lab in (lab_pw, lab_api):
+                    try:
+                        vault.delete(lab)
+                    except Exception:
+                        pass
+
+        self.step("SecretLabel 검증")
+        # 잘못된 label 패턴
+        for bad in ("UpperCase", "with-dash", "with.dot", "with space", "", "a" * 33):
+            raised = False
+            try:
+                SecretLabel(label=bad)
+            except ValueError:
+                raised = True
+            self.assert_true(
+                raised,
+                f"[ADR 0003] 잘못된 label '{bad}' 은 ValueError 필수",
+            )
+        # 잘못된 namespace
+        raised = False
+        try:
+            SecretLabel(label="ok", namespace="something_else")
+        except ValueError:
+            raised = True
+        self.assert_true(raised, "[ADR 0003] 잘못된 namespace 는 ValueError 필수")
+
+    def test_123_redact_to_placeholder_preserves_spans(self):
+        """[ADR 0003 Phase 2-a] to_placeholder_text 가 여러 span 을 역순 처리.
+
+        앞 span 치환이 뒤 span 의 인덱스를 흐트러뜨리지 않도록 뒤에서부터 치환.
+        """
+        from core.secrets_redact import (
+            format_placeholder,
+            has_placeholders,
+            to_placeholder_text,
+        )
+
+        self.step("단일 span 치환")
+        text = "로그인 ID me@x.com PW MyP@ss!2026 로 접속해줘"
+        # PW 값 위치
+        start = text.index("MyP@ss!2026")
+        end = start + len("MyP@ss!2026")
+        out = to_placeholder_text(text, [((start, end), "gmail_pw")])
+        self.assert_true("MyP@ss" not in out, f"평문 값 잔존 X 필수: {out}")
+        self.assert_true("{{secret:gmail_pw}}" in out, f"placeholder 박힘 필수: {out}")
+
+        self.step("다중 span 치환 (역순 처리 — 앞 치환이 뒤 인덱스 흐트러뜨림 X)")
+        text2 = "ID abc@x.com PW pass1234 토큰 ghp_xyzaaaaaa"
+
+        def _span_of(needle: str) -> tuple[int, int]:
+            i = text2.index(needle)
+            return (i, i + len(needle))
+
+        spans = [
+            (_span_of("abc@x.com"), "gmail_id"),
+            (_span_of("pass1234"), "gmail_pw"),
+            (_span_of("ghp_xyzaaaaaa"), "github_pat_token"),
+        ]
+        out = to_placeholder_text(text2, spans)
+        for original in ("abc@x.com", "pass1234", "ghp_xyzaaaaaa"):
+            self.assert_true(original not in out, f"평문 '{original}' 잔존 X 필수: {out}")
+        for label in ("gmail_id", "gmail_pw", "github_pat_token"):
+            self.assert_true(
+                format_placeholder(label) in out,
+                f"placeholder '{label}' 박힘 필수: {out}",
+            )
+
+        self.step("빈 입력 / 빈 span — 원문 그대로")
+        self.assert_equal(to_placeholder_text("", []), "")
+        self.assert_equal(to_placeholder_text("hello", []), "hello")
+
+        self.step("has_placeholders")
+        self.assert_true(has_placeholders("값: {{secret:gmail_pw}}"))
+        self.assert_true(not has_placeholders("값: plaintext"))
+        self.assert_true(not has_placeholders(""))
+
+        self.step("겹친 span 은 ValueError — 호출자 실수 사전 catch")
+        raised = False
+        try:
+            to_placeholder_text("hello world", [((0, 5), "a"), ((3, 8), "b")])
+        except ValueError:
+            raised = True
+        self.assert_true(raised, "겹친 span 은 ValueError 발생 필수")
+
+        self.step("잘못된 label 은 ValueError")
+        raised = False
+        try:
+            to_placeholder_text("hello", [((0, 5), "Has-Dash")])
+        except ValueError:
+            raised = True
+        self.assert_true(raised, "잘못된 label 패턴은 ValueError 발생 필수")
+
+    def test_124_redact_extract_labels_dedupes_in_order(self):
+        """[ADR 0003 Phase 2-a] extract_labels 가 등장 순 + 중복 제거.
+
+        같은 placeholder 가 여러 번 나와도 1회만 반환 (등장 순서 보존).
+        runtime D1 의 env 주입에서 같은 시크릿 중복 lookup 회피.
+        """
+        from core.secrets_redact import extract_labels
+
+        self.step("기본 — 등장 순서 보존")
+        code = (
+            "pw = get_secret('gmail_pw')\n"
+            "tok = get_secret('github_pat_token')\n"
+            "# {{secret:gmail_pw}} 는 위에서 한 번 더 등장한 셈\n"
+            'login(user="{{secret:gmail_id}}", pw="{{secret:gmail_pw}}")\n'
+        )
+        labels = extract_labels(code)
+        labels_only = [lab.label for lab in labels]
+        # 등장 순서 (placeholder 기준): gmail_pw, gmail_id (gmail_pw 는 중복)
+        # 첫 번째 placeholder 는 라인 3 의 `{{secret:gmail_pw}}` — 그게 0번째
+        self.assert_equal(
+            labels_only,
+            ["gmail_pw", "gmail_id"],
+            f"등장 순서 + 중복 제거 실패: {labels_only}",
+        )
+        # 모두 namespace='secret' default
+        for lab in labels:
+            self.assert_equal(lab.namespace, "secret")
+
+        self.step("namespace override")
+        labels_api = extract_labels("url = '{{secret:openai}}/v1'", namespace="apikey")
+        self.assert_equal(len(labels_api), 1)
+        self.assert_equal(labels_api[0].label, "openai")
+        self.assert_equal(labels_api[0].namespace, "apikey")
+
+        self.step("빈 입력 / placeholder 없음 — 빈 리스트")
+        self.assert_equal(extract_labels(""), [])
+        self.assert_equal(extract_labels("일반 문장 placeholder 없음"), [])
+
+        self.step("잘못된 label 패턴은 매칭 안 됨")
+        # 대문자 / 점 / 너무 긴 라벨은 정규식이 매칭하지 않으므로 skip
+        out = extract_labels("{{secret:UpperCase}} {{secret:with.dot}} {{secret:" + "a" * 33 + "}}")
+        self.assert_equal(out, [], f"잘못된 label 은 무시되어야 함: {out}")
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-b — AppService / Kernel 통합 (test_125 ~ test_130)
+    # ──────────────────────────────────────────
+
+    def test_125_generate_step_preserves_placeholder_to_ai(self):
+        """[ADR 0003 Phase 2-b] generate_step 이 placeholder 를 AI prompt 에 보존.
+
+        user_request 에 ``{{secret:gmail_pw}}`` 가 들어있으면 AI 에 그대로 전달.
+        AI 가 system_context #21 가이드로 ``get_secret()`` 패턴 코드 생성.
+        평문 vault 값은 prompt 어디에도 들어가지 않음 (vault lookup 미발생).
+        """
+        import asyncio
+
+        from core.adapters.base_adapter import AIResponse
+        from core.app_service import AppService
+        from core.storage.local_json import LocalJsonRepository
+
+        class _CapturingAI:
+            def __init__(self):
+                self.last_user_text = None
+                self.last_system_text = None
+
+            async def generate(self, prompt, images=None, system=None):
+                self.last_user_text = prompt
+                self.last_system_text = system
+                return AIResponse(
+                    text="",
+                    code='pw = get_secret("gmail_pw")\nprint("ok")',
+                    description="placeholder 코드 생성",
+                    packages=[],
+                    raw_response="",
+                    tokens_used=10,
+                    response_time_ms=50,
+                    success=True,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalJsonRepository(data_dir=Path(tmp))
+            ai = _CapturingAI()
+            # vault 미주입 — placeholder 통과는 vault 의존 X
+            svc = AppService(session_repo=repo, ai_manager=ai)
+            session = svc.create_session(title="placeholder test")
+
+            self.step("placeholder 포함 user_request 전송")
+            user_req = "로그인 후 PW {{secret:gmail_pw}} 입력해줘"
+            asyncio.run(svc.generate_step(session, user_req))
+
+            self.assert_true(
+                "{{secret:gmail_pw}}" in (ai.last_user_text or ""),
+                f"[ADR 0003 Phase 2-b] placeholder 가 AI prompt 에 보존 필수. "
+                f"실제 prompt 일부: {(ai.last_user_text or '')[:200]}",
+            )
+
+    def test_126_generate_step_no_plaintext_to_ai_when_placeholder_used(self):
+        """[ADR 0003 Phase 2-b] vault 에 평문 등록되어 있어도 AI 에 평문 0건.
+
+        vault 등록 → 사용자가 placeholder 로 메시지 보냄 → AI 호출 시 prompt 에
+        등록된 vault 값 (평문) 은 절대 등장 X. 핵심 보안 contract.
+        """
+        import asyncio
+        import uuid
+
+        from core.adapters.base_adapter import AIResponse
+        from core.app_service import AppService
+        from core.secrets import KeyringVault, SecretLabel
+        from core.storage.local_json import LocalJsonRepository
+
+        secret_value = "RealPassword!" + uuid.uuid4().hex[:8]
+        service_name = f"ohdo.test.pr3.{uuid.uuid4().hex[:8]}"
+
+        class _CapturingAI:
+            def __init__(self):
+                self.last_user_text = None
+                self.last_system_text = None
+
+            async def generate(self, prompt, images=None, system=None):
+                self.last_user_text = prompt
+                self.last_system_text = system
+                return AIResponse(
+                    text="",
+                    code='print("ok")',
+                    description="x",
+                    packages=[],
+                    raw_response="",
+                    tokens_used=1,
+                    response_time_ms=1,
+                    success=True,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalJsonRepository(data_dir=Path(tmp))
+            vault = KeyringVault(
+                index_path=Path(tmp) / "vault_index.json",
+                service_name=service_name,
+            )
+            lab = SecretLabel(label="gmail_pw")
+            try:
+                vault.set(lab, secret_value)
+
+                ai = _CapturingAI()
+                svc = AppService(session_repo=repo, ai_manager=ai, secrets_vault=vault)
+                session = svc.create_session(title="no plaintext test")
+
+                self.step("placeholder 메시지 → vault 값은 AI 에 안 감")
+                asyncio.run(svc.generate_step(session, "PW {{secret:gmail_pw}} 사용해줘"))
+
+                prompt = ai.last_user_text or ""
+                system = ai.last_system_text or ""
+                self.assert_true(
+                    secret_value not in prompt,
+                    f"[ADR 0003 Phase 2-b] vault 평문값 '{secret_value[:8]}...' 이 "
+                    f"AI prompt (user) 에 들어가면 안 됨",
+                )
+                self.assert_true(
+                    secret_value not in system,
+                    "[ADR 0003 Phase 2-b] vault 평문값이 AI prompt (system) 에 들어가면 안 됨",
+                )
+            finally:
+                vault.delete(lab)
+
+    def test_127_session_saves_placeholder_not_plaintext(self):
+        """[ADR 0003 Phase 2-b B3] 세션 JSON 저장 시 placeholder 만 보존.
+
+        user_request 와 generated_code 가 placeholder 인 채로 저장되어, 디스크에
+        평문 시크릿 잔존 X. reload 후에도 placeholder 유지.
+        """
+        import asyncio
+
+        from core.adapters.base_adapter import AIResponse
+        from core.app_service import AppService
+        from core.storage.local_json import LocalJsonRepository
+
+        class _FakeAI:
+            async def generate(self, prompt, images=None, system=None):
+                return AIResponse(
+                    text="",
+                    code='pw = get_secret("gmail_pw")\nprint(len(pw))',
+                    description="placeholder 사용 코드",
+                    packages=[],
+                    raw_response="",
+                    tokens_used=1,
+                    response_time_ms=1,
+                    success=True,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalJsonRepository(data_dir=Path(tmp))
+            svc = AppService(session_repo=repo, ai_manager=_FakeAI())
+            session = svc.create_session(title="placeholder saved test")
+
+            self.step("generate_step 호출")
+            user_req = "PW {{secret:gmail_pw}} 사용"
+            step, _ = asyncio.run(svc.generate_step(session, user_req))
+            self.assert_true(step is not None)
+
+            self.step("디스크 JSON 직접 읽어 placeholder 유지 확인")
+            # SessionManager 규칙: {data_dir}/sessions/{session_id}/session.json
+            session_file = Path(tmp) / "sessions" / session.session_id / "session.json"
+            self.assert_true(
+                session_file.exists(), f"session 파일 디스크 저장 필수: {session_file}"
+            )
+            disk_text = session_file.read_text(encoding="utf-8")
+            self.assert_true(
+                "{{secret:gmail_pw}}" in disk_text,
+                f"[ADR 0003 Phase 2-b B3] 세션 JSON 에 placeholder 보존 필수. 파일: {session_file}",
+            )
+
+            self.step("reload 시 placeholder 유지")
+            reloaded = svc.get_session(session.session_id)
+            self.assert_equal(len(reloaded.steps), 1)
+            saved = reloaded.steps[0]
+            self.assert_true(
+                "{{secret:gmail_pw}}" in saved.get("user_request", ""),
+                f"[ADR 0003 Phase 2-b B3] reload 후 user_request placeholder 유지 필수. "
+                f"실제: {saved.get('user_request')!r}",
+            )
+            # generated_code 는 AI 가 placeholder 대신 get_secret('label') 패턴 생성 —
+            # B3 의 핵심은 user_request 에 평문 미잔존 + generated_code 에도 vault 평문값
+            # 절대 미잔존. AI 가 반환한 코드 그대로 보존되는지만 확인.
+            self.assert_true(
+                "get_secret" in saved.get("generated_code", "")
+                and "gmail_pw" in saved.get("generated_code", ""),
+                f"[ADR 0003 Phase 2-b B3] reload 후 generated_code 에 get_secret('gmail_pw') "
+                f"패턴 보존 필수. 실제: {saved.get('generated_code')!r}",
+            )
+
+    def test_128_execution_kernel_injects_vault_env(self):
+        """[ADR 0003 Phase 2-b D1] ExecutionKernel._build_subprocess_env 가 vault
+        시크릿을 ``OHDO_SECRET_<label>`` 환경변수로 주입 + 기존 ``OHDO_PARENT_PID``
+        보존.
+        """
+        import uuid
+
+        from core.execution_kernel import ExecutionKernel
+        from core.secrets import KeyringVault, SecretLabel
+
+        service_name = f"ohdo.test.pr3.{uuid.uuid4().hex[:8]}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = KeyringVault(
+                index_path=Path(tmp) / "vault_index.json",
+                service_name=service_name,
+            )
+            lab = SecretLabel(label="gmail_pw")
+            lab2 = SecretLabel(label="github_pat_token")
+            try:
+                vault.set(lab, "secret_value_1")
+                vault.set(lab2, "secret_value_2")
+
+                self.step("vault 주입 — env 에 OHDO_SECRET_* 들어감")
+                kernel = ExecutionKernel(secrets_vault=vault)
+                env = kernel._build_subprocess_env()
+                self.assert_equal(env.get("OHDO_SECRET_gmail_pw"), "secret_value_1")
+                self.assert_equal(env.get("OHDO_SECRET_github_pat_token"), "secret_value_2")
+                self.assert_true(
+                    "OHDO_PARENT_PID" in env,
+                    "[§4.5] OHDO_PARENT_PID 보존 (vault 주입이 기존 fix 깨면 안 됨)",
+                )
+                self.assert_equal(env.get("PYTHONIOENCODING"), "utf-8")
+                self.assert_equal(env.get("PYTHONUNBUFFERED"), "1")
+
+                self.step("vault 미주입 — OHDO_SECRET_* 없음")
+                kernel_no_vault = ExecutionKernel()
+                env2 = kernel_no_vault._build_subprocess_env()
+                secret_keys = [k for k in env2 if k.startswith("OHDO_SECRET_")]
+                self.assert_equal(
+                    secret_keys,
+                    [],
+                    f"vault 미주입 시 OHDO_SECRET_* 없어야 함. 실제: {secret_keys}",
+                )
+                # 기존 path 회귀 X
+                self.assert_true("OHDO_PARENT_PID" in env2)
+            finally:
+                vault.delete(lab)
+                vault.delete(lab2)
+
+    def test_129_kernel_worker_has_get_secret_helper(self):
+        """[ADR 0003 Phase 2-b D1] kernel_worker.py 가 get_secret() helper 주입.
+
+        - helper 함수 ``_get_secret`` 정의 존재
+        - globals 에 ``get_secret`` 키로 등록 (AI 생성 코드가 import 없이 호출 가능)
+        - 환경변수 미존재 시 RuntimeError + 사용자 안내 메시지
+        """
+        worker_path = Path(__file__).parent.parent / "core" / "kernel_worker.py"
+        src = worker_path.read_text(encoding="utf-8")
+
+        self.step("helper 함수 정의 + globals 등록")
+        self.assert_true(
+            "def _get_secret(" in src,
+            "[ADR 0003 D1] kernel_worker 에 _get_secret 함수 정의 필수",
+        )
+        self.assert_true(
+            '_globals["get_secret"]' in src or "_globals['get_secret']" in src,
+            "[ADR 0003 D1] _globals['get_secret'] 등록 필수 (AI 코드가 import 없이 호출)",
+        )
+        self.assert_true(
+            "OHDO_SECRET_" in src,
+            "[ADR 0003 D1] OHDO_SECRET_<label> 환경변수 prefix 사용 필수",
+        )
+
+        self.step("runtime — 환경변수 set → get_secret 호출 → 값 반환")
+        from core import kernel_worker
+
+        os.environ["OHDO_SECRET_test_pr3_label"] = "runtime_value"
+        try:
+            val = kernel_worker._get_secret("test_pr3_label")
+            self.assert_equal(val, "runtime_value")
+        finally:
+            del os.environ["OHDO_SECRET_test_pr3_label"]
+
+    def test_130_get_secret_raises_runtime_error_on_missing(self):
+        """[ADR 0003 Phase 2-b D1] get_secret 미존재 label 은 RuntimeError +
+        사용자 안내 메시지 (Settings 어디서 등록할지).
+        """
+        from core import kernel_worker
+
+        # 보장 — 환경에 절대 없을 unique label
+        missing_label = "absent_label_" + os.urandom(4).hex()
+        env_key = f"OHDO_SECRET_{missing_label}"
+        # 안전망 — 혹시라도 set 되어있으면 제거
+        os.environ.pop(env_key, None)
+
+        self.step("미존재 label → RuntimeError")
+        raised_err = None
+        try:
+            kernel_worker._get_secret(missing_label)
+        except RuntimeError as e:
+            raised_err = e
+
+        self.assert_true(
+            raised_err is not None,
+            "[ADR 0003 D1] 미존재 label 은 RuntimeError 발생 필수",
+        )
+        msg = str(raised_err)
+        self.assert_true(
+            missing_label in msg,
+            f"[ADR 0003 D1] 에러 메시지에 label 명시 필수: {msg}",
+        )
+        self.assert_true(
+            "Settings" in msg or "시크릿" in msg,
+            f"[ADR 0003 D1] 사용자 안내 (Settings/시크릿) 필수: {msg}",
+        )
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-c — UI 통합 (test_131)
+    # ──────────────────────────────────────────
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-c PR-5 — Detector 패턴 보강 (test_132 ~ test_133)
+    # ──────────────────────────────────────────
+
+    def test_132_detector_catches_quoted_password_in_rpa_input(self):
+        """[ADR 0003 PR-5] detector 가 따옴표 안 PW-look-alike 값을 잡음.
+
+        사용자 보고 (2026-05-14 'v2-새세션-083149' 세션):
+            ohdo 가 채팅 입력 '...클릭하고 \\'@06dhentjd%@%^\\' 입력' 처리 시
+            advisory 모달 안 뜨고 PW 평문이 AI prompt + generated_code 까지
+            그대로 흘러감. 원인: 기존 detector 의 password_hint 는 "비밀번호:"
+            같은 명시 키워드 + separator 필요, generic_token 은 charset 에
+            특수문자 (@%^) 없고 길이 임계 20 미만 → 둘 다 미스.
+
+        Fix: quoted_literal 패턴 추가 — 따옴표 안 6자+ 값 중 특수문자 mix
+        또는 RPA 입력 동사 ('입력', 'write' 등) 인접 시 confidence ≥0.5.
+        """
+        from core.secrets_detector import detect
+
+        self.step("사용자 실제 케이스 — '@06dhentjd%@%^' (특수문자 + 영숫자 mix)")
+        user_text = "📌 선택된 요소: [Edit] \"￼\"\n클릭하고 '@06dhentjd%@%^' 입력"
+        matches = detect(user_text)
+        actionable = [m for m in matches if m.confidence >= 0.5]
+        self.assert_true(
+            any(m.value == "@06dhentjd%@%^" for m in actionable),
+            f"[ADR 0003 PR-5] 사용자 실제 PW '@06dhentjd%@%^' match 필수. "
+            f"actionable matches: {[(m.kind, m.value, m.confidence) for m in actionable]}",
+        )
+        pw_match = next(m for m in actionable if m.value == "@06dhentjd%@%^")
+        self.assert_true(
+            pw_match.confidence >= 0.6,
+            f"[ADR 0003 PR-5] PW match confidence ≥0.6 필수 "
+            f"(특수문자 mix + RPA 동사 인접). 실제: {pw_match.confidence}",
+        )
+
+        self.step("RPA 동사 인접 — confidence boost")
+        no_verb = detect("값은 'aB3!cD5#eF7$' 이에요")
+        with_verb = detect("값 'aB3!cD5#eF7$' 입력")
+        no_verb_hits = [m for m in no_verb if m.kind == "quoted_literal"]
+        with_verb_hits = [m for m in with_verb if m.kind == "quoted_literal"]
+        self.assert_true(
+            len(no_verb_hits) >= 1 and len(with_verb_hits) >= 1,
+            "[ADR 0003 PR-5] 특수문자 mix 값은 양쪽 다 match 되어야 함",
+        )
+        self.assert_true(
+            with_verb_hits[0].confidence > no_verb_hits[0].confidence,
+            f"[ADR 0003 PR-5] RPA 동사 인접 시 confidence boost 필수. "
+            f"no_verb={no_verb_hits[0].confidence}, with_verb={with_verb_hits[0].confidence}",
+        )
+
+    def test_133_detector_skips_common_labels_and_identifiers(self):
+        """[ADR 0003 PR-5] quoted_literal false-positive 가드.
+
+        흔히 RPA 명령에 나오는 UI 라벨 / 키 이름 / 사용자 ID / element name
+        메타 문자는 시크릿이 아니므로 advisory 안 띄워야 함. 사용자 보고 케이스
+        ('doosung.oh' ID 는 false-positive 안 함) 도 여기 포함.
+        """
+        from core.secrets_detector import detect
+
+        cases_should_not_alert = [
+            "📌 선택된 요소: [Edit] \"￼\"\n클릭하고 'doosung.oh' 입력",
+            "버튼 '확인' 클릭",
+            "팝업 '취소' 누름",
+            "다이얼로그 '저장' 클릭",
+            "'OK' 버튼 누르기",
+            "'Cancel' 클릭",
+            "'엔터' 키 누르기",
+            "'tab' 키 누르기",
+            "'Enter' 키",
+            "필드 '￼' 클릭",
+            "메모장 열고 '안녕' 입력",
+        ]
+        for text in cases_should_not_alert:
+            self.step(f"false-positive 회피 — {text[:40]}")
+            matches = detect(text)
+            actionable = [m for m in matches if m.confidence >= 0.5]
+            quoted_actionable = [m for m in actionable if m.kind == "quoted_literal"]
+            self.assert_true(
+                len(quoted_actionable) == 0,
+                f"[ADR 0003 PR-5] '{text}' 는 quoted_literal alert 0건 필수. "
+                f"실제: {[(m.value, m.confidence) for m in quoted_actionable]}",
+            )
+
+        self.step("명시 PW 키워드 — 여전히 catch (회귀 가드)")
+        matches = detect("비밀번호: MyP@ss123!")
+        hint_matches = [m for m in matches if m.kind == "password_hint"]
+        self.assert_true(
+            len(hint_matches) >= 1,
+            "[ADR 0003 PR-5] 명시 키워드 password_hint path 회귀 X",
+        )
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-c PR-6 — Hot secret reload (test_134 ~ test_135)
+    # ──────────────────────────────────────────
+
+    def test_134_kernel_worker_has_set_secrets_handler(self):
+        """[ADR 0003 PR-6] kernel_worker / execution_kernel 에 SET_SECRETS IPC 추가.
+
+        - ``SET_SECRETS_CMD`` / ``SECRETS_OK`` 마커 정의 + handler 분기 존재
+        - ``ExecutionKernel`` 가 ``_SET_SECRETS`` / ``_SECRETS_OK`` 마커 보유 +
+          ``push_secrets`` / ``_push_secrets_unlocked`` 메서드 + ``_execute_locked``
+          가 매 실행 직전 auto-push
+        """
+        worker_path = Path(__file__).parent.parent / "core" / "kernel_worker.py"
+        worker_src = worker_path.read_text(encoding="utf-8")
+        for needle in (
+            'SET_SECRETS_CMD = "<<<SET_SECRETS>>>"',
+            'SECRETS_OK = "<<<SECRETS_OK>>>"',
+            "is_set_secrets",
+            "OHDO_SECRET_",
+            "json.loads",
+        ):
+            self.assert_true(
+                needle in worker_src,
+                f"[ADR 0003 PR-6] kernel_worker.py 에 '{needle}' 필수",
+            )
+
+        from core.execution_kernel import ExecutionKernel
+
+        self.assert_true(
+            ExecutionKernel._SET_SECRETS == "<<<SET_SECRETS>>>",
+            "[ADR 0003 PR-6] ExecutionKernel._SET_SECRETS 마커 필수",
+        )
+        self.assert_true(
+            ExecutionKernel._SECRETS_OK == "<<<SECRETS_OK>>>",
+            "[ADR 0003 PR-6] ExecutionKernel._SECRETS_OK 마커 필수",
+        )
+        self.assert_true(
+            hasattr(ExecutionKernel, "push_secrets")
+            and hasattr(ExecutionKernel, "_push_secrets_unlocked"),
+            "[ADR 0003 PR-6] push_secrets + _push_secrets_unlocked 메서드 필수",
+        )
+
+        import inspect
+
+        exec_src = inspect.getsource(ExecutionKernel._execute_locked)
+        self.assert_true(
+            "_push_secrets_unlocked" in exec_src,
+            "[ADR 0003 PR-6] _execute_locked 가 매 실행 직전 _push_secrets_unlocked 호출 필수",
+        )
+
+    def test_135_kernel_hot_reload_after_vault_set(self):
+        """[ADR 0003 PR-6] kernel 시작 후 vault.set 한 시크릿이 즉시 반영.
+
+        사용자 보고 (2026-05-14 'v2-새세션-091348'): 사용자가 advisory 모달에서
+        vault 등록 후 그 step 을 실행 → RuntimeError "secret 'password' 미등록"
+        — kernel start() 시점 1회 env 주입 패턴 한계. PR-6 의 SET_SECRETS hot
+        reload 가 다음 실행에 자동 반영하도록 fix.
+
+        실제 subprocess kernel 을 띄우는 integration 테스트 — 가볍지만 핵심 contract.
+        """
+        import uuid
+
+        from core.execution_kernel import ExecutionKernel
+        from core.secrets import KeyringVault, SecretLabel
+
+        service_name = f"ohdo.test.pr6.{uuid.uuid4().hex[:8]}"
+        label_name = f"pr6_test_{uuid.uuid4().hex[:6]}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = KeyringVault(
+                index_path=Path(tmp) / "vault_index.json",
+                service_name=service_name,
+            )
+            kernel = ExecutionKernel(secrets_vault=vault, default_timeout=30)
+            lab = SecretLabel(label=label_name)
+            secret_value = "SecretValue_" + uuid.uuid4().hex[:8]
+
+            try:
+                self.step("vault 비어 있는 상태로 kernel 시작")
+                kernel.start()
+                self.assert_true(kernel.is_alive, "kernel 시작 실패")
+
+                self.step("kernel 시작 후 vault.set 한 시크릿이 hot reload 됨")
+                # 사용자 시나리오 — kernel 이미 떠 있는데 vault 에 새 시크릿 등록
+                vault.set(lab, secret_value)
+
+                # execute_block 의 auto-push 가 동작하는지 검증.
+                # AI 가 생성한 코드처럼 get_secret 호출.
+                result = kernel.execute_block(
+                    f"print(get_secret({label_name!r}))",
+                    step_id=1,
+                    timeout=15,
+                )
+                self.assert_true(
+                    result.success,
+                    f"[ADR 0003 PR-6] hot reload 후 get_secret 호출 성공 필수. "
+                    f"output: {result.output!r}, error: {result.error!r}",
+                )
+                self.assert_true(
+                    secret_value in (result.output or ""),
+                    f"[ADR 0003 PR-6] vault 값이 stdout 으로 반환 필수. "
+                    f"expected: {secret_value!r}, actual output: {result.output!r}",
+                )
+
+                self.step("vault.delete 후 다음 실행에서 RuntimeError")
+                vault.delete(lab)
+                # AI 코드는 보통 try/except 로 감싸지만 여기선 raw — RuntimeError 가 step 으로 propagate
+                result2 = kernel.execute_block(
+                    f"print(get_secret({label_name!r}))",
+                    step_id=2,
+                    timeout=15,
+                )
+                self.assert_true(
+                    (not result2.success)
+                    and (label_name in (result2.error or "") + (result2.output or "")),
+                    f"[ADR 0003 PR-6] vault.delete 후 미존재 label 은 RuntimeError 필수. "
+                    f"success: {result2.success}, error: {result2.error!r}",
+                )
+
+                self.step("explicit push_secrets — 동일 효과")
+                vault.set(lab, "RegisteredAgain_" + uuid.uuid4().hex[:6])
+                push_ok = kernel.push_secrets(timeout=5.0)
+                self.assert_true(push_ok, "[ADR 0003 PR-6] push_secrets 응답 OK 필수")
+
+                expected2 = vault.get(lab)
+                result3 = kernel.execute_block(
+                    f"print(get_secret({label_name!r}))",
+                    step_id=3,
+                    timeout=15,
+                )
+                self.assert_true(
+                    result3.success and expected2 in (result3.output or ""),
+                    f"[ADR 0003 PR-6] push_secrets 후 값 반영 필수. "
+                    f"expected: {expected2!r}, output: {result3.output!r}",
+                )
+
+            finally:
+                try:
+                    kernel.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    vault.delete(lab)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def test_131_pr4_ui_wiring_and_locale_catalog(self):
+        """[ADR 0003 Phase 2-c PR-4] 사용자 입력 path 보호 + Settings 시크릿 탭.
+
+        구성 요소:
+          1. ``prepare_outgoing_text`` import 가능 + signature 정상
+          2. ``ui_v2._on_send_message`` 가 ``prepare_outgoing_text`` 호출 (detector
+             hit 시 advisory 모달 띄움 — 사용자 입력 path 차단 entry-point)
+          3. ``SettingsDialog`` 가 ``secrets_vault`` kwarg + ``_create_secrets_tab``
+             메서드 보유 (시크릿 관리 UI)
+          4. locale catalog — ``ui_v2.secret_advisory.*`` + ``ui_v2.settings.secrets.*``
+             + ``ui_v2.toast.secret_*`` + ``ui_v2.validation.kind_hardcoded_secret``
+             모든 키가 ko/en 양쪽에 정확히 같은 set 으로 존재 (handoff §21 패턴)
+        """
+        import inspect
+        from inspect import signature
+
+        self.step("(1) prepare_outgoing_text import + signature")
+        from ui_v2.secret_advisory_dialog import (
+            SecretAdvisoryDialog,
+            prepare_outgoing_text,
+        )
+
+        sig = signature(prepare_outgoing_text)
+        params = list(sig.parameters)
+        for needed in ("raw_text", "vault", "parent"):
+            self.assert_true(
+                needed in params,
+                f"[ADR 0003 PR-4] prepare_outgoing_text 에 '{needed}' 인자 필수. 실제: {params}",
+            )
+        self.assert_true(SecretAdvisoryDialog is not None, "SecretAdvisoryDialog import 가능 필수")
+
+        self.step("(2) ui_v2._on_send_message 가 prepare_outgoing_text 호출")
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        send_src = inspect.getsource(MainWindowV2._on_send_message)
+        self.assert_true(
+            "prepare_outgoing_text" in send_src,
+            "[ADR 0003 PR-4] _on_send_message 가 prepare_outgoing_text 호출 필수 "
+            "(detector hit 시 advisory 모달 — 사용자 입력 path 차단 entry-point)",
+        )
+        self.assert_true(
+            "secrets_vault" in send_src,
+            "[ADR 0003 PR-4] _on_send_message 가 self.app_service.secrets_vault 전달 필수",
+        )
+
+        self.step("(3) SettingsDialog 의 secrets_vault kwarg + _create_secrets_tab")
+        from ui.settings_dialog import SettingsDialog
+
+        init_src = inspect.getsource(SettingsDialog.__init__)
+        self.assert_true(
+            "secrets_vault" in init_src,
+            "[ADR 0003 PR-4] SettingsDialog.__init__ 가 secrets_vault kwarg 받음 필수",
+        )
+        self.assert_true(
+            hasattr(SettingsDialog, "_create_secrets_tab"),
+            "[ADR 0003 PR-4] SettingsDialog._create_secrets_tab 메서드 필수",
+        )
+        # ui_v2 가 vault 주입해서 SettingsDialog 호출
+        from ui_v2.main_window_v2 import MainWindowV2 as _MW
+
+        settings_open_src = inspect.getsource(_MW._on_open_settings)
+        self.assert_true(
+            "secrets_vault" in settings_open_src,
+            "[ADR 0003 PR-4] ui_v2._on_open_settings 가 SettingsDialog 에 vault 주입 필수",
+        )
+
+        self.step("(4) locale catalog — 9+ 시크릿 키 + 양쪽 symmetry")
+        ko = json.loads(
+            (Path(__file__).parent.parent / "core" / "locale" / "ko.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        en = json.loads(
+            (Path(__file__).parent.parent / "core" / "locale" / "en.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        required_keys = [
+            "ui_v2.secret_advisory.title",
+            "ui_v2.secret_advisory.body",
+            "ui_v2.secret_advisory.btn_register_and_send",
+            "ui_v2.secret_advisory.btn_send_as_is",
+            "ui_v2.secret_advisory.btn_cancel",
+            "ui_v2.settings.tab_secrets",
+            "ui_v2.settings.secrets.empty",
+            "ui_v2.toast.secret_registered_count",
+            "ui_v2.validation.kind_hardcoded_secret",
+        ]
+        for key in required_keys:
+            self.assert_true(
+                key in ko,
+                f"[ADR 0003 PR-4] 키 '{key}' ko.json 누락",
+            )
+            self.assert_true(
+                key in en,
+                f"[ADR 0003 PR-4] 키 '{key}' en.json 누락",
+            )
+
+        # 전체 시크릿 관련 키 symmetry (handoff §21 i18n 패턴)
+        secret_prefixes = (
+            "ui_v2.secret_advisory.",
+            "ui_v2.settings.secrets.",
+            "ui_v2.toast.secret_",
+            "ui_v2.toast.kernel_restart_for_secret",
+        )
+
+        def _filter(d):
+            return {k for k in d.keys() if any(k == p or k.startswith(p) for p in secret_prefixes)}
+
+        ko_set = _filter(ko)
+        en_set = _filter(en)
+        self.assert_true(
+            ko_set == en_set,
+            f"[ADR 0003 PR-4] ko/en catalog 시크릿 키 mismatch. "
+            f"ko-only: {sorted(ko_set - en_set)}, en-only: {sorted(en_set - ko_set)}",
+        )
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-c PR-7 — Element-based password-field detection (test_136 ~ test_137)
+    # ──────────────────────────────────────────
+
+    def test_136_is_password_field_element_decisive_signals(self):
+        """[ADR 0003 PR-7] is_password_field_element 가 HTML / UIA 신호로 판정.
+
+        결정적 / 강한 신호:
+          - HTML ``type="password"`` (dom_context.attributes.type)
+          - HTML ``name`` / ``id`` 가 password-hint (password / pwd / pswd / userps 등)
+          - UIA ``control_type="Edit"`` + ``automation_id`` 가 password-hint
+          - UIA Edit + ``name`` 이 한글 "비밀번호" / "패스워드" 등
+
+        False-positive 가드:
+          - HTML ``type="text"`` + name=username → False
+          - HTML ``type="email"`` → False
+          - automation_id ∈ {user, username, userid, email, search, ...} → False
+        """
+        from core.secrets_detector import is_password_field_element
+
+        self.step("HTML type=password — 결정적")
+        elem = {
+            "control_type": "Edit",
+            "automation_id": "userPs",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "input",
+                "attributes": {"type": "password", "id": "userPs"},
+            },
+        }
+        is_pw, reason = is_password_field_element(elem)
+        self.assert_true(is_pw, f"HTML type=password 결정적 신호 필수. reason={reason!r}")
+        self.assert_true("password" in reason.lower(), f"reason 에 password 명시 필수: {reason}")
+
+        self.step("UIA only (DOM 없음) — automation_id 'userPs' hint")
+        elem_uia = {
+            "control_type": "Edit",
+            "automation_id": "userPs",
+            "parent_window_title": "어떤 앱",
+        }
+        is_pw2, _ = is_password_field_element(elem_uia)
+        self.assert_true(is_pw2, "UIA Edit + automation_id 'userPs' password-hint 필수")
+
+        self.step("UIA Edit + name='비밀번호' (한글 라벨)")
+        elem_ko = {"control_type": "Edit", "automation_id": "", "name": "비밀번호"}
+        is_pw3, _ = is_password_field_element(elem_ko)
+        self.assert_true(is_pw3, "한글 '비밀번호' 라벨 catch 필수")
+
+        self.step("false-positive — username field")
+        elem_user = {
+            "control_type": "Edit",
+            "automation_id": "userId",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "input",
+                "attributes": {"type": "text", "id": "userId", "name": "username"},
+            },
+        }
+        is_pw4, _ = is_password_field_element(elem_user)
+        self.assert_true(not is_pw4, "username field 는 password 아님")
+
+        self.step("false-positive — email field")
+        elem_email = {
+            "control_type": "Edit",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "input",
+                "attributes": {"type": "email", "name": "email"},
+            },
+        }
+        is_pw5, _ = is_password_field_element(elem_email)
+        self.assert_true(not is_pw5, "email field 는 password 아님")
+
+        self.step("false-positive — search box")
+        elem_search = {
+            "control_type": "Edit",
+            "automation_id": "search",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "input",
+                "attributes": {"type": "text", "name": "search"},
+            },
+        }
+        is_pw6, _ = is_password_field_element(elem_search)
+        self.assert_true(not is_pw6, "search box 는 password 아님")
+
+        self.step("빈 / None element")
+        self.assert_true(not is_password_field_element({})[0])
+        self.assert_true(not is_password_field_element(None)[0])
+
+    def test_137_detect_with_elements_surfaces_password_field_input(self):
+        """[ADR 0003 PR-7] element 가 password field 면 사용자 입력 따옴표 값을
+        자동 surface — 사용자 보고 'v2-새세션-091348' 시나리오 재현.
+
+        시나리오: 사용자가 채팅에 평범한 따옴표 값 ('doosung.oh') 입력. text-only
+        detect() 는 이걸 ID 로 보고 skip. 하지만 picker 가 잡은 element 가 password
+        field (type="password" / automation_id="userPs") 이면 input 의도가 시크릿임
+        → advisory 띄움.
+        """
+        from core.secrets_detector import detect, detect_with_elements
+
+        # 사용자 input + HTML password field
+        user_text = "📌 선택된 요소: [Edit] \"￼\"\n클릭하고 '@06dhentjd%@%^' 입력"
+        elem_pw = {
+            "control_type": "Edit",
+            "automation_id": "userPs",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "input",
+                "attributes": {"type": "password", "id": "userPs"},
+            },
+        }
+
+        self.step("기본 detect — 이미 quoted_literal 잡음 (PR-5)")
+        text_only = [m for m in detect(user_text) if m.confidence >= 0.5]
+        ql = [m for m in text_only if m.kind == "quoted_literal"]
+        self.assert_true(len(ql) >= 1, "PR-5 quoted_literal 회귀 가드")
+
+        self.step("with elements — kind 가 password_field_element 로 upgrade")
+        with_elem = [
+            m for m in detect_with_elements(user_text, elements=[elem_pw]) if m.confidence >= 0.5
+        ]
+        pw_field_matches = [m for m in with_elem if m.kind == "password_field_element"]
+        self.assert_true(
+            len(pw_field_matches) >= 1,
+            f"[ADR 0003 PR-7] element 가 PW field 면 password_field_element kind 필수. "
+            f"실제: {[(m.kind, m.value, m.confidence) for m in with_elem]}",
+        )
+        # confidence boost (≥0.85) — quoted_literal 의 0.85 보다 높거나 같음
+        self.assert_true(
+            pw_field_matches[0].confidence >= 0.85,
+            f"[ADR 0003 PR-7] PW field upgrade confidence ≥0.85 필수. "
+            f"실제: {pw_field_matches[0].confidence}",
+        )
+
+        self.step("사용자 ID ('doosung.oh') 도 PW field 면 surface")
+        # text-only detect 는 'doosung.oh' 를 email-like 로 skip (PR-5)
+        id_text = "📌 선택된 요소: [Edit] \"￼\"\n클릭하고 'doosung.oh' 입력"
+        text_id = [m for m in detect(id_text) if m.confidence >= 0.5]
+        # detect() 만 호출하면 hit 없음
+        self.assert_true(
+            not any(m.kind in ("quoted_literal", "password_field_element") for m in text_id),
+            "PR-5 — 영문 ID skip 가드",
+        )
+        # element 가 PW field 면 surface
+        with_pw_field = [
+            m
+            for m in detect_with_elements(id_text, elements=[elem_pw])
+            if m.confidence >= 0.5 and m.kind == "password_field_element"
+        ]
+        self.assert_true(
+            len(with_pw_field) >= 1 and any(m.value == "doosung.oh" for m in with_pw_field),
+            f"[ADR 0003 PR-7] element 가 PW field 면 'doosung.oh' 도 surface. "
+            f"실제: {[(m.kind, m.value, m.confidence) for m in with_pw_field]}",
+        )
+
+        self.step("element 가 username field 면 surface 안 함 (false-positive 가드)")
+        elem_user = {
+            "control_type": "Edit",
+            "automation_id": "userId",
+            "dom_context": {
+                "cdp_available": True,
+                "tagName": "input",
+                "attributes": {"type": "text", "name": "username"},
+            },
+        }
+        with_user_field = [
+            m for m in detect_with_elements(id_text, elements=[elem_user]) if m.confidence >= 0.5
+        ]
+        self.assert_true(
+            len(with_user_field) == 0,
+            f"[ADR 0003 PR-7] username element 는 advisory 안 띄워야 함. "
+            f"실제: {[(m.kind, m.value, m.confidence) for m in with_user_field]}",
+        )
+
+        self.step("elements 미주입 — 기존 detect() 동작 보존")
+        # quoted_literal 의 confidence 와 동일
+        with_none = detect_with_elements(user_text, elements=None)
+        only_text = detect(user_text)
+        # password_field_element 매치는 절대 없어야 함
+        self.assert_true(
+            not any(m.kind == "password_field_element" for m in with_none),
+            "elements 없으면 password_field_element kind 없어야 함",
+        )
+        # 다른 매치는 동일
+        self.assert_equal(len(with_none), len(only_text))
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-c PR-8 — Windows Credential Manager import (test_138)
+    # ──────────────────────────────────────────
+
+    def test_138_windows_credentials_module_and_ui_wiring(self):
+        """[ADR 0003 PR-8] Windows Credential Manager import path.
+
+        1. ``core.windows_credentials`` 모듈 — API 표면 정상
+        2. SettingsDialog 가 vault 주입 시 ``_on_secrets_import_winvault`` 메서드 보유
+        3. ``WindowsCredentialsImportDialog`` import 가능 + ``__init__`` 가 vault 받음
+        4. locale catalog — ko/en 양쪽에 import 관련 키 존재 + symmetry
+        5. Windows 환경에서 ``list_credentials`` 가 실 호출 가능 (값 비어도 OK)
+        """
+        import inspect
+
+        self.step("(1) core.windows_credentials API 표면")
+        from core.windows_credentials import (
+            CRED_TYPE_GENERIC,
+            WindowsCredentialMeta,
+            is_available,
+            list_credentials,
+            read_credential,
+        )
+
+        self.assert_equal(CRED_TYPE_GENERIC, 1)
+        self.assert_true(callable(is_available), "is_available 함수 필수")
+        self.assert_true(callable(list_credentials), "list_credentials 함수 필수")
+        self.assert_true(callable(read_credential), "read_credential 함수 필수")
+        # WindowsCredentialMeta 는 frozen dataclass — suggested_label 메서드 보유
+        meta = WindowsCredentialMeta(
+            target_name="git:https://github.com",
+            user_name="oddsung",
+            cred_type=CRED_TYPE_GENERIC,
+        )
+        sl = meta.suggested_label()
+        self.assert_true(
+            isinstance(sl, str)
+            and 1 <= len(sl) <= 32
+            and all(c.islower() or c.isdigit() or c == "_" for c in sl),
+            f"[PR-8] suggested_label 포맷 ([a-z0-9_]{{1,32}}): {sl!r}",
+        )
+
+        self.step("(2) SettingsDialog._on_secrets_import_winvault")
+        from ui.settings_dialog import SettingsDialog
+
+        self.assert_true(
+            hasattr(SettingsDialog, "_on_secrets_import_winvault"),
+            "[PR-8] SettingsDialog._on_secrets_import_winvault 메서드 필수",
+        )
+        tab_src = inspect.getsource(SettingsDialog._create_secrets_tab)
+        self.assert_true(
+            "windows_credentials" in tab_src and "btn_import_winvault" in tab_src,
+            "[PR-8] secrets 탭이 Windows import 버튼 조건부 표시 필수",
+        )
+
+        self.step("(3) WindowsCredentialsImportDialog import + 시그니처")
+        from ui.windows_credentials_import_dialog import WindowsCredentialsImportDialog
+
+        sig = inspect.signature(WindowsCredentialsImportDialog.__init__)
+        self.assert_true(
+            "secrets_vault" in sig.parameters,
+            "[PR-8] WindowsCredentialsImportDialog __init__ 가 secrets_vault 받음 필수",
+        )
+        # 핵심 메서드들
+        for needed in ("_reload_credentials", "_on_import_clicked", "_on_filter_changed"):
+            self.assert_true(
+                hasattr(WindowsCredentialsImportDialog, needed),
+                f"[PR-8] WindowsCredentialsImportDialog.{needed} 필수",
+            )
+
+        self.step("(4) locale catalog — import 관련 키 ko/en 양쪽 + symmetry")
+        ko = json.loads(
+            (Path(__file__).parent.parent / "core" / "locale" / "ko.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        en = json.loads(
+            (Path(__file__).parent.parent / "core" / "locale" / "en.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        required_keys = [
+            "ui_v2.settings.secrets.btn_import_winvault",
+            "ui_v2.settings.secrets.import_dialog_title",
+            "ui_v2.settings.secrets.import_dialog_description",
+            "ui_v2.settings.secrets.import_col_target",
+            "ui_v2.settings.secrets.import_col_user",
+            "ui_v2.settings.secrets.import_col_label",
+            "ui_v2.settings.secrets.import_btn",
+            "ui_v2.settings.secrets.import_empty",
+            "ui_v2.settings.secrets.import_done",
+            "ui_v2.settings.secrets.import_failed",
+        ]
+        for key in required_keys:
+            self.assert_true(key in ko, f"[PR-8] key '{key}' ko.json 누락")
+            self.assert_true(key in en, f"[PR-8] key '{key}' en.json 누락")
+
+        self.step("(5) Windows 환경 — list_credentials 실 호출")
+        if is_available():
+            creds = list_credentials()
+            # 시스템 자격 증명 0개 가능 — list 타입만 확인
+            self.assert_true(
+                isinstance(creds, list),
+                f"[PR-8] list_credentials 반환 타입 list 필수. 실제: {type(creds).__name__}",
+            )
+            for c in creds[:3]:
+                self.assert_true(
+                    isinstance(c, WindowsCredentialMeta),
+                    "[PR-8] list_credentials 항목 타입은 WindowsCredentialMeta",
+                )
+                self.assert_equal(c.cred_type, CRED_TYPE_GENERIC)
+        else:
+            # 비 Windows 환경 (CI Linux 등) — 빈 list 반환 보장
+            self.assert_equal(list_credentials(), [])
+            self.assert_true(read_credential("anything") is None)
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-c PR-9 — Secret insert popup (test_139 ~ test_140)
+    # ──────────────────────────────────────────
+
+    def test_139_find_at_trigger_logic(self):
+        """[ADR 0003 PR-9] '@' 자동완성 trigger 조건.
+
+        - 공백/줄 시작 뒤의 @ + 영문/숫자/_ prefix → trigger
+        - user@host (email — @ 앞이 영문) → trigger 안 함
+        - cursor 가 prefix 영역 밖 (공백/구두점 등 통과) → trigger 안 함
+        """
+        from ui_v2.secret_insert_popup import find_at_trigger
+
+        cases = [
+            ("hello @", 7, (6, "")),
+            ("@github_pat", 11, (0, "github_pat")),
+            ("hello @git", 10, (6, "git")),
+            ("user@host", 9, None),
+            ("hello @abc def", 10, (6, "abc")),
+            ("hello @abc def", 13, None),
+            ("@", 1, (0, "")),
+            ("text", 4, None),
+            ("", 0, None),
+        ]
+        for text, pos, expected in cases:
+            self.step(f"text={text!r} pos={pos}")
+            result = find_at_trigger(text, pos)
+            self.assert_equal(
+                result,
+                expected,
+                f"[PR-9] find_at_trigger({text!r}, {pos}) → {result} != {expected}",
+            )
+
+    def test_140_secret_insert_popup_module_and_wiring(self):
+        r"""[ADR 0003 PR-9] popup module + ui_v2 wiring (\`@\` 자동완성 only).
+
+        PR-10a (2026-05-14): 🔒 버튼 (옵션 A) 제거. \`@\` 자동완성 (옵션 B) 만 남음.
+
+        - ``SecretInsertPopup`` import + 시그니처 + ``open_from_at`` / ``update_filter``
+        - ui_v2 의 ``_on_message_text_changed`` 가 ``find_at_trigger`` + ``open_from_at`` 호출
+        - ``message_edit.textChanged`` → ``_on_message_text_changed`` signal 연결 존재
+        """
+        import inspect
+
+        from ui_v2.secret_insert_popup import (
+            SecretInsertPopup,
+            find_at_trigger,
+        )
+
+        self.step("(1) SecretInsertPopup API")
+        sig = inspect.signature(SecretInsertPopup.__init__)
+        for needed in ("vault", "editor", "parent"):
+            self.assert_true(
+                needed in sig.parameters,
+                f"[PR-9] SecretInsertPopup __init__ 의 '{needed}' 인자 필수",
+            )
+        for needed in ("open_from_at", "update_filter", "label_selected"):
+            self.assert_true(
+                hasattr(SecretInsertPopup, needed),
+                f"[PR-9] SecretInsertPopup.{needed} 필수",
+            )
+        # PR-10a: 🔒 버튼 path 제거 — open_from_button 메서드 없어야 함
+        self.assert_true(
+            not hasattr(SecretInsertPopup, "open_from_button"),
+            "[PR-10a] open_from_button 제거 필수 (옵션 A 폐기)",
+        )
+
+        self.step("(2) ui_v2 wiring — textChanged hook + lazy popup")
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        for method_name in ("_get_secret_popup", "_on_message_text_changed"):
+            self.assert_true(
+                hasattr(MainWindowV2, method_name),
+                f"[PR-9] MainWindowV2.{method_name} 필수",
+            )
+        # PR-10a: 🔒 버튼 핸들러 제거
+        self.assert_true(
+            not hasattr(MainWindowV2, "_on_secret_insert_clicked"),
+            "[PR-10a] _on_secret_insert_clicked 제거 필수",
+        )
+        # textChanged 핸들러가 find_at_trigger + open_from_at 호출
+        tc_src = inspect.getsource(MainWindowV2._on_message_text_changed)
+        self.assert_true(
+            "find_at_trigger" in tc_src and "open_from_at" in tc_src,
+            "[PR-9] textChanged 핸들러가 find_at_trigger + open_from_at 사용 필수",
+        )
+        mw_path = Path(__file__).parent.parent / "ui_v2" / "main_window_v2.py"
+        mw_src = mw_path.read_text(encoding="utf-8")
+        self.assert_true(
+            "textChanged.connect(self._on_message_text_changed)" in mw_src,
+            "[PR-9] message_edit.textChanged → _on_message_text_changed 연결 필수",
+        )
+
+        self.assert_true(callable(find_at_trigger))
+
+    # ──────────────────────────────────────────
+    # ADR 0003 Phase 2-c PR-10 — Element placeholder (test_141 ~ test_144)
+    # ──────────────────────────────────────────
+
+    def test_141_suggest_element_label_inference(self):
+        """[PR-10b] HTML/UIA attribute → 의미 있는 라벨 자동 추론."""
+        from core.element_labels import normalize_label, suggest_element_label
+
+        # HTML type=password
+        self.assert_equal(
+            suggest_element_label(
+                {
+                    "control_type": "Edit",
+                    "automation_id": "userPs",
+                    "dom_context": {
+                        "cdp_available": True,
+                        "tagName": "input",
+                        "attributes": {"type": "password", "id": "userPs"},
+                    },
+                }
+            ),
+            "pw",
+        )
+        # HTML username
+        self.assert_equal(
+            suggest_element_label(
+                {
+                    "control_type": "Edit",
+                    "dom_context": {
+                        "cdp_available": True,
+                        "tagName": "input",
+                        "attributes": {"type": "text", "name": "username"},
+                    },
+                }
+            ),
+            "id",
+        )
+        # UIA-only userPs — password keyword catch
+        self.assert_equal(
+            suggest_element_label({"control_type": "Edit", "automation_id": "userPs"}),
+            "pw",
+        )
+        # 빈 dict — fallback
+        self.assert_equal(suggest_element_label({}), "elem")
+        # 중복 처리 — suffix
+        self.assert_equal(
+            suggest_element_label(
+                {"control_type": "Edit", "automation_id": "userPs"},
+                used_labels={"pw"},
+            ),
+            "pw_2",
+        )
+        # normalize_label
+        self.assert_equal(normalize_label("Login Button!"), "login_button")
+        self.assert_equal(normalize_label("user@host.com"), "user_host_com")
+
+    def test_142_chip_widgets_module(self):
+        """[PR-10c] chip_widgets 모듈 — ElementChip 라벨 편집 path."""
+        import inspect
+
+        from ui_v2.chip_widgets import ElementChip, ImageChip
+
+        # ElementChip 시그니처
+        sig = inspect.signature(ElementChip.__init__)
+        for needed in ("label", "control_type", "name", "parent"):
+            self.assert_true(
+                needed in sig.parameters,
+                f"[PR-10c] ElementChip __init__ '{needed}' 인자 필수",
+            )
+        # signals
+        self.assert_true(hasattr(ElementChip, "label_changed"))
+        self.assert_true(hasattr(ElementChip, "remove_requested"))
+        self.assert_true(hasattr(ImageChip, "remove_requested"))
+
+        # main_window_v2 가 chip_widgets 사용하는지
+        mw_path = Path(__file__).parent.parent / "ui_v2" / "main_window_v2.py"
+        mw_src = mw_path.read_text(encoding="utf-8")
+        self.assert_true(
+            "ElementChip" in mw_src and "ImageChip" in mw_src,
+            "[PR-10c] _refresh_chip_area 가 chip widget 사용 필수",
+        )
+        self.assert_true(
+            "_ohdo_label" in mw_src,
+            "[PR-10c] _ohdo_label 키로 라벨 저장 필수",
+        )
+
+    def test_143_element_placeholders_module(self):
+        """[PR-10e] element_placeholders — extract / find_unresolved / replace_with_references."""
+        from core.element_placeholders import (
+            ELEMENT_PLACEHOLDER_RE,
+            extract_labels,
+            find_unresolved,
+            replace_with_references,
+        )
+
+        text = "{{el:ID}} 클릭 후 'test' 입력 후 {{el:PW}} 클릭"
+        # ID/PW 대문자 사용 — placeholder 정규식은 lowercase only 라 매치 안 됨
+        self.step("대문자 라벨은 매치 안 됨 (lowercase only)")
+        self.assert_equal(extract_labels(text), [])
+
+        self.step("lowercase 정상 매치 + 중복 제거 + 등장 순서")
+        text2 = "{{el:id}} 클릭 후 'test' 입력 후 {{el:pw}} 클릭 후 {{el:id}} 재클릭"
+        self.assert_equal(extract_labels(text2), ["id", "pw"])
+
+        self.step("find_unresolved — 매핑 안 된 라벨 반환")
+        elements = [{"_ohdo_label": "id"}, {"_ohdo_label": "pw"}]
+        self.assert_equal(find_unresolved(text2, elements), [])
+        # pw 라벨 누락
+        elements_partial = [{"_ohdo_label": "id"}]
+        self.assert_equal(find_unresolved(text2, elements_partial), ["pw"])
+        # 빈 elements
+        self.assert_equal(find_unresolved(text2, []), ["id", "pw"])
+        self.assert_equal(find_unresolved(text2, None), ["id", "pw"])
+
+        self.step("replace_with_references — 📌 [label] 변환")
+        replaced = replace_with_references(text2)
+        self.assert_true("{{el:" not in replaced, f"placeholder 잔존 X 필수: {replaced}")
+        self.assert_true("📌 [id]" in replaced)
+        self.assert_true("📌 [pw]" in replaced)
+        # 빈 input
+        self.assert_equal(replace_with_references(""), "")
+        self.assert_equal(replace_with_references("일반 텍스트"), "일반 텍스트")
+
+        self.step("정규식 export")
+        self.assert_true(ELEMENT_PLACEHOLDER_RE.match("{{el:gmail_pw}}") is not None)
+
+    def test_144_pr10_ui_wiring(self):
+        """[PR-10] ui_v2 wiring + popup elements_provider + i18n."""
+        import inspect
+
+        from ui_v2.main_window_v2 import MainWindowV2
+        from ui_v2.secret_insert_popup import SecretInsertPopup
+
+        self.step("(1) ui_v2._on_send_message 가 unresolved + replace 호출")
+        send_src = inspect.getsource(MainWindowV2._on_send_message)
+        self.assert_true(
+            "find_unresolved" in send_src and "replace_with_references" in send_src,
+            "[PR-10e] _on_send_message 가 element_placeholders helper 사용 필수",
+        )
+        self.assert_true(
+            "element_unresolved" in send_src,
+            "[PR-10e] _on_send_message 가 unresolved 시 차단 (모달) 필수",
+        )
+
+        self.step("(2) SecretInsertPopup elements_provider 인자")
+        sig = inspect.signature(SecretInsertPopup.__init__)
+        self.assert_true(
+            "elements_provider" in sig.parameters,
+            "[PR-10d] SecretInsertPopup __init__ 가 elements_provider 받음 필수",
+        )
+        popup_src = inspect.getsource(SecretInsertPopup._populate_items)
+        self.assert_true(
+            "elements_provider" in popup_src and '"el"' in popup_src,
+            "[PR-10d] popup 이 elements 와 vault 통합 + (kind='el', label) 튜플 저장 필수",
+        )
+        insert_src = inspect.getsource(SecretInsertPopup._insert_placeholder)
+        self.assert_true(
+            '"{{el:"' in insert_src or "'{{el:'" in insert_src,
+            "[PR-10d] popup 이 element 선택 시 {{el:label}} placeholder 삽입 필수",
+        )
+
+        self.step("(3) ui_v2 _get_secret_popup 가 elements_provider 주입")
+        get_popup_src = inspect.getsource(MainWindowV2._get_secret_popup)
+        self.assert_true(
+            "elements_provider" in get_popup_src,
+            "[PR-10d] _get_secret_popup 가 self._pending_elements 를 provider 로 전달 필수",
+        )
+
+        self.step("(4) win_inspector header 에 _ohdo_label suffix")
+        from core.win_inspector import WindowInspector
+
+        inspector = WindowInspector()
+        text = inspector.get_element_info_text(
+            {
+                "control_type": "Edit",
+                "name": "username",
+                "automation_id": "userId",
+                "_ohdo_label": "id",
+            }
+        )
+        self.assert_true(
+            "[📌 id]" in text,
+            f"[PR-10e] win_inspector header 에 [📌 label] 표시 필수. 실제: {text[:200]}",
+        )
+
+        self.step("(5) i18n catalog — unresolved 모달 키 ko/en")
+        ko = json.loads(
+            (Path(__file__).parent.parent / "core" / "locale" / "ko.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        en = json.loads(
+            (Path(__file__).parent.parent / "core" / "locale" / "en.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for key in (
+            "ui_v2.dialog.element_unresolved_title",
+            "ui_v2.dialog.element_unresolved_body",
+        ):
+            self.assert_true(key in ko, f"[PR-10] key '{key}' ko.json 누락")
+            self.assert_true(key in en, f"[PR-10] key '{key}' en.json 누락")
 
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.

@@ -13,14 +13,17 @@
     실행 전에 우리 측에서 자동으로 검사. 본 모듈은 검사 엔진 (순수 함수, side
     effect 없음) 만 담당 — UI 표시 / AI 재호출 hook 은 G7-B/C/D 단계.
 
-검사 항목 4종:
-    1. ``syntax``           : ``ast.parse`` 실패 (SyntaxError / IndentationError)
-    2. ``redefined_var``    : 이전 step 들의 module-level 할당 변수가 현재 step
-                              에서 다시 module-level 로 할당됨 (jupyter mode 깨짐)
-    3. ``missing_try``      : risky 호출이 try 블록 밖 module-level 또는
-                              top-level 함수 정의 밖에 있음
-    4. ``import_misplaced`` : ``Import`` / ``ImportFrom`` 가 module top 이 아닌
-                              try / def / class / if / for / while / with 안
+검사 항목 5종:
+    1. ``syntax``             : ``ast.parse`` 실패 (SyntaxError / IndentationError)
+    2. ``redefined_var``      : 이전 step 들의 module-level 할당 변수가 현재 step
+                                에서 다시 module-level 로 할당됨 (jupyter mode 깨짐)
+    3. ``missing_try``        : risky 호출이 try 블록 밖 module-level 또는
+                                top-level 함수 정의 밖에 있음
+    4. ``import_misplaced``   : ``Import`` / ``ImportFrom`` 가 module top 이 아닌
+                                try / def / class / if / for / while / with 안
+    5. ``hardcoded_secret``   : 코드의 문자열 리터럴에 평문 비밀번호 / 토큰 /
+                                API 키 패턴 발견 ([ADR 0003](../docs/saas/decisions/
+                                0003-secrets-handling.md) Phase 1 C2)
 
 False positive 최소화 정책:
     - 함수 정의 (``def`` / ``async def``) 내부의 risky 호출은 검사 제외 — 호출자
@@ -35,6 +38,7 @@ False positive 최소화 정책:
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -44,7 +48,19 @@ __all__ = [
     "validate_step_code",
     "RISKY_CALL_NAMES",
     "RISKY_MODULE_ATTRS",
+    "SECRET_CONFIDENCE_THRESHOLD",
 ]
+
+
+# ─────────────────────────────────────────────────────────
+# Hardcoded secret 검사 임계
+# ─────────────────────────────────────────────────────────
+
+# secrets_detector.detect 결과 중 이 값 이상 confidence 만 warning 으로 채택.
+# 0.85 = JWT / AWS / GH PAT / OpenAI / 명시 password hint 만. high_entropy 일반
+# 토큰은 false-positive 비율 높아 코드 스캔에선 제외 (사용자 입력 스캔 A1 에서는
+# threshold 낮춰 0.5 권장 — UI 가 사용자에게 confirm 받으므로 FP 비용 낮음).
+SECRET_CONFIDENCE_THRESHOLD: float = 0.85
 
 
 # ─────────────────────────────────────────────────────────
@@ -295,6 +311,49 @@ def _find_misplaced_imports(tree: ast.Module) -> list[ast.stmt]:
     return misplaced
 
 
+def _find_hardcoded_secrets(
+    tree: ast.Module,
+) -> list[tuple[ast.AST, str, str]]:
+    """AST 의 ``Constant(str)`` 리터럴에서 평문 비밀 패턴 검색.
+
+    [ADR 0003](../docs/saas/decisions/0003-secrets-handling.md) Phase 1 C2.
+
+    Returns:
+        list[(node, secret_kind, masked_preview)] — node 는 lineno 추출용,
+        secret_kind 는 `secrets_detector.SecretMatch.kind`, masked_preview 는
+        UI / 메시지용 (앞 4자 + ...).
+
+    정책:
+      - ``{{secret:label}}`` placeholder 자체는 검사 통과 (정상 패턴).
+      - 매우 짧은 리터럴 (< 16 char) 은 명시 토큰 prefix 가 없는 한 skip — 짧은
+        문자열에 entropy/AWS 등 매칭은 사실상 false-positive.
+      - confidence < ``SECRET_CONFIDENCE_THRESHOLD`` 는 skip (high_entropy 등).
+    """
+    from .secrets_detector import detect as _detect_secrets
+
+    findings: list[tuple[ast.AST, str, str]] = []
+    placeholder_re = re.compile(r"\{\{secret:[a-z0-9_]{1,32}\}\}")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        s = node.value
+        if not s or len(s) < 4:
+            continue
+        # placeholder 만 들어있으면 정상
+        if placeholder_re.fullmatch(s.strip()):
+            continue
+        for m in _detect_secrets(s):
+            if m.confidence < SECRET_CONFIDENCE_THRESHOLD:
+                continue
+            # 너무 짧은 generic 매칭 skip (위의 명시 토큰 prefix 체크는 confidence
+            # threshold 가 처리)
+            preview = m.value[:4] + "..." if len(m.value) > 4 else m.value
+            findings.append((node, m.kind, preview))
+
+    return findings
+
+
 # ─────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────
@@ -375,6 +434,20 @@ def validate_step_code(
                 kind="import_misplaced",
                 message="import 가 코드 최상단이 아닌 곳에 있습니다 (try / def / if 등 안).",
                 line=getattr(imp, "lineno", 0),
+            )
+        )
+
+    # hardcoded_secret 검사 (ADR 0003 Phase 1 C2)
+    for node, secret_kind, preview in _find_hardcoded_secrets(tree):
+        result.issues.append(
+            ValidationIssue(
+                kind="hardcoded_secret",
+                message=(
+                    f"코드에 평문 비밀 정보로 보이는 값이 박혀 있습니다 "
+                    f"({secret_kind}: '{preview}'). "
+                    "get_secret('label') 로 vault 참조 패턴 사용 권장."
+                ),
+                line=getattr(node, "lineno", 0),
             )
         )
 

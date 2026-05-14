@@ -48,6 +48,7 @@ from .storage.base import SessionRepository
 
 if TYPE_CHECKING:
     from core.adapters.base_adapter import AIResponse
+    from core.secrets import SecretsVault
 
 # UI 가 직접 ``core.session_manager`` / ``core.execution_kernel`` 등을 import 하지
 # 않도록 도메인 타입 + 코드 추출 pure 함수 + 핵심 클래스를 AppService 모듈에서
@@ -88,6 +89,10 @@ class AppService:
         session_repo: 저장소 구현체. 로컬 기본은 ``LocalJsonRepository``.
         ai_manager: AI 엔진 매니저 (현재 1차에서는 미사용, 확장 지점만 확보).
         workflow_engine: 워크플로우 엔진 (현재 1차에서는 미사용, 확장 지점만 확보).
+        secrets_vault: 비밀 정보 vault — [ADR 0003](../docs/saas/decisions/0003-secrets-handling.md)
+            Phase 2-b. 미주입 시 vault 의존 path (runtime env 주입) 만 skip.
+            ``placeholder`` 가 들어있는 prompt / generated_code 는 그대로 통과 —
+            AI 가이드 (system_context #21) 가 ``get_secret()`` 패턴 생성 유도.
     """
 
     def __init__(
@@ -96,11 +101,13 @@ class AppService:
         ai_manager: Optional["AIEngineManager"] = None,
         workflow_engine: Optional["WorkflowEngine"] = None,
         prompt_builder: Optional["PromptBuilder"] = None,
+        secrets_vault: Optional["SecretsVault"] = None,
     ) -> None:
         self._repo = session_repo
         self._ai = ai_manager
         self._engine = workflow_engine
         self._prompt_builder = prompt_builder
+        self._secrets_vault = secrets_vault
 
     @classmethod
     def create_default(
@@ -126,7 +133,22 @@ class AppService:
 
         repo = LocalJsonRepository(data_dir=Path(data_dir))
         ai_mgr = AIEngineManager(settings) if settings is not None else None
-        return cls(session_repo=repo, ai_manager=ai_mgr)
+
+        # ADR 0003 Phase 2-b — KeyringVault 자동 시도, 실패 시 None (vault 의존 path skip).
+        # 헤드리스/CI 환경 (keyring backend 없음) 에서도 데스크톱 앱 자체는 정상 부팅.
+        vault = None
+        try:
+            from core.secrets import KeyringVault
+
+            vault = KeyringVault(index_path=Path(data_dir) / "vault_index.json")
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            import logging
+
+            logging.getLogger(__name__).info(
+                "KeyringVault 초기화 실패 — vault 의존 path 비활성 (%s)", exc
+            )
+
+        return cls(session_repo=repo, ai_manager=ai_mgr, secrets_vault=vault)
 
     def reload_ai(self, settings: dict) -> None:
         """Settings 변경 후 AI 엔진 재초기화 (UI 가 ``AIEngineManager`` 를 직접 import 안 하도록)."""
@@ -138,8 +160,14 @@ class AppService:
         """새 ``ExecutionKernel`` 인스턴스 — 세션별 분리 사용.
 
         UI 가 ``core.execution_kernel`` 을 직접 import 안 하도록 factory 제공.
+        ADR 0003 Phase 2-b — vault 가 있으면 kernel 에 주입 (env 자동 주입).
         """
-        return ExecutionKernel()
+        return ExecutionKernel(secrets_vault=self._secrets_vault)
+
+    @property
+    def secrets_vault(self) -> Optional["SecretsVault"]:
+        """vault 인스턴스 — UI Settings 시크릿 관리 탭이 직접 호출용 (PR-4)."""
+        return self._secrets_vault
 
     @property
     def repo(self) -> SessionRepository:

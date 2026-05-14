@@ -38,10 +38,13 @@ from PySide6.QtWidgets import (
 class SettingsDialog(QDialog):
     """환경 설정 다이얼로그"""
 
-    def __init__(self, settings: dict, prompts: dict, parent=None):
+    def __init__(self, settings: dict, prompts: dict, parent=None, *, secrets_vault=None):
         super().__init__(parent)
         self.settings = json.loads(json.dumps(settings))  # 딥 카피
         self.prompts = json.loads(json.dumps(prompts))
+        # ADR 0003 Phase 2-c — vault 가 있으면 "🔒 시크릿" 탭 표시. None 이면 탭 생략.
+        # ui_v2 가 self.app_service.secrets_vault 전달, v1 은 미전달 (tab 안 보임).
+        self._secrets_vault = secrets_vault
 
         self.setWindowTitle("⚙️ 환경 설정")
         self.setMinimumSize(600, 500)
@@ -75,6 +78,17 @@ class SettingsDialog(QDialog):
 
         # 6. 환경 설정 탭
         tabs.addTab(self._create_environment_tab(), "🔧 환경")
+
+        # 7. 시크릿 탭 (ADR 0003 Phase 2-c — vault 주입 시에만 표시)
+        if self._secrets_vault is not None:
+            try:
+                from core.i18n import tr as _tr
+
+                tabs.addTab(self._create_secrets_tab(), _tr("ui_v2.settings.tab_secrets"))
+            except Exception:  # noqa: BLE001 — 시크릿 탭 실패가 dialog 전체 막지 X
+                import logging
+
+                logging.getLogger(__name__).exception("Secrets tab 생성 실패 — skip")
 
         layout.addWidget(tabs)
 
@@ -654,6 +668,177 @@ class SettingsDialog(QDialog):
 
             except Exception as e:
                 QMessageBox.warning(self, "오류", f"Python 경로 변경 중 오류:\n{e}")
+
+    def _create_secrets_tab(self) -> QWidget:
+        """ADR 0003 Phase 2-c — 시크릿 vault 관리 탭.
+
+        - 등록된 시크릿 목록 (label + namespace, 값은 표시 X)
+        - + 추가 / 삭제 버튼
+        - vault 는 ``self._secrets_vault`` 주입 (None 이면 이 탭 자체가 안 만들어짐)
+        """
+        from core.i18n import tr as _tr
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        heading = QLabel(f"<b>{_tr('ui_v2.settings.secrets.heading')}</b>")
+        layout.addWidget(heading)
+        desc = QLabel(_tr("ui_v2.settings.secrets.description"))
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #a6adc8;")
+        layout.addWidget(desc)
+
+        # 목록 테이블
+        self._secrets_table = QTableWidget(0, 2)
+        self._secrets_table.setHorizontalHeaderLabels(
+            [
+                _tr("ui_v2.settings.secrets.col_label"),
+                _tr("ui_v2.settings.secrets.col_namespace"),
+            ]
+        )
+        self._secrets_table.verticalHeader().setVisible(False)
+        self._secrets_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._secrets_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._secrets_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self._secrets_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        layout.addWidget(self._secrets_table)
+
+        self._secrets_empty_label = QLabel(_tr("ui_v2.settings.secrets.empty"))
+        self._secrets_empty_label.setStyleSheet("color: #a6adc8; padding: 12px;")
+        self._secrets_empty_label.setWordWrap(True)
+        self._secrets_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._secrets_empty_label)
+
+        # 버튼
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton(_tr("ui_v2.settings.secrets.btn_add"))
+        btn_add.clicked.connect(self._on_secrets_add)
+        btn_row.addWidget(btn_add)
+        self._btn_secrets_delete = QPushButton(_tr("ui_v2.settings.secrets.btn_delete"))
+        self._btn_secrets_delete.clicked.connect(self._on_secrets_delete)
+        btn_row.addWidget(self._btn_secrets_delete)
+
+        # ADR 0003 PR-8 — Windows 자격 증명 관리자에서 가져오기 (Windows 한정)
+        try:
+            from core.windows_credentials import is_available as _win_creds_avail
+
+            if _win_creds_avail():
+                btn_import = QPushButton(_tr("ui_v2.settings.secrets.btn_import_winvault"))
+                btn_import.clicked.connect(self._on_secrets_import_winvault)
+                btn_row.addWidget(btn_import)
+        except Exception:  # noqa: BLE001 — import 자체 실패 시 그냥 버튼 안 보임
+            pass
+
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        self._refresh_secrets_table()
+        return widget
+
+    def _refresh_secrets_table(self) -> None:
+        """vault.list() 호출해 표 갱신. namespace 별로 모두 표시."""
+        from core.i18n import tr as _tr
+
+        if self._secrets_vault is None:
+            return
+        try:
+            labels = list(self._secrets_vault.list(namespace="secret"))
+            labels += list(self._secrets_vault.list(namespace="apikey"))
+        except Exception:  # noqa: BLE001
+            labels = []
+
+        self._secrets_table.setRowCount(len(labels))
+        for row, lab in enumerate(labels):
+            label_item = QTableWidgetItem(lab.label)
+            label_item.setData(Qt.ItemDataRole.UserRole, lab)
+            self._secrets_table.setItem(row, 0, label_item)
+            namespace_text = _tr(f"ui_v2.settings.secrets.namespace_{lab.namespace}")
+            if namespace_text.startswith("ui_v2."):
+                namespace_text = lab.namespace
+            self._secrets_table.setItem(row, 1, QTableWidgetItem(namespace_text))
+
+        is_empty = len(labels) == 0
+        self._secrets_empty_label.setVisible(is_empty)
+        self._secrets_table.setVisible(not is_empty)
+        self._btn_secrets_delete.setEnabled(not is_empty)
+
+    def _on_secrets_add(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        from PySide6.QtWidgets import QLineEdit as _QLE
+
+        from core.i18n import tr as _tr
+        from core.secrets import SecretLabel
+
+        label, ok = QInputDialog.getText(
+            self,
+            _tr("ui_v2.settings.secrets.add_dialog_title"),
+            _tr("ui_v2.settings.secrets.add_dialog_label"),
+        )
+        if not ok or not label:
+            return
+        label = label.strip()
+        try:
+            sec_label = SecretLabel(label=label, namespace="secret")
+        except ValueError as exc:
+            QMessageBox.warning(self, _tr("ui_v2.settings.secrets.add_dialog_title"), str(exc))
+            return
+
+        value, ok = QInputDialog.getText(
+            self,
+            _tr("ui_v2.settings.secrets.add_dialog_title"),
+            _tr("ui_v2.settings.secrets.add_dialog_value"),
+            _QLE.EchoMode.Password,
+        )
+        if not ok or value == "":
+            return
+
+        try:
+            self._secrets_vault.set(sec_label, value)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, _tr("ui_v2.settings.secrets.add_dialog_title"), str(exc))
+            return
+
+        self._refresh_secrets_table()
+
+    def _on_secrets_delete(self) -> None:
+        from core.i18n import tr as _tr
+
+        rows = self._secrets_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        item = self._secrets_table.item(rows[0].row(), 0)
+        if item is None:
+            return
+        sec_label = item.data(Qt.ItemDataRole.UserRole)
+        if sec_label is None:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            _tr("ui_v2.settings.secrets.delete_confirm_title"),
+            _tr("ui_v2.settings.secrets.delete_confirm_body").format(label=sec_label.label),
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self._secrets_vault.delete(sec_label)
+        except Exception:  # noqa: BLE001
+            pass
+        self._refresh_secrets_table()
+
+    def _on_secrets_import_winvault(self) -> None:
+        """ADR 0003 PR-8 — Windows 자격 증명 관리자 import 다이얼로그."""
+        from ui.windows_credentials_import_dialog import WindowsCredentialsImportDialog
+
+        dialog = WindowsCredentialsImportDialog(secrets_vault=self._secrets_vault, parent=self)
+        dialog.exec()
+        # vault 변경 가능 — 표 새로고침
+        self._refresh_secrets_table()
 
     def get_settings(self) -> dict:
         """현재 설정값을 딕셔너리로 반환"""

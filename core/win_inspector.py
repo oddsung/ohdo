@@ -270,11 +270,23 @@ class WindowInspector:
         피커로 선택된 단일 요소 정보를 AI 프롬프트에 포함할 텍스트로 변환합니다.
         Selenium 가능 (CDP DOM 수집됨) → Selenium 코드 예시.
         그 외 (browser chrome / CDP 없음 / 데스크톱 앱) → pywinauto 코드 예시.
+
+        ADR 0003 PR-10e — ``element_info['_ohdo_label']`` 이 있으면 header 에
+        ``[📌 label]`` 표시. user_request 안의 ``📌 [label]`` reference 와 AI 가
+        cross-reference 하도록.
         """
         if self.should_use_selenium(element_info):
             return self._get_browser_element_info_text(element_info)
         else:
             return self._get_desktop_element_info_text(element_info)
+
+    @staticmethod
+    def _label_suffix(element_info: dict) -> str:
+        """element_info 에 _ohdo_label 있으면 header 에 붙일 ``[📌 label]`` suffix."""
+        label = element_info.get("_ohdo_label")
+        if isinstance(label, str) and label:
+            return f" [📌 {label}]"
+        return ""
 
     def _get_browser_element_info_text(self, element_info: dict) -> str:
         """브라우저 요소 → Selenium 코드 생성"""
@@ -289,7 +301,7 @@ class WindowInspector:
         picker_locators: list[tuple[str, str]] = element_info.get("locator_candidates", [])
 
         lines = [
-            f"## 선택된 UI 요소 (브라우저: {browser_type})",
+            f"## 선택된 UI 요소 (브라우저: {browser_type}){self._label_suffix(element_info)}",
             f"- **타입**: {ctrl_type}",
             "- **자동화 방식**: Selenium (DOM 직접 제어)",
         ]
@@ -717,7 +729,7 @@ class WindowInspector:
         recommended_backend = element_info.get("recommended_backend", "uia")
 
         lines = [
-            "## 선택된 UI 요소 (데스크톱 앱)",
+            f"## 선택된 UI 요소 (데스크톱 앱){self._label_suffix(element_info)}",
             f"- **타입**: {ctrl_type}",
             "- **자동화 방식**: pywinauto",
         ]
@@ -1075,7 +1087,7 @@ class WindowInspector:
         detected_backend = element_info.get("detected_backend", "uia")
 
         lines = [
-            "## 선택된 UI 요소 (데스크톱 앱 — Owner-drawn 컨트롤)",
+            f"## 선택된 UI 요소 (데스크톱 앱 — Owner-drawn 컨트롤){self._label_suffix(element_info)}",
             f"- **타입**: {ctrl_type} (owner-drawn: UIA/Win32 자식으로 노출되지 않음)",
             "- **자동화 방식**: pyautogui 좌표 기반 클릭",
         ]
