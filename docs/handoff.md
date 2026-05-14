@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-13 (5/4~5/13 작업 — 자세한 변경은 §5 변경 이력 + §11~§22 인계 노트 참조). baseline: **core 116/116 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준, 5/12 GUI 핵심기능 테스트 세션 후 — **미커밋, 다음 세션에서 commit**). **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
+> 마지막 업데이트: 2026-05-14 (5/4~5/14 작업 — 자세한 변경은 §5 변경 이력 + §11~§23 인계 노트 참조). baseline: **core 144/144 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준). **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -258,6 +258,7 @@ ui_v2 의 `_on_send_message` 가 이 메서드만 호출 — Step 생성 로직 
    - **Phase 2.5: Initial 블럭 단독 실행** (§4.9) — Initial 블럭 카드의 "⏯ 단독" 버튼 클릭 → driver/options 등 재초기화되는지. 라이브러리 미초기화 상태 / 초기화된 상태 양쪽 시나리오 확인. 다른 step status 안 건드리는지.
 4. **PySide6 양쪽 동기화 정책**: 코드 수정 시 어디 먼저 적용할지. 현재 PyQt6 원본 먼저 → 수동 sed 로 sync (자동 스크립트 없음).
 5. **API key 저장 위치 (D2 후속)**: 현재 `settings.json` 평문. OS keyring (Windows Credential Manager) 으로 옮길지 사용자 결정 대기. v1.0 공개 전 결정 권장 (보안 디폴트).
+   - **2026-05-13 진척**: [ADR 0003](saas/decisions/0003-secrets-handling.md) + [설계 — Phase 1+2](saas/architecture/24-secrets-phase-1-2.md) 작성 — API key 와 사용자 시크릿 (ID/PW/토큰) 을 동일 vault (KeyringVault) 의 다른 namespace 로 통합 (`ohdo:apikey:<engine>` vs `ohdo:secret:<label>`) 권장. ADR Proposed 상태 — 사용자 검토 후 Accepted 전환 + Phase 1 (1일) → Phase 2 (3일) → Phase 3 (3일) 순.
 6. **장기 AI 모델 (D2 후속)**: BYO API 키만 / ohdo 크레딧 SaaS / 둘 다 — 미정. 현 어댑터는 BYO 우선 설계지만 SaaS 모드 ('proxy' base_url) 로 확장 가능.
 
 ## 7. 다음 작업 후보 (우선순위 순)
@@ -1298,6 +1299,9 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
 - **kernel IPC RESULT 마커는 항상 "\n" prefix** (§22 #1): `kernel_worker` 가 `RESULT_SUCCESS`/`RESULT_ERROR`/`PONG_RESP` 쓸 때 `"\n" + MARKER + "\n"`. subprocess 가 trailing newline 없이 fd1 에 남긴 partial line 과 합쳐지면 `execution_kernel` 의 literal 비교 fail → success/error 오분류. test_110.
 - **재생성 (G7-D) 은 in-place 대체** (§22 #4): `generate_step(replaces_step_id=...)` — `add_step` 대신 `update_step`, prev_body 계산 시 그 step skip, step_id 보존. 새 step 추가 X. test_113.
 - **v2 element picker 는 showMinimized** (§22 #5): `_on_elempick` 가 `self.showMinimized()` (not `self.lower()`). picked/cancel 시 `showNormal()`. F3 wait 후 main window 가시 회귀 방지. test_114. (cf. `_on_capture` 는 아직 `self.lower()` — 추후 동일 fix 후보)
+- **시크릿 placeholder `{{secret:label}}` / element placeholder `{{el:label}}`** (§23): 사용자 메시지에 직접 또는 `@` 자동완성으로 삽입. `{{secret:...}}` 는 prompt_builder 가 그대로 AI 에 전달 + kernel runtime 에 vault 환경변수로 주입. `{{el:...}}` 는 ui_v2 가 전송 직전 `📌 [label]` 자연어 reference 로 사전 치환 → AI 는 placeholder 안 봄. label 패턴: `[a-z0-9_]{1,32}`.
+- **`@` 자동완성 trigger 조건** (§23 PR-9): 채팅창에 `@` 가 공백/줄 시작 뒤일 때만 popup. email `user@host` false-positive 회피. popup 에 시크릿 (🔒) + apikey (🔑) + element (📌) 통합 표시.
+- **chip 라벨 자동 추론 + 편집** (§23 PR-10c): picker 로 element 잡으면 `core/element_labels.suggest_element_label` 이 HTML/UIA attribute 분석해 의미 라벨 부여 (`type=password` → `pw`, `name=username` → `id`). chip 클릭으로 inline edit. 중복 라벨 거부.
 
 ## 10. 사용자에게 빠르게 물어볼 후보
 
@@ -1305,3 +1309,100 @@ baseline 100 → **106** (core 106/106 + scenarios 73/73). ruff lint 0 issue + f
 - "다음 작업 후보 (§7) 중 어느 거 진행할까?" (Phase 2.5 Initial 블럭 단독 실행 / AI prompt 효과 측정 / main_window 추가 분해)
 - "PySide6 포트 GUI 검증 결과는?"
 - "LICENSE 파일 (AGPL-3.0) 추가할까? README 라이선스 섹션도 같이 작성?"
+
+## 23. 5/13~5/14 ADR 0003 Phase 1+2 — 시크릿 처리 + element placeholder (PR-1~10)
+
+**컨텍스트**: 5/13 사용자 질문 — "AI 와 대화로 Python 코드 만들 때 사용자가 웹사이트 ID/PW 나 API 키 같은 민감 정보를 입력하면 그게 그대로 코드에 박혀 보이는 경우 발생. 해결 방법을 여러 가지 제안해 줘." 본 트랙은 그 질문에 대한 다층 방어 (Defense in Depth) 구현. 5/13 ADR + 설계 문서 작성 → Accepted → PR-1~10 순차 구현 → 5/14 완료.
+
+**관련 문서**:
+- [ADR 0003 시크릿 처리 정책](saas/decisions/0003-secrets-handling.md)
+- [Architecture — Phase 1+2 데이터 흐름·삽입점](saas/architecture/24-secrets-phase-1-2.md)
+
+### Sub-PR 요약
+
+| PR | 작업 | 신규 테스트 |
+|---|---|---|
+| **PR-1** | A1 detector (`core/secrets_detector.py`) + C1 prompt 가이드 (system_context #21) + C2 정적 분석 (`code_validator.hardcoded_secret` issue kind) | test_117~121 |
+| **PR-2** | `core/secrets.py` (`SecretLabel` + `SecretsVault` ABC + `KeyringVault` — OS keyring + `data/vault_index.json` for list()), `core/secrets_redact.py` (placeholder ↔ 평문 변환) | test_122~124 |
+| **PR-3** | AppService `secrets_vault` 인자 + 자동 KeyringVault 생성, ExecutionKernel env 주입 (start() 시점), kernel_worker `_get_secret(label)` helper + globals 등록 | test_125~130 |
+| **PR-4** | `SecretAdvisoryDialog` (ui_v2) + SettingsDialog 🔒 시크릿 탭 (list/add/delete) + i18n catalog 36 키 + `prepare_outgoing_text` 후크 in `_on_send_message` | test_131 |
+| **PR-5** | Detector 보강 — `_QUOTED_LITERAL` 패턴 (따옴표 안 PW-look-alike) + RPA 입력 동사 (`입력`/`write`/`paste` 등) 인접 confidence boost + UI 라벨/식별자 skip list | test_132~133 |
+| **PR-6** | Hot secret reload — kernel_worker `<<<SET_SECRETS>>>` IPC 마커 + ExecutionKernel `push_secrets()` (매 execute_block 직전 자동 호출). vault.set 후 즉시 반영 — kernel 재시작 불필요 | test_134~135 |
+| **PR-7** | Element-based password-field 감지 — `is_password_field_element` + `detect_with_elements`. HTML `type="password"` / UIA Edit + password-hint automation_id 신호 시 사용자가 PW 키워드 안 써도 advisory 발동 | test_136~137 |
+| **PR-8** | Windows Credential Manager import — `core/windows_credentials.py` (`win32cred` wrapper, read-only) + `WindowsCredentialsImportDialog`. 일반 자격 증명 (CRED_TYPE_GENERIC) 만 노출, RDP 등 제외 | test_138 |
+| **PR-9** | `@` 자동완성 popup (`SecretInsertPopup`) — 채팅창 `@` + 공백/줄 시작 뒤 trigger, email `user@host` false-positive 회피, `find_at_trigger` helper | test_139~140 |
+| **PR-10a** | 🔒 버튼 제거 — `@` 자동완성 만으로 충분 (사용자 피드백) | test_140 갱신 |
+| **PR-10b** | `core/element_labels.suggest_element_label` — HTML/UIA attribute 기반 의미 라벨 자동 추론 (`type=password` → `pw`, `userId` → `id`, `userPs` → `pw`) + 중복 시 `_2` suffix | test_141 |
+| **PR-10c** | chip 영역 컴포넌트화 — `ui_v2/chip_widgets.py` `ImageChip` + `ElementChip` (stacked widget, inline 라벨 edit) + `_ohdo_label` 키에 라벨 저장 + 중복 라벨 거부 | test_142 |
+| **PR-10d** | `@` popup 통합 — `SecretInsertPopup` 에 `elements_provider` 인자, vault (🔒/🔑) + elements (📌) 통합 표시. UserRole 에 `(kind, label)` 튜플 저장, kind 별 placeholder 삽입 (`{{secret:...}}` 또는 `{{el:...}}`) | (test_140 갱신) |
+| **PR-10e** | `core/element_placeholders.py` (`{{el:label}}` → `📌 [label]` 자연어 reference 치환, `find_unresolved` 매핑 검사) + `win_inspector.get_element_info_text` header 에 `[📌 label]` suffix. `_on_send_message` 에 미매핑 차단 모달 (i18n) | test_143~144 |
+
+**총 28 신규 테스트** (test_117~144), **10 신규 모듈**:
+- `core/secrets.py`, `secrets_detector.py`, `secrets_redact.py`, `windows_credentials.py`, `element_labels.py`, `element_placeholders.py`
+- `ui/windows_credentials_import_dialog.py`
+- `ui_v2/secret_advisory_dialog.py`, `secret_insert_popup.py`, `chip_widgets.py`
+
+**신규 IPC**: kernel_worker `<<<SET_SECRETS>>>` / `<<<SECRETS_OK>>>` (PR-6 hot reload).
+
+**의존성 추가**: `keyring>=24.0.0` (PR-2). `win32cred` 는 기존 `pywin32` 의 일부 — 추가 없음.
+
+### 핵심 데이터 흐름 (Phase 2 완료 기준)
+
+**시크릿 path**:
+```
+사용자 입력 → A1 detector (PR-1+5+7) → SecretAdvisoryDialog (PR-4) → vault.set
+                                                                    ↓
+        AI prompt (placeholder 만) ← prompt_builder ← _send_request (사용자 입력에 placeholder 만 보냄)
+                                                                    ↓
+        AI 응답 → C2 정적 분석 (PR-1) → Step 저장 (placeholder 만, PR-3)
+                                                                    ↓
+        kernel.execute_block → push_secrets IPC (PR-6) → env OHDO_SECRET_<label>
+                                                                    ↓
+        AI 생성 코드 `get_secret('label')` → kernel_worker helper → env 값 반환
+```
+
+**Element placeholder path** (PR-10):
+```
+사용자 picker → chip 영역 (자동 추론 라벨, 편집 가능) → _ohdo_label
+                                                            ↓
+사용자 채팅에 {{el:label}} 또는 '@' 자동완성 → popup 에서 선택
+                                                            ↓
+_on_send_message 진입 → find_unresolved → 미매핑 시 차단 + 모달
+                                                            ↓
+replace_with_references → user_request 내 {{el:label}} → 📌 [label]
+                                                            ↓
+prompt_builder → element_context 헤더에 [📌 label] suffix → AI
+                                                            ↓
+AI 가 placeholder 안 보고 평범한 element_context cross-reference 로 코드 생성
+```
+
+### 알려진 한계 / Phase 3 후보
+
+1. **세션 마이그레이션 미구현**: 옛 세션 JSON 의 평문 시크릿 자동 detect → 모달 안내. ADR 0003 §4 에 설계 명시되어 있지만 PR 범위 외로 미뤘음.
+2. **콘솔 출력 마스킹 미구현**: 사용자 step 코드가 `print(get_secret('xxx'))` 처럼 직접 출력하면 콘솔에 평문 보임. kernel_worker stdout 캡처 단계에서 vault 값 사후 치환 (Phase 3).
+3. **Export `.env.example` 분리 미구현**: `app_service.export_workflow` 가 placeholder 그대로 export. `python-dotenv` 기반 `.env.example` + `os.environ` 패턴 변환 (Phase 3).
+4. **AI 환각 — try/except 가 RuntimeError 묻음**: PR-3 시도 시 사용자 보고 케이스 — AI 가 `get_secret('password')` 실패한 RuntimeError 를 가장 바깥 try/except 로 잡아 print 만 하고 raise 안 함 → kernel 은 ✅ 보고, 사용자는 콘솔만 보고 confusing. system_context 보강 후보 (re-raise 강제) 또는 PR-7 처럼 정적 가드.
+5. **AI api_key vault 마이그레이션**: `settings.json` 평문 잔존 — handoff §6 #5. 같은 `KeyringVault` 의 `apikey` namespace 활용 가능 (이미 가능). UI 마이그레이션 path 미구현.
+6. **외부 vault provider** (HashiCorp Vault, 1Password CLI): ADR 0004 후보, SaaS / 팀 시나리오 시.
+
+### 검증 결과
+
+- **core: 144/144 그린** (5/13 핵심 116 + PR-1~10 28 새 테스트 = 144)
+- **scenarios: 73/73 그린** (회귀 0)
+- **ruff check + format**: All passed
+- 실측 (사용자 시스템 — Windows + WinVaultKeyring backend): 22 자격 증명 중 generic 15 enumerate, RDP/도메인 7 자동 필터
+
+### 다음 세션 출발점
+
+**A. 사용자 GUI 검증 (권장 1순위)**: ohdo (`python main.py --ui v2`) 직접 띄워 다음 5 시나리오 실측:
+1. 채팅에 평문 PW 입력 → advisory 모달 발동 → 라벨 입력 → vault 등록 → AI 코드에 `get_secret()` 패턴 → 즉시 실행 성공 (PR-6 hot reload 검증)
+2. picker 로 password field 선택 → chip 라벨 자동 `pw` → 채팅 `@pw` 입력 → 자동완성 → `{{el:pw}}` 삽입 → 전송 (PR-10 검증)
+3. Windows 자격 증명에서 import → Settings → 🔒 시크릿 탭 → 표 표시 → 가져오기 → 채팅 `@` 자동완성에 등장 (PR-8 검증)
+4. 미매핑 `@unknown` → 차단 모달 (PR-10e 검증)
+5. chip 라벨 클릭으로 inline edit → 라벨 변경 → `@` popup 에 새 라벨로 즉시 반영 (PR-10c 검증)
+
+**B. Phase 3 진행**: 위 한계 1~3 (세션 마이그레이션 / 콘솔 마스킹 / export 분리). 각각 PR-11/12/13 정도.
+
+**C. AI 환각 가드** (한계 4): system_context 보강 또는 정적 검사. 사용자 보고 빈도에 따라 우선순위.
+
+**D. 다른 트랙 복귀**: §22 D 의 저장소 public 공개 준비 / ui/ (v1) i18n / 영어 catalogue 검토 / baseline UI 스크린샷.
