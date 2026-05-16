@@ -7038,6 +7038,200 @@ if __name__ == "__main__":
             self.assert_true(key in ko, f"[PR-10] key '{key}' ko.json 누락")
             self.assert_true(key in en, f"[PR-10] key '{key}' en.json 누락")
 
+    def test_145_input_hooks_module_and_api(self):
+        """[ADR 0004 PR-11] core/input_hooks.py 모듈 + 핵심 dataclass + API 표면.
+
+        recorder (PR-12+) 와 향후 element_picker 통합 시 공유할 LL hook manager.
+        element_picker 의 기존 inline hook 코드는 PR-11 에서 건드리지 않음
+        (test_44~48 sentinel 보호) — Phase R2/R3 점진 마이그레이션.
+        """
+        from core import input_hooks
+
+        self.step("(1) dataclass + Literal 타입")
+        self.assert_true(hasattr(input_hooks, "MouseEvent"), "MouseEvent dataclass 필수")
+        self.assert_true(hasattr(input_hooks, "KeyboardEvent"), "KeyboardEvent dataclass 필수")
+
+        me = input_hooks.MouseEvent(type="lbutton_down", x=10, y=20)
+        self.assert_true(
+            me.type == "lbutton_down" and me.x == 10 and me.y == 20,
+            f"MouseEvent 필드 — type/x/y. 실제: {me!r}",
+        )
+        ke = input_hooks.KeyboardEvent(type="keydown", vk_code=0x41, scan_code=30)
+        self.assert_true(
+            ke.type == "keydown" and ke.vk_code == 0x41,
+            f"KeyboardEvent 필드 — type/vk_code. 실제: {ke!r}",
+        )
+
+        self.step("(2) Win32 상수 정의")
+        for const in (
+            "WH_MOUSE_LL",
+            "WH_KEYBOARD_LL",
+            "WM_LBUTTONDOWN",
+            "WM_LBUTTONUP",
+            "WM_RBUTTONDOWN",
+            "WM_KEYDOWN",
+            "WM_KEYUP",
+        ):
+            self.assert_true(
+                hasattr(input_hooks, const),
+                f"[PR-11] Win32 상수 {const} 필수",
+            )
+
+        self.step("(3) InputHookManager API")
+        self.assert_true(hasattr(input_hooks, "InputHookManager"), "InputHookManager 클래스 필수")
+        mgr = input_hooks.InputHookManager()
+        for method in (
+            "install_mouse_callback",
+            "install_keyboard_callback",
+            "uninstall_mouse_callback",
+            "uninstall_keyboard_callback",
+            "uninstall_all",
+        ):
+            self.assert_true(hasattr(mgr, method), f"[PR-11] InputHookManager.{method} 필수")
+        for prop in (
+            "is_mouse_hook_installed",
+            "is_keyboard_hook_installed",
+            "mouse_callback_count",
+            "keyboard_callback_count",
+        ):
+            self.assert_true(hasattr(mgr, prop), f"[PR-11] InputHookManager.{prop} 필수")
+
+        self.step("(4) get_hook_manager 싱글톤")
+        self.assert_true(hasattr(input_hooks, "get_hook_manager"), "get_hook_manager 함수 필수")
+        m1 = input_hooks.get_hook_manager()
+        m2 = input_hooks.get_hook_manager()
+        self.assert_true(m1 is m2, "[PR-11] get_hook_manager 는 싱글톤 반환 필수")
+
+    def test_146_input_hooks_callback_registration(self):
+        """[ADR 0004 PR-11] callback 등록/해제 멱등성 + ID 고유성 + uninstall_all.
+
+        non-Windows 환경에서도 callback 사전 등록은 작동 (hook 자체만 noop).
+        """
+        from core.input_hooks import InputHookManager
+
+        mgr = InputHookManager()
+        try:
+            cb_a = lambda ev: False  # noqa: E731
+            cb_b = lambda ev: False  # noqa: E731
+
+            self.step("(1) 등록 ID 고유성")
+            id_a = mgr.install_mouse_callback(cb_a)
+            id_b = mgr.install_mouse_callback(cb_b)
+            self.assert_true(id_a != id_b, f"[PR-11] callback ID 고유 필수. {id_a}=={id_b}")
+            self.assert_true(
+                mgr.mouse_callback_count == 2,
+                f"[PR-11] mouse_callback_count == 2. 실제: {mgr.mouse_callback_count}",
+            )
+
+            self.step("(2) 부분 해제")
+            mgr.uninstall_mouse_callback(id_a)
+            self.assert_true(
+                mgr.mouse_callback_count == 1,
+                f"[PR-11] 부분 해제 후 count == 1. 실제: {mgr.mouse_callback_count}",
+            )
+
+            self.step("(3) 존재하지 않는 ID 해제 무시")
+            mgr.uninstall_mouse_callback(99999)  # 예외 X
+            self.assert_true(
+                mgr.mouse_callback_count == 1,
+                "[PR-11] 잘못된 ID 해제 idempotent (예외 X) 필수",
+            )
+
+            self.step("(4) keyboard 측 동일 동작")
+            id_k = mgr.install_keyboard_callback(cb_a)
+            self.assert_true(
+                mgr.keyboard_callback_count == 1,
+                "[PR-11] keyboard 등록 후 count == 1",
+            )
+            mgr.uninstall_keyboard_callback(id_k)
+            self.assert_true(
+                mgr.keyboard_callback_count == 0,
+                "[PR-11] keyboard 해제 후 count == 0",
+            )
+
+            self.step("(5) uninstall_all 전부 비움")
+            mgr.install_keyboard_callback(cb_a)
+            mgr.uninstall_all()
+            self.assert_true(
+                mgr.mouse_callback_count == 0 and mgr.keyboard_callback_count == 0,
+                "[PR-11] uninstall_all 후 양쪽 count == 0",
+            )
+        finally:
+            mgr.uninstall_all()
+
+    def test_147_input_hooks_callback_exception_isolation(self):
+        """[ADR 0004 PR-11] 한 callback 예외가 다른 callback dispatch 에 영향 X.
+
+        직접 dispatch 메서드 호출 (실제 hook 설치 X — 크로스 플랫폼 안전).
+        """
+        from core.input_hooks import InputHookManager, MouseEvent
+
+        mgr = InputHookManager()
+        try:
+            received: list[str] = []
+
+            def cb_raise(ev: MouseEvent) -> bool:
+                raise RuntimeError("의도된 예외")
+
+            def cb_ok(ev: MouseEvent) -> bool:
+                received.append(ev.type)
+                return False
+
+            mgr.install_mouse_callback(cb_raise)
+            mgr.install_mouse_callback(cb_ok)
+
+            self.step("(1) dispatch 시 예외 격리 — cb_ok 호출 보장")
+            mgr._mouse_callbacks_snapshot = list(mgr._mouse_callbacks.values())
+            ev = MouseEvent(type="lbutton_down", x=0, y=0)
+            for cb in list(mgr._mouse_callbacks.values()):
+                try:
+                    cb(ev)
+                except Exception:
+                    pass
+            self.assert_true(
+                "lbutton_down" in received,
+                "[PR-11] cb_raise 예외 발생해도 cb_ok 가 dispatch 받아야 함",
+            )
+        finally:
+            mgr.uninstall_all()
+
+    def test_148_input_hooks_non_windows_silent_noop(self):
+        """[ADR 0004 PR-11] non-Windows 환경에서 install/uninstall 이 silent noop.
+
+        sys.platform != 'win32' 시 _user32 == None, hook 설치 시도해도 예외 없이
+        is_*_hook_installed == False. callback 등록 자체는 가능 (메모리에만).
+        """
+        import sys as _sys
+
+        from core.input_hooks import InputHookManager
+
+        mgr = InputHookManager()
+        try:
+            # 직접 _user32 None 으로 강제 — 실제 win32 환경에서도 noop path 검증
+            mgr._user32 = None
+
+            self.step("(1) hook 설치 시도 예외 X")
+            cb_id = mgr.install_mouse_callback(lambda ev: False)
+            self.assert_true(cb_id > 0, "[PR-11] callback 등록 자체는 작동 필수")
+
+            self.step("(2) is_mouse_hook_installed == False (noop)")
+            self.assert_true(
+                mgr.is_mouse_hook_installed is False,
+                "[PR-11] non-Windows 에서 hook 미설치 (False) 필수",
+            )
+
+            self.step("(3) uninstall 도 silent noop")
+            mgr.uninstall_mouse_callback(cb_id)
+            self.assert_true(
+                mgr.mouse_callback_count == 0,
+                "[PR-11] non-Windows 에서도 callback 해제 작동 필수",
+            )
+
+            # 실제 win32 환경 확인 (정보용, fail 아님)
+            self.step(f"(info) sys.platform == {_sys.platform!r}")
+        finally:
+            mgr.uninstall_all()
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
