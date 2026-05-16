@@ -48,6 +48,7 @@ from .storage.base import SessionRepository
 
 if TYPE_CHECKING:
     from core.adapters.base_adapter import AIResponse
+    from core.recorder import Recorder
     from core.secrets import SecretsVault
 
 # UI 가 직접 ``core.session_manager`` / ``core.execution_kernel`` 등을 import 하지
@@ -108,6 +109,11 @@ class AppService:
         self._engine = workflow_engine
         self._prompt_builder = prompt_builder
         self._secrets_vault = secrets_vault
+
+        # [ADR 0004 PR-14] 작업 녹화 lifecycle 상태 — 단일 instance per AppService.
+        # UI 가 동시에 두 녹화 진입하지 못하도록 Recorder 자체가 거부 (lock).
+        self._recorder: Optional["Recorder"] = None
+        self._recording_listeners: list[Callable[[str, dict], None]] = []  # (event_name, payload)
 
     @classmethod
     def create_default(
@@ -309,6 +315,158 @@ class AppService:
             source_dir=Path(source_dir),
             new_title=new_title,
         )
+
+    # ── 작업 녹화 (ADR 0004 PR-14) ─────────────────────
+
+    def add_recording_listener(self, callback: Callable[[str, dict], None]) -> None:
+        """녹화 lifecycle 이벤트 listener 등록.
+
+        callback 시그니처: ``(event_name: str, payload: dict) -> None``.
+
+        이벤트 종류:
+        - ``"recording.started"`` — payload: ``{recording_session_id, target_session_id}``
+        - ``"recording.stopped"`` — payload: ``{recording_session_id, raw_event_count,
+          transformed_step_count}``
+        - ``"recording.committed"`` — payload: ``{recording_session_id, target_session_id,
+          step_count}``
+        """
+        if callback not in self._recording_listeners:
+            self._recording_listeners.append(callback)
+
+    def remove_recording_listener(self, callback: Callable[[str, dict], None]) -> None:
+        try:
+            self._recording_listeners.remove(callback)
+        except ValueError:
+            pass
+
+    def _emit_recording_event(self, event_name: str, payload: dict) -> None:
+        for cb in list(self._recording_listeners):
+            try:
+                cb(event_name, payload)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "recording listener 예외 (격리됨): event=%s", event_name
+                )
+
+    @property
+    def is_recording(self) -> bool:
+        return self._recorder is not None and self._recorder.is_recording
+
+    @property
+    def recording_event_count(self) -> int:
+        return self._recorder.event_count if self._recorder else 0
+
+    def start_recording(
+        self,
+        target_session_id: Optional[str] = None,
+        element_capture_fn: Optional[Callable[[int, int], Optional[dict]]] = None,
+    ) -> str:
+        """녹화 시작. 신규 RecordingSession id 반환.
+
+        이미 녹화 중이면 ``RecorderAlreadyStartedError``.
+
+        Args:
+            target_session_id: commit 시 step 들을 추가할 ohdo Session id.
+                ``None`` 이면 commit_recording 에서 새 세션 자동 생성.
+            element_capture_fn: 클릭 시점 element 메타 capture callback.
+                일반적으로 ``WindowInspector`` 의 EFP 함수 (PR-15 UI 가 주입).
+        """
+        from core.input_hooks import get_hook_manager
+        from core.recorder import Recorder, RecorderAlreadyStartedError
+
+        if self._recorder is not None and self._recorder.is_recording:
+            raise RecorderAlreadyStartedError("AppService: 이미 녹화 중. stop_recording 먼저 호출.")
+
+        self._recorder = Recorder(
+            hook_manager=get_hook_manager(),
+            element_capture_fn=element_capture_fn,
+        )
+        rec_session = self._recorder.start(target_session_id=target_session_id)
+        self._emit_recording_event(
+            "recording.started",
+            {
+                "recording_session_id": rec_session.id,
+                "target_session_id": target_session_id,
+            },
+        )
+        return rec_session.id
+
+    def stop_recording(self, self_window_titles: Optional[list[str]] = None) -> list[Step]:
+        """녹화 종료 + raw events → Step 변환. commit 은 별도 단계.
+
+        Args:
+            self_window_titles: ohdo 자체 창 title 리스트 (drop_self_window_clicks
+                필터용). 예: ``["ohdo"]``.
+
+        Returns:
+            변환된 Step 리스트. ``commit_recording`` 으로 ohdo Session 에 추가.
+        """
+        from core.recorder import RecorderNotStartedError
+        from core.recorder_transform import transform
+
+        if self._recorder is None:
+            raise RecorderNotStartedError("AppService: 녹화 안 한 상태에서 stop_recording.")
+
+        rec_session = self._recorder.stop()
+        steps = transform(rec_session, self_window_titles=self_window_titles)
+
+        self._emit_recording_event(
+            "recording.stopped",
+            {
+                "recording_session_id": rec_session.id,
+                "raw_event_count": rec_session.event_count,
+                "transformed_step_count": len(steps),
+            },
+        )
+        return steps
+
+    def commit_recording(
+        self,
+        edited_steps: list[Step],
+        target_session_id: Optional[str] = None,
+        new_session_title: Optional[str] = None,
+    ) -> "Session":
+        """편집된 step 리스트를 ohdo Session 에 batch 추가.
+
+        Args:
+            edited_steps: review dialog (PR-15) 에서 사용자가 편집한 Step 리스트.
+            target_session_id: 추가할 세션 id. ``None`` 이면 새 세션 자동 생성.
+            new_session_title: target_session_id None 시 새 세션 제목. None 이면
+                "Recording YYYYMMDD-HHMMSS" 자동.
+
+        Returns:
+            commit 된 Session.
+        """
+        from datetime import datetime
+
+        if target_session_id is None:
+            title = new_session_title or f"Recording {datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            session = self.create_session(title=title, description="작업 녹화로 자동 생성")
+            target_session_id = session.session_id
+        else:
+            session = self._repo.load_session(target_session_id)
+
+        for step in edited_steps:
+            self._repo.add_step(session, step)
+
+        self._emit_recording_event(
+            "recording.committed",
+            {
+                "recording_session_id": (
+                    self._recorder.current_session.id
+                    if self._recorder and self._recorder.current_session
+                    else None
+                ),
+                "target_session_id": target_session_id,
+                "step_count": len(edited_steps),
+            },
+        )
+
+        # 녹화 lifecycle 종료 후 Recorder 인스턴스 정리 (다음 start 가 새 instance)
+        self._recorder = None
+        return session
 
     # ── 스텝 ───────────────────────────────────────────
 

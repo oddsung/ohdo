@@ -7761,6 +7761,151 @@ if __name__ == "__main__":
             f"[PR-13] element_meta None 시 pyautogui 좌표 fallback. 실제: {all_code!r}",
         )
 
+    def test_159_app_service_recording_lifecycle(self):
+        """[ADR 0004 PR-14] AppService.start/stop/commit_recording 전체 path + listener.
+
+        InMemoryRepository 사용 — 파일 IO 없이 통합 검증.
+        """
+        from core.app_service import AppService
+        from core.input_hooks import MouseEvent
+        from core.storage.in_memory import InMemoryRepository
+
+        repo = InMemoryRepository()
+        svc = AppService(session_repo=repo)
+
+        self.step("(1) 초기 상태 — is_recording False")
+        self.assert_true(svc.is_recording is False, "[PR-14] 초기 is_recording False")
+        self.assert_true(svc.recording_event_count == 0, "[PR-14] 초기 event_count 0")
+
+        self.step("(2) listener 등록 + start_recording")
+        events: list[tuple[str, dict]] = []
+
+        def listener(name: str, payload: dict) -> None:
+            events.append((name, payload))
+
+        svc.add_recording_listener(listener)
+        rec_id = svc.start_recording()
+        self.assert_true(
+            isinstance(rec_id, str) and rec_id,
+            f"[PR-14] start_recording 가 id 반환. {rec_id!r}",
+        )
+        self.assert_true(svc.is_recording is True, "[PR-14] start 후 is_recording True")
+        self.assert_true(
+            len(events) == 1 and events[0][0] == "recording.started",
+            f"[PR-14] recording.started 이벤트 발화. 실제: {events}",
+        )
+
+        self.step("(3) 녹화 중 event 누적 (element_capture_fn callback path)")
+        click_meta = {"control_type": "Button", "name": "OK", "automation_id": "ok"}
+        svc._recorder._element_capture_fn = lambda x, y: click_meta
+        svc._recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=10, y=20))
+        self.assert_true(svc.recording_event_count == 1, "[PR-14] event_count 1")
+
+        self.step("(4) stop_recording → Step 리스트 반환 + recording.stopped 이벤트")
+        steps = svc.stop_recording()
+        self.assert_true(
+            isinstance(steps, list) and len(steps) >= 1,
+            f"[PR-14] stop_recording 가 Step 리스트 반환. 실제: {steps}",
+        )
+        self.assert_true(svc.is_recording is False, "[PR-14] stop 후 is_recording False")
+        stopped_evs = [e for e in events if e[0] == "recording.stopped"]
+        self.assert_true(
+            len(stopped_evs) == 1 and stopped_evs[0][1]["raw_event_count"] == 1,
+            f"[PR-14] recording.stopped payload raw_event_count=1. 실제: {stopped_evs}",
+        )
+
+        self.step("(5) commit_recording (target_session_id None → 새 세션 자동)")
+        session = svc.commit_recording(steps)
+        self.assert_true(
+            session.session_id and len(session.steps) == len(steps),
+            f"[PR-14] 새 세션 + step 개수 일치. id={session.session_id} steps={len(session.steps)}",
+        )
+        committed_evs = [e for e in events if e[0] == "recording.committed"]
+        self.assert_true(
+            len(committed_evs) == 1
+            and committed_evs[0][1]["step_count"] == len(steps)
+            and committed_evs[0][1]["target_session_id"] == session.session_id,
+            f"[PR-14] recording.committed payload. 실제: {committed_evs}",
+        )
+
+        self.step("(6) listener 해제 후 새 이벤트 dispatch X")
+        svc.remove_recording_listener(listener)
+        before = len(events)
+        svc.start_recording()
+        svc.stop_recording()
+        self.assert_true(len(events) == before, "[PR-14] listener 해제 후 새 이벤트 dispatch X")
+
+    def test_160_app_service_concurrent_start_rejected(self):
+        """[ADR 0004 PR-14] 이미 녹화 중 두 번째 start_recording → RecorderAlreadyStartedError."""
+        from core.app_service import AppService
+        from core.recorder import RecorderAlreadyStartedError
+        from core.storage.in_memory import InMemoryRepository
+
+        svc = AppService(session_repo=InMemoryRepository())
+        svc.start_recording()
+        try:
+            try:
+                svc.start_recording()
+                self.assert_true(False, "[PR-14] 중복 start_recording 은 예외 발생 필수")
+            except RecorderAlreadyStartedError:
+                pass
+        finally:
+            try:
+                svc.stop_recording()
+            except Exception:
+                pass
+
+    def test_161_app_service_recording_target_session_id(self):
+        """[ADR 0004 PR-14] target_session_id 지정 vs None 분기 + new_session_title."""
+        from datetime import datetime
+
+        from core.app_service import AppService
+        from core.recorder_models import RawEvent
+        from core.session_manager import Step
+        from core.storage.in_memory import InMemoryRepository
+
+        repo = InMemoryRepository()
+        svc = AppService(session_repo=repo)
+
+        self.step("(1) target_session_id 지정 → 그 세션에 step 추가")
+        existing = svc.create_session(title="기존 세션")
+        before_step_count = len(existing.steps)
+        svc.start_recording(target_session_id=existing.session_id)
+        svc._recorder._session.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=1,
+                y=1,
+                element_meta={"control_type": "Button", "name": "X"},
+            )
+        )
+        steps = svc.stop_recording()
+        self.assert_true(len(steps) >= 1, "[PR-14] step 변환 결과 존재")
+        session = svc.commit_recording(steps, target_session_id=existing.session_id)
+        self.assert_true(
+            session.session_id == existing.session_id,
+            f"[PR-14] 지정한 session_id 그대로 사용. {session.session_id}",
+        )
+        self.assert_true(
+            len(session.steps) == before_step_count + len(steps),
+            f"[PR-14] 기존 step + 새 step. 실제 {len(session.steps)}",
+        )
+
+        self.step("(2) target_session_id None + new_session_title 지정 → 그 제목으로 새 세션")
+        custom_step = Step(step_id=0, generated_code="pyautogui.click(0, 0)", user_request="t")
+        sess2 = svc.commit_recording(
+            [custom_step], target_session_id=None, new_session_title="MyCustomTitle"
+        )
+        self.assert_true(
+            sess2.title == "MyCustomTitle",
+            f"[PR-14] new_session_title 적용. 실제 {sess2.title!r}",
+        )
+        self.assert_true(
+            sess2.session_id != existing.session_id,
+            "[PR-14] 새 세션 id 는 기존과 달라야 함",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
