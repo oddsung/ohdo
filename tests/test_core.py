@@ -7480,6 +7480,287 @@ if __name__ == "__main__":
                 recorder.stop()
             hook_mgr.uninstall_all()
 
+    def test_153_recorder_transform_basic_click_step(self):
+        """[ADR 0004 PR-13] 단일 click event → Step 변환 (element_meta 있음)."""
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import transform
+
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=100,
+                y=200,
+                button="left",
+                element_meta={
+                    "control_type": "Button",
+                    "name": "확인",
+                    "automation_id": "btn_ok",
+                    "window_title": "메모장",
+                },
+            )
+        )
+        steps = transform(sess)
+        self.assert_true(len(steps) == 1, f"[PR-13] 단일 click → 1 Step. 실제: {len(steps)}")
+        s = steps[0]
+        self.assert_true(s.step_id == 1, f"[PR-13] step_id 1 부터. 실제: {s.step_id}")
+        self.assert_true(
+            "Button" in s.user_request and "확인" in s.user_request,
+            f"[PR-13 §7] user_request 에 control_type+name. 실제: {s.user_request!r}",
+        )
+        self.assert_true(
+            "child_window" in s.generated_code and "click_input" in s.generated_code,
+            f"[PR-13] pywinauto child_window + click_input. 실제: {s.generated_code!r}",
+        )
+        self.assert_true(
+            "btn_ok" in s.generated_code,
+            "[PR-13] auto_id 셀렉터 포함 필수",
+        )
+
+    def test_154_recorder_transform_noise_filter(self):
+        """[ADR 0004 PR-13] 노이즈 필터 — 자체 창 클릭 + 빈 공간 클릭."""
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession, TransformOptions
+        from core.recorder_transform import transform
+
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=10,
+                element_meta={"control_type": "Window", "window_title": "ohdo"},
+            )
+        )
+        sess.events.append(RawEvent(ts=datetime.now(), kind="click", x=20, y=20, element_meta=None))
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=30,
+                y=30,
+                element_meta={
+                    "control_type": "Button",
+                    "name": "OK",
+                    "window_title": "Calculator",
+                },
+            )
+        )
+
+        self.step("(1) drop_self_window_clicks — ohdo 창 클릭 drop")
+        steps = transform(
+            sess,
+            opts=TransformOptions(drop_empty_space_clicks=False),
+            self_window_titles=["ohdo"],
+        )
+        all_code = " ".join(s.generated_code for s in steps)
+        self.assert_true("Calculator" in all_code, "[PR-13] Calculator step 보존")
+
+        self.step("(2) drop_empty_space_clicks=True → element_meta None 클릭 drop")
+        steps2 = transform(
+            sess,
+            opts=TransformOptions(drop_empty_space_clicks=True),
+            self_window_titles=["ohdo"],
+        )
+        all_code2 = " ".join(s.generated_code for s in steps2)
+        self.assert_true(
+            "pyautogui.click(20, 20" not in all_code2,
+            f"[PR-13] 빈 공간 (20,20) 클릭 drop 필수. 실제: {all_code2!r}",
+        )
+
+    def test_155_recorder_transform_key_grouping(self):
+        """[ADR 0004 PR-13] 연속 키입력 → pyautogui.write 1개로 그룹핑."""
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import transform
+
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        click_meta = {"control_type": "Edit", "name": "Input", "automation_id": "txt"}
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=50,
+                y=60,
+                button="left",
+                element_meta=click_meta,
+            )
+        )
+        for vk in (0x48, 0x45, 0x4C, 0x4C, 0x4F):  # H, E, L, L, O (lowercase 매핑)
+            sess.events.append(RawEvent(ts=datetime.now(), kind="key", vk_code=vk))
+        steps = transform(sess)
+        self.assert_true(len(steps) == 1, f"[PR-13] click + key group → 1 Step. 실제: {len(steps)}")
+        code = steps[0].generated_code
+        self.assert_true(
+            "pyautogui.write('hello')" in code,
+            f"[PR-13] 연속 key 5개 → write('hello') 1개로 그룹. 실제: {code!r}",
+        )
+
+    def test_156_recorder_transform_step_boundaries(self):
+        """[ADR 0004 PR-13 §7] 자동 경계 신호 — idle / key→click / F8 marker."""
+        from datetime import datetime, timedelta
+
+        from core.recorder_models import RawEvent, RecordingSession, TransformOptions
+        from core.recorder_transform import transform
+
+        base = datetime.now()
+
+        self.step("(1) idle_boundary_ms 휴지 → 새 step")
+        sess = RecordingSession(id="t", started_at=base)
+        meta_a = {"control_type": "Button", "name": "A"}
+        meta_b = {"control_type": "Button", "name": "B"}
+        sess.events.append(RawEvent(ts=base, kind="click", x=1, y=1, element_meta=meta_a))
+        sess.events.append(
+            RawEvent(
+                ts=base + timedelta(seconds=5),
+                kind="click",
+                x=2,
+                y=2,
+                element_meta=meta_b,
+            )
+        )
+        steps = transform(sess, opts=TransformOptions(idle_boundary_ms=3000))
+        self.assert_true(len(steps) == 2, f"[PR-13] 5초 휴지로 2 step 분리. 실제: {len(steps)}")
+
+        self.step("(2) key 후 click → 새 step (key group 종료)")
+        sess = RecordingSession(id="t", started_at=base)
+        meta_edit = {"control_type": "Edit", "name": "E", "automation_id": "e1"}
+        meta_btn = {"control_type": "Button", "name": "Submit"}
+        sess.events.append(RawEvent(ts=base, kind="click", x=1, y=1, element_meta=meta_edit))
+        sess.events.append(
+            RawEvent(ts=base + timedelta(milliseconds=100), kind="key", vk_code=0x41)
+        )
+        sess.events.append(
+            RawEvent(
+                ts=base + timedelta(milliseconds=200),
+                kind="click",
+                x=2,
+                y=2,
+                element_meta=meta_btn,
+            )
+        )
+        steps = transform(sess, opts=TransformOptions(idle_boundary_ms=5000))
+        self.assert_true(
+            len(steps) == 2,
+            f"[PR-13] key 후 click → 2 step (key group 종료). 실제: {len(steps)}",
+        )
+
+        self.step("(3) F8 marker → batch 분리 + marker 자체 drop")
+        sess = RecordingSession(id="t", started_at=base)
+        sess.events.append(RawEvent(ts=base, kind="click", x=1, y=1, element_meta=meta_a))
+        sess.events.append(RawEvent(ts=base + timedelta(milliseconds=10), kind="marker"))
+        sess.events.append(
+            RawEvent(
+                ts=base + timedelta(milliseconds=20),
+                kind="click",
+                x=2,
+                y=2,
+                element_meta=meta_b,
+            )
+        )
+        steps = transform(sess, opts=TransformOptions(enable_f8_marker=True, idle_boundary_ms=5000))
+        self.assert_true(len(steps) == 2, f"[PR-13] F8 marker → 2 step. 실제: {len(steps)}")
+        all_code = " ".join(s.generated_code for s in steps)
+        self.assert_true("marker" not in all_code, "[PR-13] marker 자체는 코드에 없음")
+
+    def test_157_recorder_transform_secrets_integration(self):
+        """[ADR 0004 PR-13 / ADR 0003 강 통합] PW field 키 시퀀스 → get_secret('label')."""
+        from datetime import datetime, timedelta
+
+        from core.recorder_models import RawEvent, RecordingSession, TransformOptions
+        from core.recorder_transform import transform
+
+        base = datetime.now()
+        sess = RecordingSession(id="t", started_at=base)
+        pw_meta = {
+            "control_type": "Edit",
+            "name": "Password",
+            "automation_id": "txt_password",
+            "is_password_field": True,
+            "_ohdo_label": "login_pw",
+        }
+        sess.events.append(RawEvent(ts=base, kind="click", x=1, y=1, element_meta=pw_meta))
+        for i, vk in enumerate((0x53, 0x45, 0x43, 0x52, 0x45, 0x54)):  # 'secret'
+            sess.events.append(
+                RawEvent(
+                    ts=base + timedelta(milliseconds=10 * (i + 1)),
+                    kind="key",
+                    vk_code=vk,
+                )
+            )
+
+        self.step("(1) integrate_secrets=True → get_secret('login_pw')")
+        steps = transform(sess, opts=TransformOptions(integrate_secrets=True))
+        code = steps[0].generated_code
+        self.assert_true(
+            "get_secret('login_pw')" in code,
+            f"[PR-13 ADR0003] get_secret('login_pw') 패턴 필수. 실제: {code!r}",
+        )
+        self.assert_true(
+            "'secret'" not in code,
+            f"[PR-13 ADR0003] 평문 'secret' 코드에 박히면 안 됨. 실제: {code!r}",
+        )
+
+        self.step("(2) integrate_secrets=False → 평문 (디버그 모드)")
+        steps2 = transform(sess, opts=TransformOptions(integrate_secrets=False))
+        self.assert_true(
+            "'secret'" in steps2[0].generated_code,
+            "[PR-13] integrate_secrets=False 시 평문 write (디버그 모드)",
+        )
+
+    def test_158_recorder_transform_browser_and_owner_drawn(self):
+        """[ADR 0004 PR-13] 브라우저 element → Selenium, element_meta None → 좌표 fallback."""
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import transform
+
+        sess = RecordingSession(id="t", started_at=datetime.now())
+
+        self.step("(1) 브라우저 element (css_selector) → Selenium")
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=100,
+                y=200,
+                element_meta={
+                    "tag_name": "button",
+                    "css_selector": "#login-btn",
+                    "name": "로그인",
+                },
+            )
+        )
+
+        self.step("(2) element_meta None → pyautogui 좌표 click")
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=500,
+                y=300,
+                button="right",
+                element_meta=None,
+            )
+        )
+
+        steps = transform(sess)
+        all_code = " ".join(s.generated_code for s in steps)
+        self.assert_true(
+            "find_element(By.CSS_SELECTOR" in all_code and "#login-btn" in all_code,
+            f"[PR-13] Selenium css_selector 코드 생성. 실제: {all_code!r}",
+        )
+        self.assert_true(
+            "pyautogui.click(500, 300, button='right')" in all_code,
+            f"[PR-13] element_meta None 시 pyautogui 좌표 fallback. 실제: {all_code!r}",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
