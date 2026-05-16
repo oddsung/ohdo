@@ -7232,6 +7232,254 @@ if __name__ == "__main__":
         finally:
             mgr.uninstall_all()
 
+    def test_149_recorder_models_structure(self):
+        """[ADR 0004 PR-12] recorder_models — RawEvent / RecordingSession / TransformOptions."""
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession, TransformOptions
+
+        self.step("(1) RawEvent — kind 분기 + 기본값")
+        click_ev = RawEvent(ts=datetime.now(), kind="click", x=10, y=20, button="left")
+        self.assert_true(
+            click_ev.kind == "click" and click_ev.x == 10 and click_ev.button == "left",
+            f"RawEvent click 필드. 실제: {click_ev!r}",
+        )
+        key_ev = RawEvent(ts=datetime.now(), kind="key", vk_code=0x41)
+        self.assert_true(
+            key_ev.vk_code == 0x41 and key_ev.modifiers == [],
+            "RawEvent key 필드 + modifiers 기본 빈 리스트",
+        )
+        marker_ev = RawEvent(ts=datetime.now(), kind="marker")
+        self.assert_true(
+            marker_ev.kind == "marker" and marker_ev.is_password_field is False,
+            "RawEvent marker + is_password_field 기본 False",
+        )
+
+        self.step("(2) RecordingSession — events 시간순 + is_stopped/event_count")
+        sess = RecordingSession(id="abc", started_at=datetime.now())
+        self.assert_true(
+            sess.is_stopped is False and sess.event_count == 0,
+            "[PR-12] 신규 세션 is_stopped False + event_count 0",
+        )
+        sess.events.append(click_ev)
+        self.assert_true(sess.event_count == 1, f"event_count 1. 실제: {sess.event_count}")
+        sess.stopped_at = datetime.now()
+        self.assert_true(sess.is_stopped is True, "stopped_at 셋 후 is_stopped True")
+
+        self.step("(3) TransformOptions — 9 옵션 + 기본값 + 사용자 추가 §7 키")
+        opts = TransformOptions()
+        for attr in (
+            "auto_window_focus_boundary",
+            "enable_f8_marker",
+            "drop_self_window_clicks",
+            "drop_empty_space_clicks",
+            "group_consecutive_keys",
+            "group_key_idle_ms",
+            "idle_boundary_ms",
+            "integrate_secrets",
+            "auto_user_request",
+        ):
+            self.assert_true(hasattr(opts, attr), f"[PR-12] TransformOptions.{attr} 필드 필수")
+        self.assert_true(
+            opts.idle_boundary_ms == 3000,
+            f"[PR-12 §7] idle_boundary_ms 기본 3000ms. 실제: {opts.idle_boundary_ms}",
+        )
+        self.assert_true(
+            opts.integrate_secrets is True,
+            "[PR-12] integrate_secrets 기본 True (ADR 0003 강 통합)",
+        )
+
+    def test_150_recorder_lifecycle(self):
+        """[ADR 0004 PR-12] Recorder start/stop/marker + 상태 전이."""
+        from core.input_hooks import InputHookManager
+        from core.recorder import (
+            Recorder,
+            RecorderAlreadyStartedError,
+            RecorderNotStartedError,
+        )
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr)
+        try:
+            self.step("(1) 초기 상태 — is_recording False")
+            self.assert_true(recorder.is_recording is False, "[PR-12] 초기 is_recording False")
+            self.assert_true(recorder.event_count == 0, "[PR-12] 초기 event_count 0")
+
+            self.step("(2) start() — RecordingSession 반환 + hook 콜백 등록")
+            sess = recorder.start(target_session_id="sess_xyz")
+            self.assert_true(recorder.is_recording is True, "[PR-12] start 후 is_recording True")
+            self.assert_true(sess.target_session_id == "sess_xyz", "[PR-12] target_session_id 보존")
+            self.assert_true(
+                hook_mgr.mouse_callback_count == 1 and hook_mgr.keyboard_callback_count == 1,
+                "[PR-12] start 가 mouse + keyboard callback 등록 (각 1)",
+            )
+
+            self.step("(3) 동시 두 번 start 거부 (RecorderAlreadyStartedError)")
+            try:
+                recorder.start()
+                self.assert_true(False, "[PR-12] 중복 start 는 예외 발생 필수")
+            except RecorderAlreadyStartedError:
+                pass
+
+            self.step("(4) add_marker — 녹화 중 marker event 추가")
+            recorder.add_marker()
+            self.assert_true(recorder.event_count == 1, "[PR-12] marker 후 event_count 1")
+            self.assert_true(sess.events[0].kind == "marker", "[PR-12] 첫 event 가 marker kind")
+
+            self.step("(5) stop — hook 해제 + stopped_at + 멱등")
+            stopped = recorder.stop()
+            self.assert_true(recorder.is_recording is False, "[PR-12] stop 후 is_recording False")
+            self.assert_true(
+                stopped.is_stopped is True and stopped.stopped_at is not None,
+                "[PR-12] stop 후 stopped_at 셋",
+            )
+            self.assert_true(
+                hook_mgr.mouse_callback_count == 0 and hook_mgr.keyboard_callback_count == 0,
+                "[PR-12] stop 가 hook callback 모두 해제",
+            )
+
+            stopped2 = recorder.stop()
+            self.assert_true(stopped2 is stopped, "[PR-12] stop 멱등 (동일 세션 반환)")
+
+            self.step("(6) stop 후 add_marker 차단 (RecorderNotStartedError)")
+            try:
+                recorder.add_marker()
+                self.assert_true(False, "[PR-12] 비녹화 add_marker 는 예외 필수")
+            except RecorderNotStartedError:
+                pass
+
+            self.step("(7) 재진입 — 새 RecordingSession 생성")
+            sess2 = recorder.start()
+            self.assert_true(sess2.id != sess.id, "[PR-12] 재진입 시 새 RecordingSession id")
+            self.assert_true(recorder.event_count == 0, "[PR-12] 재진입 시 새 세션 event_count 0")
+        finally:
+            try:
+                if recorder.is_recording:
+                    recorder.stop()
+            except Exception:
+                pass
+            hook_mgr.uninstall_all()
+
+    def test_151_recorder_buffer_capture(self):
+        """[ADR 0004 PR-12] mouse/keyboard hook callback 가 RawEvent buffer 에
+        적절한 종류로 누적 + 시간순 정렬.
+        """
+        from core.input_hooks import InputHookManager, KeyboardEvent, MouseEvent
+        from core.recorder import Recorder
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr)
+        try:
+            recorder.start()
+            sess = recorder.current_session
+            self.assert_true(sess is not None, "current_session 존재")
+
+            self.step("(1) lbutton_down → click event 추가")
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=100, y=200))
+            self.assert_true(recorder.event_count == 1, "[PR-12] click 1 event")
+            ev = sess.events[0]
+            self.assert_true(
+                ev.kind == "click" and ev.x == 100 and ev.button == "left",
+                f"[PR-12] click event 필드. 실제: {ev!r}",
+            )
+
+            self.step("(2) lbutton_up → 무시 (down 만 캡처)")
+            recorder._on_mouse_event(MouseEvent(type="lbutton_up", x=100, y=200))
+            self.assert_true(recorder.event_count == 1, "[PR-12] up 은 추가 X")
+
+            self.step("(3) move → 무시 (PR-12 범위 외)")
+            recorder._on_mouse_event(MouseEvent(type="move", x=50, y=50))
+            self.assert_true(recorder.event_count == 1, "[PR-12] move 무시")
+
+            self.step("(4) wheel → scroll event 추가 + wheel_delta 보존")
+            recorder._on_mouse_event(MouseEvent(type="wheel", x=10, y=20, wheel_delta=120))
+            self.assert_true(
+                recorder.event_count == 2
+                and sess.events[1].kind == "scroll"
+                and sess.events[1].wheel_delta == 120,
+                f"[PR-12] scroll 추가. {sess.events[1]!r}",
+            )
+
+            self.step("(5) keydown → key event 추가, keyup 무시")
+            recorder._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=0x41, scan_code=30))
+            recorder._on_keyboard_event(KeyboardEvent(type="keyup", vk_code=0x41, scan_code=30))
+            self.assert_true(
+                recorder.event_count == 3
+                and sess.events[2].kind == "key"
+                and sess.events[2].vk_code == 0x41,
+                f"[PR-12] keydown 추가, keyup 무시. {sess.events[2]!r}",
+            )
+
+            self.step("(6) 시간순 정렬 — ts 단조 증가")
+            timestamps = [ev.ts for ev in sess.events]
+            self.assert_true(
+                all(timestamps[i] <= timestamps[i + 1] for i in range(len(timestamps) - 1)),
+                "[PR-12] events ts 시간순 정렬 필수",
+            )
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
+    def test_152_recorder_element_capture_callback(self):
+        """[ADR 0004 PR-12] element_capture_fn 주입 — click 시 element_meta 채움.
+
+        PR-13/PR-15 에서 win_inspector EFP 와 연결. callback 예외 시 element_meta
+        None 으로 진행 (event 자체는 정상 추가).
+        """
+        from core.input_hooks import InputHookManager, KeyboardEvent, MouseEvent
+        from core.recorder import Recorder
+
+        hook_mgr = InputHookManager()
+        capture_calls: list[tuple[int, int]] = []
+
+        def fake_capture(x: int, y: int) -> dict:
+            capture_calls.append((x, y))
+            return {"control_type": "Edit", "name": "fake", "automation_id": "id"}
+
+        recorder = Recorder(hook_mgr, element_capture_fn=fake_capture)
+        try:
+            recorder.start()
+            sess = recorder.current_session
+
+            self.step("(1) click → element_capture_fn 호출 + element_meta 채움")
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=300, y=400))
+            self.assert_true(
+                capture_calls == [(300, 400)],
+                f"[PR-12] element_capture_fn 좌표 전달. 실제: {capture_calls}",
+            )
+            ev = sess.events[0]
+            self.assert_true(
+                ev.element_meta is not None and ev.element_meta.get("control_type") == "Edit",
+                f"[PR-12] element_meta 채워짐. 실제: {ev.element_meta!r}",
+            )
+
+            self.step("(2) callback 예외 → element_meta None, event 정상 추가")
+
+            def raising_capture(x: int, y: int) -> dict:
+                raise RuntimeError("의도된 예외")
+
+            recorder._element_capture_fn = raising_capture
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=10, y=20))
+            self.assert_true(
+                recorder.event_count == 2 and sess.events[1].element_meta is None,
+                "[PR-12] callback 예외 시 element_meta None + event 추가 진행",
+            )
+
+            self.step("(3) wheel/key 는 element_capture_fn 호출 X")
+            recorder._element_capture_fn = fake_capture
+            before = len(capture_calls)
+            recorder._on_mouse_event(MouseEvent(type="wheel", x=0, y=0, wheel_delta=1))
+            recorder._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=0x42, scan_code=48))
+            self.assert_true(
+                len(capture_calls) == before,
+                "[PR-12] wheel/key 는 element_capture_fn 미호출",
+            )
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
