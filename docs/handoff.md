@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-16 (5/4~5/16 작업 — 자세한 변경은 §5 변경 이력 + §11~§24 인계 노트 참조). baseline: **core 158/158 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준 — PR-11 +4 + PR-12 +4 + PR-13 +6 = 144→158). **5/16: ADR 0004 Accepted (작업 녹화 도입) — Phase R1+R2 결정 + 메인화면 D25 통합점 + step 자동 구분 강화 + review dialog 편집 기능 강화. PR-11 (input_hooks.py LL hook multi-callback) + PR-12 (recorder.py + recorder_models.py Pydantic 모델 + Recorder lifecycle) + PR-13 (recorder_transform.py — 노이즈 필터 + 키 그룹핑 + 자동 경계 4 신호 + win_inspector/Selenium/pyautogui 코드 생성 + ADR 0003 강 통합) 완료. 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
+> 마지막 업데이트: 2026-05-16 (5/4~5/16 작업 — 자세한 변경은 §5 변경 이력 + §11~§24 인계 노트 참조). baseline: **core 161/161 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준 — PR-11 +4 + PR-12 +4 + PR-13 +6 + PR-14 +3 = 144→161). **5/16: ADR 0004 Accepted (작업 녹화 도입) — Phase R1+R2 결정 + 메인화면 D25 통합점 + step 자동 구분 강화 + review dialog 편집 기능 강화. PR-11 (input_hooks LL hook multi-callback) + PR-12 (recorder lifecycle + Pydantic) + PR-13 (recorder_transform 노이즈+그룹핑+경계 4 신호+코드 생성+ADR 0003 강 통합) + PR-14 (AppService start/stop/commit_recording + listener pattern) 완료. 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1437,7 +1437,7 @@ AI 가 placeholder 안 보고 평범한 element_context cross-reference 로 코�
 | **PR-11** | `core/input_hooks.py` 신규 — multi-callback LL hook manager. element_picker inline hook 은 그대로 둠 (R2/R3 점진 마이그레이션, test_44~48 sentinel 보호) | ✅ **완료** (test_145~148 4 신규) |
 | **PR-12** | `core/recorder_models.py` (RawEvent + RecordingSession + TransformOptions Pydantic) + `core/recorder.py` (Recorder lifecycle + InputHookManager 통합 + element_capture_fn callback hook) | ✅ **완료** (test_149~152 4 신규) |
 | **PR-13** | `core/recorder_transform.py` — raw events → Step 변환 (노이즈 필터 + 키 그룹핑 + 자동 경계 4 신호 + element_meta → pywinauto/Selenium/pyautogui 코드 + user_request 자동 생성 + ADR 0003 강 통합 PW field → get_secret) | ✅ **완료** (test_153~158 6 신규) |
-| PR-14 | AppService — start/stop/commit_recording + EventBus 이벤트 | pending |
+| **PR-14** | AppService — `start_recording` / `stop_recording` / `commit_recording` + listener pattern (`add_recording_listener` / `remove_recording_listener`) + 이벤트 (`recording.started` / `stopped` / `committed`). EventBus 신규 모듈은 도입 X — 가벼운 callback list 패턴 (PR-15 UI 가 connect 쉽고 향후 EventBus 통합 쉬움) | ✅ **완료** (test_159~161 3 신규) |
 | PR-15 | UI — recorder_overlay (click-through) + recording_review_dialog (편집 강화) + D25 카드 + 메뉴 + i18n ~50키 | pending |
 | PR-16 (R2) | window focus 자동 경계 + F8 marker | pending |
 | PR-17 (R2) | 마이그레이션 모드 (event queue + async EFP) | pending |
@@ -1526,17 +1526,64 @@ AI 가 placeholder 안 보고 평범한 element_context cross-reference 로 코�
 - **test_157**: ADR 0003 강 통합 — PW field click 후 'secret' 키 시퀀스 → `get_secret('login_pw')` 변환 + 평문 'secret' 코드에 안 박힘. integrate_secrets=False 시 평문 (디버그 모드)
 - **test_158**: 브라우저 element (css_selector) → Selenium `find_element(By.CSS_SELECTOR).click()` + element_meta None → `pyautogui.click(x, y, button='right')` fallback
 
-### 검증 결과 (PR-11 + PR-12 + PR-13)
+### PR-14 핵심 구현 노트
 
-- **core: 158/158 그린** (144 + 4 PR-11 + 4 PR-12 + 6 PR-13)
+**`core/app_service.py`** 추가 (단일 instance per AppService — Recorder 자체가 lock 으로 동시 두 녹화 거부):
+
+```python
+# 인스턴스 변수 (__init__):
+self._recorder: Optional["Recorder"] = None
+self._recording_listeners: list[Callable[[str, dict], None]] = []
+
+# Listener 패턴 (EventBus 모듈 신규 도입 X — minimal change):
+def add_recording_listener(callback) -> None: ...
+def remove_recording_listener(callback) -> None: ...
+def _emit_recording_event(event_name, payload) -> None: ...
+
+@property
+def is_recording -> bool
+@property
+def recording_event_count -> int
+
+# Lifecycle 메서드:
+def start_recording(target_session_id=None, element_capture_fn=None) -> str
+def stop_recording(self_window_titles=None) -> list[Step]
+def commit_recording(edited_steps, target_session_id=None, new_session_title=None) -> Session
+```
+
+**이벤트 종류** (callback 시그니처: `(event_name: str, payload: dict)`):
+- `recording.started` — payload `{recording_session_id, target_session_id}`
+- `recording.stopped` — payload `{recording_session_id, raw_event_count, transformed_step_count}`
+- `recording.committed` — payload `{recording_session_id, target_session_id, step_count}`
+
+**lifecycle 흐름**:
+1. `start_recording` — `get_hook_manager()` + `Recorder` 신규 인스턴스 + `recorder.start()` → "started" emit, recording_session_id 반환
+2. (UI 가 element_capture_fn 주입 — PR-15 의 WindowInspector EFP 연결)
+3. `stop_recording` — `recorder.stop()` + `transform()` → "stopped" emit, Step 리스트 반환 (아직 commit X)
+4. (UI 가 review dialog 로 사용자 편집)
+5. `commit_recording(edited_steps)` — target_session_id None 이면 create_session 자동 ("Recording YYYYMMDD-HHMMSS" 또는 new_session_title), 각 step → repo.add_step → "committed" emit + Recorder 인스턴스 정리
+
+**listener 격리**: callback 예외 시 다른 listener dispatch 영향 X (try/except).
+
+**EventBus 모듈 도입 보류**: ohdo 에는 EventBus 가 없음. 가벼운 callback list 로 시작 — PR-15 UI 가 connect 쉽고, Phase 2 SaaS 진입 시 EventBus 통합도 쉬움. architecture 25 의 "EventBus 신규 이벤트" 는 listener pattern 으로 대체.
+
+### 회귀 가드 (test_159~161, PR-14 3 신규)
+
+- **test_159**: 전체 lifecycle (initial state → listener 등록 → start → event 누적 → stop → commit → listener 해제 후 dispatch X) — InMemoryRepository 사용 통합 검증
+- **test_160**: 중복 start 거부 (`RecorderAlreadyStartedError`)
+- **test_161**: target_session_id 분기 (지정 → 그 세션, None → 새 세션 자동 + new_session_title 적용)
+
+### 검증 결과 (PR-11 ~ PR-14)
+
+- **core: 161/161 그린** (144 + 4 PR-11 + 4 PR-12 + 6 PR-13 + 3 PR-14)
 - **scenarios: 73/73 그린** (회귀 0)
 - **element_picker baseline (test_42~48): 그린 유지**
 - ruff check + format All passed
 
 ### 다음 세션 출발점
 
-**A. PR-14 진행 (권장 1순위)**: AppService 메서드 (`start_recording` / `stop_recording` / `commit_recording`) + EventBus 이벤트 (`recording.started` / `recording.event_count_changed` / `recording.stopped` / `recording.committed`). 신규 회귀 3 (test_159~161). architecture 25 §"PR-14" 참조.
+**A. PR-15 진행 (권장 1순위, R1 마지막 PR)**: UI 통합 — `ui_v2/recorder_overlay.py` (click-through floating overlay) + `ui_v2/recording_review_dialog.py` (편집 강화 — 사용자 추가 §8: inline edit + drag&drop + bulk action + 변환 옵션 toggle 즉시 재변환 + raw events 디버그 보기) + `ui_v2/main_window_v2.py` 통합 (툴바 ⏺ + Ctrl+Shift+R + D25 빈 상태 "🎬 자동 녹화" 카드 + "+ 새 탭" 메뉴 "녹화로 새 세션") + `locale/{en,ko}.json` 의 `recording.*` catalog ~50키. 신규 회귀 6 (test_162~167). architecture 25 §"PR-15" 참조. **R1 완료 시 사용자 GUI 실측 검증** (notepad/calculator 녹화 → 변환 → review → commit → 재생).
 
-**B. ADR 0003 GUI 검증 복귀**: 사용자 시간 생기면 §23 의 5 시나리오 실측. PR-14 와 병렬 가능.
+**B. ADR 0003 GUI 검증 복귀**: 사용자 시간 생기면 §23 의 5 시나리오 실측. PR-15 와 병렬 가능.
 
-**미커밋 변경**: 없음 (PR-11 + PR-12 + PR-13 모두 커밋 완료 예정).
+**미커밋 변경**: 없음 (PR-14 커밋 완료 예정).
