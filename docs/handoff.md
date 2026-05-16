@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-14 (5/4~5/14 작업 — 자세한 변경은 §5 변경 이력 + §11~§23 인계 노트 참조). baseline: **core 144/144 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준). **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
+> 마지막 업데이트: 2026-05-16 (5/4~5/16 작업 — 자세한 변경은 §5 변경 이력 + §11~§24 인계 노트 참조). baseline: **core 148/148 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준 — PR-11 +4 신규 = 144→148). **5/16: ADR 0004 Accepted (작업 녹화 도입) — Phase R1+R2 결정 + 메인화면 D25 통합점 + step 자동 구분 강화 + review dialog 편집 기능 강화. PR-11 (core/input_hooks.py LL hook multi-callback manager 신규) 완료. 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1406,3 +1406,84 @@ AI 가 placeholder 안 보고 평범한 element_context cross-reference 로 코�
 **C. AI 환각 가드** (한계 4): system_context 보강 또는 정적 검사. 사용자 보고 빈도에 따라 우선순위.
 
 **D. 다른 트랙 복귀**: §22 D 의 저장소 public 공개 준비 / ui/ (v1) i18n / 영어 catalogue 검토 / baseline UI 스크린샷.
+
+## 24. 5/16 ADR 0004 Accepted — 작업 녹화 (Action Recording) 도입 + PR-11 완료
+
+**컨텍스트**: 5/16 사용자 요청 — *"작업 녹화? 작업 자동화? 같은 기능을 만들면 좋을것 같은데 녹화를 시작하고 사용자가 평상시대로 하는 작업을 진행할때마다 클릭 키입력등을 시간순으로 클릭한 요소들을 기록하여 최종적으로 우리가 단계별로 요청하여 생성하는것과 같은 효과를 나타내어 빠르게 자동화 프로그램이 만들어지는 기능 (녹화를 실행하고 기존의 RPA나 자동화 프로그램을 실행하면 자연스럽게 마이그레이션이 될 수 있는)"*. ADR 0003 GUI 검증이 사용자 시간 부족으로 미뤄지면서 다른 트랙으로 전환.
+
+**핵심 발견**: WH_MOUSE_LL / WH_KEYBOARD_LL 후크 코드가 [ui/element_picker.py:2079-2209](../ui/element_picker.py) 에 이미 구현되어 있음 — 녹화 인프라 절반 이상 갖춰진 상태. ohdo 의 win_inspector 가 element 메타 → 코드 생성 로직 보유, ADR 0003 (시크릿 처리) 와 강 통합 시너지 가능 (녹화 중 PW field → 자동 advisory → `get_secret()` 변환). 비개발자/AI 두려운 사용자에게 큰 진입 장벽 감소.
+
+**관련 문서**:
+- [ADR 0004 — 작업 녹화 도입](saas/decisions/0004-action-recording.md) (Accepted, 2026-05-16)
+- [Architecture — Phase R1+R2 데이터 흐름·삽입점](saas/architecture/25-recording-phase-r1-r2.md) (Accepted)
+
+### 확정 결정 (사용자 승인)
+
+| # | 항목 | 결정 |
+|---|---|---|
+| 1 | Phase 범위 | R1+R2 묶음 (3주). R3 후순위 |
+| 2 | 결과 미리보기 | 항상 강제 (R1). 즉시 commit 모드 R3 후보 |
+| 3 | 녹화 핫키 | Ctrl+Shift+R 하드코딩 (R1). 사용자 설정 R2 |
+| 4 | 마이그레이션 모드 | R2 (Power Automate / AutoHotkey / pywinauto 따라잡기). R1 은 데스크톱 핵심 |
+| 5 | 화면 캡처 | OFF 기본 (사생활). R3 OpenCV fallback 시 옵션 ON 가능 |
+| 6 | **메인화면 통합 (사용자 추가 요청)** | D25 빈 상태 화면 (예시 카드 위) 에 "🎬 자동 녹화로 만들기" 강조 카드 + "+ 새 탭" 메뉴에 "녹화로 새 세션" 액션 |
+| 7 | **Step 적절한 구분 (사용자 추가 요청)** | 자동 경계 신호 4종: 창 포커스 / F8 marker / 동일 element key group 종료 / idle_boundary_ms (3초) 휴지. user_request 자동 생성 (control_type + name 조합) |
+| 8 | **review dialog 편집 강화 (사용자 추가 요청)** | inline 편집 (user_request/code/wait), drag&drop 순서, multi-select bulk action, 인접 step 합치기/분할, 변환 옵션 toggle 즉시 재변환, raw events 디버그 보기 |
+
+### PR 분할 (R1 5개 + R2 3개)
+
+| PR | 작업 | 상태 |
+|---|---|---|
+| **PR-11** | `core/input_hooks.py` 신규 — multi-callback LL hook manager. element_picker inline hook 은 그대로 둠 (R2/R3 점진 마이그레이션, test_44~48 sentinel 보호) | ✅ **완료** (test_145~148 4 신규) |
+| PR-12 | `core/recorder.py` + `recorder_models.py` — lifecycle (start/stop/marker) + raw event buffer | pending |
+| PR-13 | `core/recorder_transform.py` — raw events → Step 변환 (노이즈 필터 + 그룹핑 + 경계 4종 + ADR 0003 통합 + user_request 자동 생성) | pending |
+| PR-14 | AppService — start/stop/commit_recording + EventBus 이벤트 | pending |
+| PR-15 | UI — recorder_overlay (click-through) + recording_review_dialog (편집 강화) + D25 카드 + 메뉴 + i18n ~50키 | pending |
+| PR-16 (R2) | window focus 자동 경계 + F8 marker | pending |
+| PR-17 (R2) | 마이그레이션 모드 (event queue + async EFP) | pending |
+| PR-18 (R2) | DPI / 멀티모니터 안정화 + i18n 완성 | pending |
+
+### PR-11 핵심 구현 노트
+
+**`core/input_hooks.py`** (375줄, AGPL-3.0 SPDX):
+- `MouseEvent` / `KeyboardEvent` dataclass + `Literal` 타입 (move / lbutton_down/up / rbutton_down/up / mbutton_down/up / wheel / keydown / keyup / syskeydown / syskeyup)
+- Win32 상수 (`WH_MOUSE_LL=14`, `WH_KEYBOARD_LL=13`, `WM_*` 12개)
+- `InputHookManager` — 단일 instance 가 hook 설치 + multi-callback dispatch
+  - `install_mouse_callback(cb) -> int` (등록 ID 반환), `uninstall_mouse_callback(cb_id)`
+  - 동일 패턴 keyboard 측
+  - `uninstall_all()` 전부 해제
+  - 콜백 등록 시 자동 hook 설치, 마지막 해제 시 자동 hook 제거
+  - callback 시그니처: `(MouseEvent) -> bool` — True 반환 시 차단 (CallNextHookEx 호출 X), False/None 통과
+  - dispatch 시 callback snapshot — 예외 발생해도 다른 callback 영향 X (try/except 격리)
+  - non-Windows 환경에서 `_user32 = None` → install/uninstall silent noop, `is_*_hook_installed` 항상 False
+- `get_hook_manager()` 모듈 레벨 싱글톤 — recorder + 향후 element_picker 통합 시 공유
+
+**element_picker 비변경 결정 근거**: test_44 sentinel 이 `_install_mouse_hook` source 안에서 `WH_MOUSE_LL`, `WM_LBUTTONDOWN`, `return 1`, `CallNextHookEx` 등 키워드 직접 검사 → wrapper 로 바꾸면 자동 fail. Win32 LL hook 은 같은 thread 에 여러 hook 동시 설치 가능 (call chain) + element_picker 와 recorder lifecycle 동시 활성 X (ADR 0004 명시). PR-11 에서는 두 hook 시스템 병렬 유지, R2/R3 에서 점진 통합.
+
+### 회귀 가드 (test_145~148, 4 신규)
+
+- **test_145**: 모듈 + dataclass + Literal 타입 + Win32 상수 + InputHookManager API + get_hook_manager 싱글톤
+- **test_146**: callback 등록 ID 고유성 + 부분 해제 + 잘못된 ID idempotent + uninstall_all
+- **test_147**: callback 예외 격리 — 한 callback 예외가 다른 callback dispatch 영향 X
+- **test_148**: non-Windows silent noop (`_user32 = None` 강제 path 검증)
+
+### 검증 결과 (PR-11)
+
+- **core: 148/148 그린** (144 + 4 신규, PR-11 완료 시점)
+- **scenarios: 73/73 그린** (회귀 0)
+- **element_picker baseline (test_42~48): 그린 유지** — input_hooks 가 element_picker 의 hook 코드를 안 건드림으로 자동 보장
+
+### 다음 세션 출발점
+
+**A. PR-12 진행 (권장 1순위)**: `core/recorder.py` + `recorder_models.py` — Pydantic 모델 (RawEvent, RecordingSession, TransformOptions) + Recorder lifecycle (start/stop/marker, input_hooks 사용). 신규 회귀 4 (test_149~152). architecture 25 §"PR-12" 참조.
+
+**B. ADR 0003 GUI 검증 복귀**: 사용자 시간 생기면 §23 의 5 시나리오 실측. PR-12 진행 중 병렬 가능.
+
+**C. 디자인 재검토 필요 시**: ADR 0004 §"확정된 결정" / Architecture 25 §"R1 완료 기준" 다시 보고 우선순위 변경 가능.
+
+**미커밋 변경 (5/16 PR-11)**:
+- `core/input_hooks.py` (신규)
+- `tests/test_core.py` (test_145~148 추가)
+- `docs/saas/decisions/0004-action-recording.md` (신규)
+- `docs/saas/architecture/25-recording-phase-r1-r2.md` (신규)
+- `docs/handoff.md` (§0 + §24 갱신)
