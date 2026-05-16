@@ -1066,6 +1066,10 @@ class MainWindowV2(QMainWindow):
         ui_cfg = self._load_settings().get("ui", {})
         self._sidebar_collapsed: bool = bool(ui_cfg.get("sidebar_collapsed", False))
 
+        # ADR 0004 PR-15: 작업 녹화 상태 — overlay + target session id
+        self._recorder_overlay: Optional[object] = None
+        self._recording_target_session_id: Optional[str] = None
+
         self.setWindowTitle("ohdo — UI v2 PoC")
         self.resize(1400, 900)
         self.setStyleSheet(GLOBAL_QSS)
@@ -1246,6 +1250,15 @@ class MainWindowV2(QMainWindow):
         kernel_btn.setToolTip(tr("ui_v2.action_bar.tooltip_kernel_restart"))
         kernel_btn.clicked.connect(self._on_kernel_reset)
         bar.addWidget(kernel_btn)
+
+        # ADR 0004 PR-15: 작업 녹화 toolbar 버튼 (Ctrl+Shift+R)
+        self._record_btn = QPushButton(tr("ui_v2.recording.action_bar.btn"))
+        self._record_btn.setToolTip(tr("ui_v2.recording.action_bar.tooltip_start"))
+        self._record_btn.setStyleSheet(
+            f"color: {COLORS['error']}; font-weight: bold; padding: 4px 10px;"
+        )
+        self._record_btn.clicked.connect(self._on_toggle_recording)
+        bar.addWidget(self._record_btn)
 
         # 전체 펼치기/접기 — 모든 카드 코드 영역 일괄 토글
         expand_all_btn = QToolButton()
@@ -1636,6 +1649,11 @@ class MainWindowV2(QMainWindow):
     def _on_plus_tab(self) -> None:
         menu = QMenu(self)
         menu.addAction(tr("ui_v2.tab.menu_new_empty"), self._on_new_session)
+        # ADR 0004 PR-15: 녹화로 새 세션 — 빈 세션 + 즉시 녹화 시작
+        menu.addAction(
+            tr("ui_v2.recording.tab_menu.new_recording"),
+            self._on_new_session_with_recording,
+        )
         menu.addAction(tr("ui_v2.tab.menu_load_from_sidebar"), self._focus_sidebar_search)
         menu.addAction(tr("ui_v2.tab.menu_import_workflow"), self._on_import_workflow)
         menu.addSeparator()
@@ -1819,6 +1837,8 @@ class MainWindowV2(QMainWindow):
         QShortcut(QKeySequence("Ctrl+K"), self, activated=self._on_command_palette)
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self._on_new_session)
         QShortcut(QKeySequence("Ctrl+B"), self, activated=self._toggle_sidebar)
+        # ADR 0004 PR-15: 녹화 시작/중지 — 하드코딩 (R2 에서 사용자 설정 가능)
+        QShortcut(QKeySequence("Ctrl+Shift+R"), self, activated=self._on_toggle_recording)
 
     # ── 세션 ─────────────────────────────────────────────────
 
@@ -1868,7 +1888,7 @@ class MainWindowV2(QMainWindow):
             return
 
         if not self.current_session.steps:
-            # D25: 빈 상태 안내 + 예시 요청 3개
+            # D25: 빈 상태 안내 + 예시 요청 3개 + ADR 0004 녹화 강조 카드
             self._show_empty_state(
                 tr("ui_v2.empty.session_start_title", title=self.current_session.title),
                 tr("ui_v2.empty.session_start_desc"),
@@ -1877,6 +1897,7 @@ class MainWindowV2(QMainWindow):
                     tr("ui_v2.empty.example_browser"),
                     tr("ui_v2.empty.example_window_title"),
                 ],
+                show_recording_card=True,
             )
             return
 
@@ -1965,10 +1986,14 @@ class MainWindowV2(QMainWindow):
         title: str,
         description: str,
         examples: Optional[list[str]] = None,
+        show_recording_card: bool = False,
     ) -> None:
         """D25: 세션이 비었을 때 일러스트 + 안내 + 예시 카드 (PoC: 텍스트 only).
 
         예시 카드 클릭 시 입력창에 자동 채움 — 첫 사용자 진입 장벽 ↓.
+
+        ADR 0004 PR-15: ``show_recording_card=True`` 시 예시 카드 위에 "🎬 자동
+        녹화로 만들기" 강조 카드를 추가한다 (사용자 추가 §6).
         """
         wrapper = QWidget()
         wrapper.setStyleSheet("background: transparent;")
@@ -1987,6 +2012,41 @@ class MainWindowV2(QMainWindow):
         desc_label.setStyleSheet(f"color: {COLORS['text_muted']}; border: none; font-size: 12px;")
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(desc_label)
+
+        # ADR 0004 PR-15: "🎬 자동 녹화로 만들기" 강조 카드 (예시 카드 위)
+        if show_recording_card:
+            v.addSpacing(8)
+            rec_card = QFrame()
+            rec_card.setStyleSheet(
+                f"""
+                QFrame {{
+                    background-color: {COLORS["bg_surface"]};
+                    border: 2px solid {COLORS["error"]};
+                    border-radius: 8px;
+                }}
+                """
+            )
+            rc = QVBoxLayout(rec_card)
+            rc.setContentsMargins(16, 14, 16, 14)
+            rc.setSpacing(6)
+            rec_title = QLabel(tr("ui_v2.recording.empty.card_title"))
+            rec_title.setFont(QFont("Malgun Gothic", 13, QFont.Weight.Bold))
+            rec_title.setStyleSheet(f"color: {COLORS['error']}; border: none;")
+            rec_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            rc.addWidget(rec_title)
+            rec_desc = QLabel(tr("ui_v2.recording.empty.card_desc"))
+            rec_desc.setWordWrap(True)
+            rec_desc.setStyleSheet(f"color: {COLORS['text_muted']}; border: none; font-size: 12px;")
+            rec_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            rc.addWidget(rec_desc)
+            rec_btn = QPushButton(tr("ui_v2.recording.empty.card_btn"))
+            rec_btn.setStyleSheet(
+                f"background-color: {COLORS['error']}; color: {COLORS['bg_base']}; "
+                f"font-weight: bold; padding: 6px 16px;"
+            )
+            rec_btn.clicked.connect(self._on_toggle_recording)
+            rc.addWidget(rec_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            v.addWidget(rec_card)
 
         if examples:
             v.addSpacing(8)
@@ -2057,6 +2117,142 @@ class MainWindowV2(QMainWindow):
                 pass
             del self._kernels[sid]
         self._log(tr("ui_v2.log.kernel_restart"))
+
+    # ── ADR 0004 PR-15: 작업 녹화 lifecycle ─────────────────
+
+    def _on_toggle_recording(self) -> None:
+        """toolbar ⏺ / Ctrl+Shift+R / 빈 상태 카드 공용 진입점."""
+        if self.app_service.is_recording:
+            self._do_stop_recording()
+        else:
+            target_id = self.current_session.session_id if self.current_session else None
+            self._do_start_recording(target_session_id=target_id)
+
+    def _on_new_session_with_recording(self) -> None:
+        """+ 새 탭 메뉴: 빈 세션 + 즉시 녹화 시작 (사용자 추가 §6)."""
+        if self.app_service.is_recording:
+            self._toast(tr("ui_v2.recording.toast.error", error="already recording"), "warning")
+            return
+        from datetime import datetime as _dt
+
+        title = tr(
+            "ui_v2.recording.commit.new_session_title", ts=_dt.now().strftime("%Y%m%d-%H%M%S")
+        )
+        session = self.app_service.create_session(title=title)
+        self._refresh_session_list()
+        self._open_session_tab(session.session_id)
+        self._do_start_recording(target_session_id=session.session_id)
+
+    def _do_start_recording(self, target_session_id: Optional[str]) -> None:
+        from .recorder_overlay import RecorderOverlay
+
+        try:
+            self.app_service.start_recording(target_session_id=target_session_id)
+        except Exception as e:  # noqa: BLE001
+            self._toast(tr("ui_v2.recording.toast.error", error=str(e)), "error")
+            return
+
+        self._recording_target_session_id = target_session_id
+        self._record_btn.setToolTip(tr("ui_v2.recording.action_bar.tooltip_stop"))
+        self._record_btn.setStyleSheet(
+            f"color: {COLORS['bg_base']}; background-color: {COLORS['error']}; "
+            f"font-weight: bold; padding: 4px 10px;"
+        )
+
+        self._recorder_overlay = RecorderOverlay(
+            get_event_count=lambda: self.app_service.recording_event_count,
+            on_stop=self._do_stop_recording,
+            parent=None,
+        )
+        self._recorder_overlay.start()
+        self.showMinimized()
+        self._toast(tr("ui_v2.recording.toast.started"), "info")
+
+    def _do_stop_recording(self) -> None:
+        if not self.app_service.is_recording:
+            return
+        try:
+            steps = self.app_service.stop_recording(self_window_titles=["ohdo"])
+        except Exception as e:  # noqa: BLE001
+            self._toast(tr("ui_v2.recording.toast.error", error=str(e)), "error")
+            self._teardown_recording_ui()
+            return
+
+        self._teardown_recording_ui()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+        if not steps:
+            self._toast(tr("ui_v2.recording.toast.empty_steps"), "warning")
+            # raw events 가 비어있어도 commit_recording 호출해서 Recorder 정리.
+            try:
+                self.app_service.commit_recording(
+                    [], target_session_id=self._recording_target_session_id
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return
+
+        self._toast(
+            tr("ui_v2.recording.toast.stopped", count=len(steps)),
+            "success",
+        )
+        self._show_review_dialog(steps)
+
+    def _show_review_dialog(self, initial_steps: list[Step]) -> None:
+        from PySide6.QtWidgets import QDialog as _QDialog
+
+        from .recording_review_dialog import RecordingReviewDialog
+
+        rec_session = getattr(self.app_service._recorder, "current_session", None)
+        dlg = RecordingReviewDialog(
+            recording_session=rec_session,
+            initial_steps=initial_steps,
+            self_window_titles=["ohdo"],
+            parent=self,
+        )
+        result = dlg.exec()
+        if result != _QDialog.DialogCode.Accepted:
+            # cancel — recorder 정리 + 토스트
+            try:
+                self.app_service.commit_recording(
+                    [], target_session_id=self._recording_target_session_id
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            self._toast(tr("ui_v2.recording.toast.cancel"), "info")
+            return
+
+        try:
+            session = self.app_service.commit_recording(
+                dlg.edited_steps,
+                target_session_id=self._recording_target_session_id,
+            )
+        except Exception as e:  # noqa: BLE001
+            self._toast(tr("ui_v2.recording.toast.commit_failed", error=str(e)), "error")
+            return
+
+        self._refresh_session_list()
+        self._open_session_tab(session.session_id)
+        self._toast(
+            tr("ui_v2.recording.toast.committed", count=len(dlg.edited_steps)),
+            "success",
+        )
+
+    def _teardown_recording_ui(self) -> None:
+        if self._recorder_overlay is not None:
+            try:
+                self._recorder_overlay.stop_and_hide()
+                self._recorder_overlay.deleteLater()
+            except Exception:  # noqa: BLE001
+                pass
+            self._recorder_overlay = None
+        self._record_btn.setToolTip(tr("ui_v2.recording.action_bar.tooltip_start"))
+        self._record_btn.setStyleSheet(
+            f"color: {COLORS['error']}; font-weight: bold; padding: 4px 10px;"
+        )
+        self._recording_target_session_id = None
 
     def _on_run_initial(self, _step_id: int) -> None:
         """Initial 단독 실행 — AppService.run_initial_block_sync 사용 (Phase 2.5 contract)."""

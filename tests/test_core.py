@@ -7906,6 +7906,258 @@ if __name__ == "__main__":
             "[PR-14] 새 세션 id 는 기존과 달라야 함",
         )
 
+    def test_162_recording_toolbar_button_and_hotkey(self):
+        """[ADR 0004 PR-15] ⏺ toolbar 버튼 + Ctrl+Shift+R 핫키 + toggle handler.
+
+        가드: source-level sentinel — main_window_v2 에
+        1. ``_on_toggle_recording`` 메서드 존재 + Step _do_start/_do_stop 호출
+        2. ``_record_btn`` 위젯 + clicked → _on_toggle_recording
+        3. ``Ctrl+Shift+R`` QShortcut 등록 + _on_toggle_recording 연결
+        4. tr 키 ``ui_v2.recording.action_bar.btn`` / tooltip_start / tooltip_stop 사용
+        """
+        import inspect as _inspect
+
+        from ui_v2 import main_window_v2 as _mw
+
+        src = _inspect.getsource(_mw)
+        # 1) 메서드
+        self.assert_true(
+            "def _on_toggle_recording" in src,
+            "[PR-15] _on_toggle_recording 핸들러 존재",
+        )
+        self.assert_true(
+            "def _do_start_recording" in src and "def _do_stop_recording" in src,
+            "[PR-15] _do_start_recording / _do_stop_recording 헬퍼 존재",
+        )
+        # 2) toolbar 버튼
+        self.assert_true(
+            "_record_btn" in src and "_on_toggle_recording" in src,
+            "[PR-15] _record_btn 위젯 + clicked → _on_toggle_recording",
+        )
+        # 3) Ctrl+Shift+R 핫키 (test_162 sentinel — architecture 25 §"PR-15" 회귀 가드)
+        self.assert_true(
+            'QShortcut(QKeySequence("Ctrl+Shift+R")' in src and "_on_toggle_recording" in src,
+            "[PR-15] Ctrl+Shift+R 핫키 등록 + _on_toggle_recording 연결",
+        )
+        # 4) tr 키 사용
+        for key in (
+            "ui_v2.recording.action_bar.btn",
+            "ui_v2.recording.action_bar.tooltip_start",
+            "ui_v2.recording.action_bar.tooltip_stop",
+        ):
+            self.assert_true(key in src, f"[PR-15] tr 키 '{key}' main_window_v2 에서 사용")
+
+    def test_163_recorder_overlay_clickthrough_and_stop_btn(self):
+        """[ADR 0004 PR-15] RecorderOverlay 가 click-through + 자식 [중지] 버튼만
+        mouse 받음 + frameless + always-on-top.
+        """
+        import inspect as _inspect
+
+        from ui_v2 import recorder_overlay as _ro
+        from ui_v2.recorder_overlay import RecorderOverlay
+
+        src = _inspect.getsource(_ro)
+
+        # 핵심 Qt 플래그/속성 sentinel
+        for needle, desc in (
+            ("FramelessWindowHint", "frameless window"),
+            ("WindowStaysOnTopHint", "always-on-top"),
+            ("Tool", "Qt.Tool window type"),
+            ("WA_ShowWithoutActivating", "show without activating (다른 창 focus 유지)"),
+            ("WA_TransparentForMouseEvents, True", "overlay 자체 click-through"),
+            ("WA_TransparentForMouseEvents, False", "[중지] 버튼은 mouse 받기"),
+            ("def start", "start lifecycle"),
+            ("def stop_and_hide", "stop_and_hide lifecycle"),
+            ("get_event_count", "event count callable 주입"),
+            ("on_stop", "stop callback 주입"),
+        ):
+            self.assert_true(
+                needle in src,
+                f"[PR-15] RecorderOverlay 에 '{desc}' 패턴 필수: '{needle}'",
+            )
+
+        # callable 시그니처
+        sig = _inspect.signature(RecorderOverlay.__init__)
+        params = list(sig.parameters)
+        for p in ("get_event_count", "on_stop"):
+            self.assert_true(p in params, f"[PR-15] RecorderOverlay.__init__ '{p}' 인자")
+
+    def test_164_recording_locale_catalog_complete(self):
+        """[ADR 0004 PR-15] recording.* catalog 키 ~40 개 en/ko 양쪽 존재 + 양쪽
+        key set 동일.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        locale_dir = _Path(__file__).parent.parent / "core" / "locale"
+        en_cat = _json.loads((locale_dir / "en.json").read_text(encoding="utf-8"))
+        ko_cat = _json.loads((locale_dir / "ko.json").read_text(encoding="utf-8"))
+
+        en_keys = {k for k in en_cat if k.startswith("ui_v2.recording.")}
+        ko_keys = {k for k in ko_cat if k.startswith("ui_v2.recording.")}
+
+        self.assert_true(
+            len(en_keys) >= 30,
+            f"[PR-15] en.json 의 ui_v2.recording.* 키 30개 이상 필요. 실제 {len(en_keys)}",
+        )
+        diff = en_keys.symmetric_difference(ko_keys)
+        self.assert_true(
+            not diff,
+            f"[PR-15] en/ko 의 ui_v2.recording.* 키 set 동일. 차이: {sorted(diff)[:5]}",
+        )
+
+        # 필수 키 sentinel
+        for key in (
+            "ui_v2.recording.action_bar.btn",
+            "ui_v2.recording.overlay.label_recording",
+            "ui_v2.recording.review.title",
+            "ui_v2.recording.empty.card_title",
+            "ui_v2.recording.tab_menu.new_recording",
+            "ui_v2.recording.toast.started",
+            "ui_v2.recording.toast.committed",
+        ):
+            self.assert_true(
+                key in en_cat and key in ko_cat,
+                f"[PR-15] 필수 catalog 키 '{key}' en+ko 양쪽 존재",
+            )
+
+    def test_165_recording_secrets_integration_sentinel(self):
+        """[ADR 0004 PR-15 + ADR 0003] 녹화 → PW field → get_secret 변환 path.
+
+        recorder_transform 이 integrate_secrets=True 일 때 PW field 후속 key
+        그룹을 get_secret('label') 로 변환하는 path 가 살아있는지 sentinel.
+        """
+        import inspect as _inspect
+
+        from core import recorder_transform as _rt
+
+        src = _inspect.getsource(_rt)
+        self.assert_true(
+            "integrate_secrets" in src,
+            "[PR-15] recorder_transform 이 integrate_secrets 옵션 사용",
+        )
+        self.assert_true(
+            "is_password_field" in src,
+            "[PR-15] PW field 감지 path 살아있음",
+        )
+        self.assert_true(
+            "get_secret(" in src,
+            "[PR-15] get_secret('label') 코드 생성 path 살아있음 (ADR 0003 강 통합)",
+        )
+
+        # 사용자 메시지 advisory path — UI 측에서 secrets_detector 의 advisory 호출
+        # 가능하도록 review dialog 에 opt_secrets 토글 + tr 키 노출.
+        from ui_v2 import recording_review_dialog as _rrd
+
+        rd_src = _inspect.getsource(_rrd)
+        self.assert_true(
+            "ui_v2.recording.review.opt_secrets" in rd_src,
+            "[PR-15] review dialog 에 ADR 0003 시크릿 변환 토글 노출",
+        )
+
+    def test_166_empty_state_recording_card(self):
+        """[ADR 0004 PR-15 — 사용자 추가 §6] D25 빈 상태에 "🎬 자동 녹화" 카드
+        + + 새 탭 메뉴에 "녹화로 새 세션" 액션.
+        """
+        import inspect as _inspect
+
+        from ui_v2 import main_window_v2 as _mw
+
+        src = _inspect.getsource(_mw)
+
+        # 1) _show_empty_state 가 show_recording_card 인자를 받음
+        self.assert_true(
+            "show_recording_card" in src,
+            "[PR-15] _show_empty_state 에 show_recording_card 인자",
+        )
+        # 2) 호출부에서 True 로 켜는 sentinel (세션 빈 상태)
+        self.assert_true(
+            "show_recording_card=True" in src,
+            "[PR-15] session 빈 상태 호출에서 show_recording_card=True",
+        )
+        # 3) 카드 안 tr 키 노출
+        for key in (
+            "ui_v2.recording.empty.card_title",
+            "ui_v2.recording.empty.card_desc",
+            "ui_v2.recording.empty.card_btn",
+        ):
+            self.assert_true(key in src, f"[PR-15] 빈 상태 카드 tr 키 '{key}' 사용")
+        # 4) + 새 탭 메뉴에 "녹화로 새 세션" 액션
+        self.assert_true(
+            "ui_v2.recording.tab_menu.new_recording" in src,
+            "[PR-15] + 새 탭 메뉴에 녹화로 새 세션 액션",
+        )
+        self.assert_true(
+            "_on_new_session_with_recording" in src,
+            "[PR-15] _on_new_session_with_recording 핸들러 존재",
+        )
+
+    def test_167_review_dialog_edit_features(self):
+        """[ADR 0004 PR-15 — 사용자 추가 §8] review dialog 편집 기능 강화.
+
+        가드: review dialog 에
+        - inline 편집 콜백 (_on_step_wait_changed, _on_edit_code, _on_item_double_clicked)
+        - drag&drop reorder (InternalMove + _on_rows_moved)
+        - 변환 옵션 toggle 즉시 재변환 (_on_option_toggled + recorder_transform.transform 호출)
+        - bulk action (_bulk_delete, _bulk_merge + context menu)
+        - 인접 step 합치기/분할 (_on_split, _on_merge_prev)
+        - raw events 디버그 보기 (_on_view_raw_events)
+        """
+        import inspect as _inspect
+
+        from ui_v2 import recording_review_dialog as _rrd
+        from ui_v2.recording_review_dialog import RecordingReviewDialog
+
+        # 필수 메서드 sentinel
+        for name in (
+            "_on_step_wait_changed",
+            "_on_edit_code",
+            "_on_item_double_clicked",
+            "_on_option_toggled",
+            "_on_split",
+            "_on_merge_prev",
+            "_on_move",
+            "_on_delete",
+            "_on_rows_moved",
+            "_bulk_delete",
+            "_bulk_merge",
+            "_on_context_menu",
+            "_on_view_raw_events",
+        ):
+            self.assert_true(
+                callable(getattr(RecordingReviewDialog, name, None)),
+                f"[PR-15] RecordingReviewDialog.{name} 메서드 존재",
+            )
+
+        src = _inspect.getsource(_rrd)
+        # drag&drop + multi-select
+        for needle, desc in (
+            ("InternalMove", "drag&drop reorder mode"),
+            ("ExtendedSelection", "multi-select bulk action"),
+            ("from core.recorder_transform import transform", "import path"),
+            ("transform(", "재변환 호출"),
+            ("TransformOptions(", "옵션 재구성"),
+            ("blockSignals", "rowsMoved 재진입 가드"),
+        ):
+            self.assert_true(
+                needle in src,
+                f"[PR-15] review dialog 에 '{desc}' 패턴 필수: '{needle}'",
+            )
+
+        # 변환 옵션 토글 4개 tr 키
+        for key in (
+            "ui_v2.recording.review.opt_group_keys",
+            "ui_v2.recording.review.opt_drop_empty",
+            "ui_v2.recording.review.opt_window_focus",
+            "ui_v2.recording.review.opt_secrets",
+            "ui_v2.recording.review.btn_raw_events",
+            "ui_v2.recording.review.btn_commit",
+        ):
+            self.assert_true(
+                key in src,
+                f"[PR-15] review dialog 에 tr 키 '{key}' 노출",
+            )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
