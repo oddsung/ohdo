@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-16 (5/4~5/16 작업 — 자세한 변경은 §5 변경 이력 + §11~§24 인계 노트 참조). baseline: **core 169/169 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준 — PR-11 +4 + PR-12 +4 + PR-13 +6 + PR-14 +3 + PR-15 +6 + PR-16a +2 = 144→169). **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
+> 마지막 업데이트: 2026-05-18 (5/4~5/18 작업 — 자세한 변경은 §5 변경 이력 + §11~§24 인계 노트 참조). baseline: **core 173/173 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준 — PR-11 +4 + PR-12 +4 + PR-13 +6 + PR-14 +3 + PR-15 +6 + PR-16a +2 + PR-16w +4 = 144→173). **5/18: ADR 0004 Phase R2 PR-16w 완료 — 창 포커스 자동 경계 (SetWinEventHook EVENT_SYSTEM_FOREGROUND + SKIPOWNPROCESS) + F8 키보드 hook 에서 marker 자동 변환. PR-13 의 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 가 비로소 end-to-end 작동 (이전엔 PR-13 에서 분리 로직만 구현되어 있었고 캡처 path 가 없어서 dead code 였음). 자세한 §24.** **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1439,7 +1439,7 @@ AI 가 placeholder 안 보고 평범한 element_context cross-reference 로 코�
 | **PR-13** | `core/recorder_transform.py` — raw events → Step 변환 (노이즈 필터 + 키 그룹핑 + 자동 경계 4 신호 + element_meta → pywinauto/Selenium/pyautogui 코드 + user_request 자동 생성 + ADR 0003 강 통합 PW field → get_secret) | ✅ **완료** (test_153~158 6 신규) |
 | **PR-14** | AppService — `start_recording` / `stop_recording` / `commit_recording` + listener pattern (`add_recording_listener` / `remove_recording_listener`) + 이벤트 (`recording.started` / `stopped` / `committed`). EventBus 신규 모듈은 도입 X — 가벼운 callback list 패턴 (PR-15 UI 가 connect 쉽고 향후 EventBus 통합 쉬움) | ✅ **완료** (test_159~161 3 신규) |
 | **PR-15** | UI — `ui_v2/recorder_overlay.py` (click-through floating overlay, WA_TransparentForMouseEvents) + `ui_v2/recording_review_dialog.py` (inline 편집 + drag&drop + bulk action + 4 옵션 toggle 즉시 재변환 + raw events 보기) + main_window_v2 통합 (툴바 ⏺ + Ctrl+Shift+R + D25 빈 상태 🎬 카드 + + 새 탭 메뉴) + locale 47 키 (en/ko) | ✅ **완료** (test_162~167 6 신규) |
-| PR-16 (R2) | window focus 자동 경계 + F8 marker | pending |
+| **PR-16w (R2)** | `core/input_hooks.py` SetWinEventHook(EVENT_SYSTEM_FOREGROUND, SKIPOWNPROCESS) + WinEventEvent/WinEventCallback API + `core/recorder.py` start/stop 에서 winevent callback 등록·해제 + `_on_winevent_event` 가 window_focus RawEvent 적재 + F8 keydown (VK_F8=0x77) 을 enable_f8_marker 옵션에 따라 marker RawEvent 로 자동 변환 | ✅ **완료** (test_170~173 4 신규) |
 | PR-17 (R2) | 마이그레이션 모드 (event queue + async EFP) | pending |
 | PR-18 (R2) | DPI / 멀티모니터 안정화 + i18n 완성 | pending |
 
@@ -1651,9 +1651,42 @@ def commit_recording(edited_steps, target_session_id=None, new_session_title=Non
 - **test_168**: `core.element_inspect` 모듈 contract — `capture_element_at` callable + (x, y) 시그니처 + 필수 10 필드 sentinel (control_type / name / automation_id / class_name / window_title / hwnd / process_id / exe_name / rect / is_password_field) + non-Windows 분기 + UIA `CurrentIsPassword` path
 - **test_169**: `MainWindowV2._do_start_recording` 의 element_capture_fn 주입 sentinel — `from core.element_inspect import capture_element_at` import + `element_capture_fn=capture_element_at` keyword 호출
 
-### 검증 결과 (PR-11 ~ PR-16a)
+### PR-16w 핵심 구현 노트 (5/18 — R2 첫 PR; PR-16a 와 이름 충돌 회피로 -w 접미사)
 
-- **core: 169/169 그린** (144 + 4 PR-11 + 4 PR-12 + 6 PR-13 + 3 PR-14 + 6 PR-15 + 2 PR-16a)
+**배경**: PR-13 에서 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 와 `_split_into_batches` 의 window_focus / marker 처리 로직이 구현되어 있었지만, 실제 캡처 path 가 없어서 dead code 였음 (RawEvent 의 `window_focus` / `marker` kind 가 외부에서 들어올 일 없었음). PR-16w 가 캡처 path 를 활성화하여 end-to-end 작동.
+
+**`core/input_hooks.py` 변경**:
+- Win32 상수 추가: `EVENT_SYSTEM_FOREGROUND=0x3`, `WINEVENT_OUTOFCONTEXT=0x0`, `WINEVENT_SKIPOWNPROCESS=0x2`, `OBJID_WINDOW=0`
+- `WinEventEvent` dataclass 신규 + `WinEventType = Literal["foreground"]` + `WinEventCallback = Callable[[WinEventEvent], None]` (반환값 없음 — WinEvent 는 OS 알림 전용, 차단 불가)
+- `InputHookManager` 확장:
+  - `_winevent_callbacks: dict[int, WinEventCallback]`, `_winevent_hook`, `_winevent_proc_ref`
+  - `install_winevent_callback(cb) -> int` / `uninstall_winevent_callback(cb_id)` / `is_winevent_hook_installed` / `winevent_callback_count`
+  - `_install_winevent_hook_locked` → `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, proc, 0, 0, OUTOFCONTEXT | SKIPOWNPROCESS)` — SKIPOWNPROCESS 로 ohdo 자체 창 전환 (showMinimized / overlay 등) 자동 제외
+  - `_uninstall_winevent_hook_locked` → `UnhookWinEvent` (NOT `UnhookWindowsHookEx` — 다른 API)
+  - `_winevent_dispatch` → `OBJID_WINDOW (0)` 만 처리 (컨트롤 레벨 idObject 무시) + `GetWindowTextW(256)` 로 window_title 채움 + callback 예외 격리
+- `uninstall_all` 도 winevent 정리
+
+**`core/recorder.py` 변경**:
+- `VK_F8 = 0x77` 상수 모듈 레벨 노출
+- `Recorder.__init__` 에 `_winevent_cb_id: Optional[int]` 추가
+- `start()` 가 mouse/keyboard 외에 winevent callback 추가 등록, `stop()` 이 해제
+- `_on_winevent_event(WinEventEvent)` → `_append_winevent_event` → `RawEvent(kind="window_focus", hwnd=..., window_title=...)` 추가
+- `_append_keyboard_event` 분기 추가: `opts.enable_f8_marker and vk_code == VK_F8` 이면 `RawEvent(kind="marker")` (vk_code 미채움 — clean marker), 그 외엔 기존 key event 유지. enable_f8_marker=False 시 F8 도 일반 key event (디버그/사용자 선호용)
+
+**OUTOFCONTEXT dispatch 의존**: WinEvent OUTOFCONTEXT 콜백은 SetWinEventHook 을 호출한 스레드에 SendMessage 로 dispatch — Qt 메인 이벤트 루프가 메시지 펌프 역할. recorder 사용은 main_window_v2 에서 시작되므로 자동 작동. 테스트는 `_on_winevent_event` 를 직접 invoke 하여 OS 의존성 우회.
+
+**recorder_transform 무변경**: `_split_into_batches` 의 `window_focus` / `marker` 처리는 PR-13 에서 이미 구현됨. PR-16w 는 capture path 만 활성화 — 변환 로직은 그대로.
+
+### 회귀 가드 (test_170~173, PR-16w 4 신규)
+
+- **test_170**: `input_hooks` WinEvent 모듈 contract — Win32 상수 값 / WinEventEvent 필드 / InputHookManager API (install/uninstall_winevent_callback/properties) / SKIPOWNPROCESS 플래그 sentinel / UnhookWinEvent (NOT UnhookWindowsHookEx) sentinel / get_hook_manager 싱글톤 동일 property 노출
+- **test_171**: Recorder window_focus 캡처 — start 시 winevent_callback_count==1 / `_on_winevent_event(WinEventEvent("foreground", hwnd=42, title="Notepad"))` → 첫 RawEvent kind="window_focus" + hwnd/window_title 보존 / 'foreground' 외 type 무시 / stop 시 callback 해제 / 재진입 재등록
+- **test_172**: F8 marker 매핑 — `VK_F8=0x77` 상수 + enable_f8_marker=True default 시 F8 keydown → marker RawEvent (vk_code=None, clean) + 다른 키 (0x41 'A') 는 key event 유지 + enable_f8_marker=False 시 F8 도 일반 key event
+- **test_173**: end-to-end transform — window_focus event 가 PR-13 의 `_split_into_batches` 의 `auto_window_focus_boundary` 분기에서 step 경계 신호로 작동 + 옵션 OFF 시 1 step 으로 합침 + window_focus 자체는 generated_code 에 안 박힘
+
+### 검증 결과 (PR-11 ~ PR-16w)
+
+- **core: 173/173 그린** (144 + 4 PR-11 + 4 PR-12 + 6 PR-13 + 3 PR-14 + 6 PR-15 + 2 PR-16a + 4 PR-16w)
 - **scenarios: 73/73 그린** (회귀 0)
 - **element_picker baseline (test_42~48): 그린 유지**
 - ruff check + format All passed (84 files)
@@ -1662,8 +1695,8 @@ def commit_recording(edited_steps, target_session_id=None, new_session_title=Non
 
 **A. PR-16b (권장 1순위, 큰 PR)**: AI 후처리 — 녹화 종료 시 raw events + element_meta + screenshot 을 컴팩트하게 직렬화 → AI 프롬프트 (기존 `core/prompt_builder.py` 확장 또는 `core/recorder_ai_generator.py` 신규) → 응답을 step 별 generated_code 로 매핑 → review dialog 에 "AI 재생성" 버튼 (사용자가 토글로 AI 생성/deterministic 생성 선택). 비용/속도 tradeoff — 녹화 30초당 AI 호출 1번 + 토큰 ~5K. PR-13 의 deterministic 코드 생성과 공존 (fallback path)
 
-**B. 사용자 GUI 실측 검증**: PR-16a 완료로 element 메타 채워짐 → notepad/calculator/브라우저 녹화 시 control_type/name 기반 코드가 실제로 생성되는지 실측 가능. 실패 케이스 발견 시 fix → PR-16a.1 / PR-16c 등으로 분기
+**B. 사용자 GUI 실측 검증**: PR-16a + PR-16w 완료로 element 메타 + 창 포커스 경계 + F8 marker 모두 작동 → notepad / calculator / 브라우저 녹화 시 control_type/name 기반 코드 + 자동 step 경계 (다른 앱 전환 시 + F8 누름 시) 실제 검증 가능. 실패 케이스 발견 시 fix → PR-16w.1 / PR-16c 분기
 
-**C. PR-16 (R2, 다른 트랙) — 창 포커스 자동 경계 + F8 marker**: `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` + `add_marker` 활성화. architecture 25 §"PR-16" 참조 (PR-16a 와 별개 트랙 — 이름 충돌 회피 위해 R2 의 본래 PR-16 은 PR-16w 같은 식으로 rename 검토)
+**C. PR-17 (R2)**: 마이그레이션 모드 — event queue + async EFP. LL hook callback 100ms 이내 처리 강제 + 무거운 EFP 호출은 queue 로 분리하여 빠른 입력 따라잡기 (Power Automate / AutoHotkey / pywinauto 스크립트 마이그레이션 시나리오). architecture 25 §"PR-17" 참조
 
-**미커밋 변경**: PR-16a 전체 (element_inspect.py 신규 + main_window_v2 wire-up + test_168~169 + handoff sync).
+**D. PR-18 (R2)**: DPI / 멀티모니터 안정화 + i18n 완성 — PROCESS_PER_MONITOR_DPI_AWARE 보장 + 모니터별 좌표 보정 + R2 신규 i18n catalog 키 (Ctrl+Shift+R 설정 UI 등)
