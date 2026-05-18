@@ -8158,6 +8158,81 @@ if __name__ == "__main__":
                 f"[PR-15] review dialog 에 tr 키 '{key}' 노출",
             )
 
+    def test_168_element_inspect_module_contract(self):
+        """[ADR 0004 PR-16a] core.element_inspect 모듈 + capture_element_at API.
+
+        가드:
+        1. 모듈 import 가능 + capture_element_at callable
+        2. capture_element_at 시그니처가 (x, y) 위치 인자 2개
+        3. 모듈 source 에 recorder_transform 이 소비하는 필드 sentinel
+        4. non-Windows 환경 silent fallback (sys.platform 분기)
+        5. ADR 0003 시너지 — UIA IsPassword 감지 path
+        """
+        import inspect as _inspect
+
+        from core import element_inspect as _ei
+        from core.element_inspect import capture_element_at
+
+        self.assert_true(callable(capture_element_at), "[PR-16a] capture_element_at callable")
+
+        sig = _inspect.signature(capture_element_at)
+        params = list(sig.parameters)
+        self.assert_true(
+            len(params) >= 2,
+            f"[PR-16a] capture_element_at 인자 최소 2개 (x, y). 실제: {params}",
+        )
+
+        src = _inspect.getsource(_ei)
+        for needle in (
+            '"control_type"',
+            '"name"',
+            '"automation_id"',
+            '"class_name"',
+            '"window_title"',
+            '"hwnd"',
+            '"process_id"',
+            '"exe_name"',
+            '"rect"',
+            '"is_password_field"',
+        ):
+            self.assert_true(
+                needle in src,
+                f"[PR-16a] capture_element_at 가 {needle} 필드 채움",
+            )
+
+        self.assert_true(
+            "sys.platform" in src and "win32" in src,
+            "[PR-16a] non-Windows 환경 silent fallback (sys.platform 분기)",
+        )
+
+        self.assert_true(
+            "CurrentIsPassword" in src,
+            "[PR-16a] UIA IsPassword 감지 path 살아있음 (ADR 0003)",
+        )
+
+    def test_169_main_window_v2_injects_element_capture_fn(self):
+        """[ADR 0004 PR-16a] main_window_v2._do_start_recording 가
+        capture_element_at 를 element_capture_fn 으로 주입.
+
+        PR-14 의 element_capture_fn 인자가 PR-15 까지는 미사용 (None) 이라서
+        녹화된 click 의 element_meta 가 항상 None 으로 떨어짐. PR-16a 가 이
+        갭을 메움 — recorder_transform 이 비로소 control_type/name/automation_id
+        기반 코드를 생성 가능.
+        """
+        import inspect as _inspect
+
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        src = _inspect.getsource(MainWindowV2._do_start_recording)
+        for needle, desc in (
+            ("from core.element_inspect import capture_element_at", "element_inspect import"),
+            ("element_capture_fn=capture_element_at", "element_capture_fn 주입 (keyword)"),
+        ):
+            self.assert_true(
+                needle in src,
+                f"[PR-16a] _do_start_recording 에 '{desc}' 필수: '{needle}'",
+            )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 

@@ -2144,10 +2144,19 @@ class MainWindowV2(QMainWindow):
         self._do_start_recording(target_session_id=session.session_id)
 
     def _do_start_recording(self, target_session_id: Optional[str]) -> None:
+        # ADR 0004 PR-16a: element 메타를 채우기 위한 EFP callback 주입.
+        # core.element_inspect.capture_element_at 는 UI overlay / 위젯 의존 없는
+        # 가벼운 (x, y) → element_meta dict 함수 — LL hook thread 에서 그대로
+        # 호출해도 안전. 실패 시 None 반환 (recorder_transform 이 좌표 fallback).
+        from core.element_inspect import capture_element_at
+
         from .recorder_overlay import RecorderOverlay
 
         try:
-            self.app_service.start_recording(target_session_id=target_session_id)
+            self.app_service.start_recording(
+                target_session_id=target_session_id,
+                element_capture_fn=capture_element_at,
+            )
         except Exception as e:  # noqa: BLE001
             self._toast(tr("ui_v2.recording.toast.error", error=str(e)), "error")
             return
