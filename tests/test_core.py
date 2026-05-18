@@ -8233,6 +8233,293 @@ if __name__ == "__main__":
                 f"[PR-16a] _do_start_recording 에 '{desc}' 필수: '{needle}'",
             )
 
+    def test_170_input_hooks_winevent_module_contract(self):
+        """[ADR 0004 PR-16w] InputHookManager 의 WinEvent (foreground 전환) 지원.
+
+        가드:
+        1. WinEventEvent dataclass + WinEventType Literal
+        2. Win32 상수 EVENT_SYSTEM_FOREGROUND / WINEVENT_OUTOFCONTEXT / WINEVENT_SKIPOWNPROCESS
+        3. install/uninstall_winevent_callback + winevent_callback_count / is_winevent_hook_installed
+        4. SKIPOWNPROCESS 플래그가 SetWinEventHook 호출에 박혀있음 (ohdo 자체 창 제외)
+        5. uninstall_all 가 winevent 도 정리
+        """
+        import inspect as _inspect
+
+        from core import input_hooks as _ih
+        from core.input_hooks import (
+            EVENT_SYSTEM_FOREGROUND,
+            WINEVENT_OUTOFCONTEXT,
+            WINEVENT_SKIPOWNPROCESS,
+            InputHookManager,
+            WinEventEvent,
+        )
+
+        self.step("(1) Win32 상수 값")
+        self.assert_true(EVENT_SYSTEM_FOREGROUND == 0x0003, "[PR-16w] EVENT_SYSTEM_FOREGROUND=0x3")
+        self.assert_true(WINEVENT_OUTOFCONTEXT == 0x0000, "[PR-16w] WINEVENT_OUTOFCONTEXT=0x0")
+        self.assert_true(WINEVENT_SKIPOWNPROCESS == 0x0002, "[PR-16w] WINEVENT_SKIPOWNPROCESS=0x2")
+
+        self.step("(2) WinEventEvent dataclass 필드")
+        ev = WinEventEvent(type="foreground", hwnd=123, window_title="Test")
+        for field in ("type", "hwnd", "window_title", "timestamp_ms"):
+            self.assert_true(hasattr(ev, field), f"[PR-16w] WinEventEvent.{field} 필드")
+        self.assert_true(
+            ev.type == "foreground" and ev.hwnd == 123,
+            f"[PR-16w] WinEventEvent 초기값 보존. 실제: {ev!r}",
+        )
+
+        self.step("(3) InputHookManager WinEvent API")
+        mgr = InputHookManager()
+        for method in (
+            "install_winevent_callback",
+            "uninstall_winevent_callback",
+        ):
+            self.assert_true(hasattr(mgr, method), f"[PR-16w] InputHookManager.{method} 필수")
+        for prop in ("is_winevent_hook_installed", "winevent_callback_count"):
+            self.assert_true(hasattr(mgr, prop), f"[PR-16w] InputHookManager.{prop} 필수")
+        self.assert_true(
+            mgr.winevent_callback_count == 0,
+            "[PR-16w] 초기 winevent_callback_count == 0",
+        )
+
+        self.step("(4) callback 등록/해제 + uninstall_all")
+        cb_id = mgr.install_winevent_callback(lambda ev: None)
+        self.assert_true(
+            mgr.winevent_callback_count == 1,
+            "[PR-16w] 등록 후 count == 1",
+        )
+        mgr.uninstall_winevent_callback(cb_id)
+        self.assert_true(
+            mgr.winevent_callback_count == 0,
+            "[PR-16w] 해제 후 count == 0",
+        )
+
+        mgr.install_winevent_callback(lambda ev: None)
+        mgr.uninstall_all()
+        self.assert_true(
+            mgr.winevent_callback_count == 0,
+            "[PR-16w] uninstall_all 후 winevent count == 0",
+        )
+
+        self.step("(5) SetWinEventHook 호출에 SKIPOWNPROCESS 플래그 박힘")
+        install_src = _inspect.getsource(InputHookManager._install_winevent_hook_locked)
+        self.assert_true(
+            "SetWinEventHook" in install_src,
+            "[PR-16w] _install_winevent_hook_locked 가 SetWinEventHook 호출",
+        )
+        self.assert_true(
+            "WINEVENT_SKIPOWNPROCESS" in install_src,
+            "[PR-16w] SKIPOWNPROCESS 플래그 필수 (ohdo 자체 창 전환 제외)",
+        )
+        self.assert_true(
+            "UnhookWinEvent"
+            in _inspect.getsource(InputHookManager._uninstall_winevent_hook_locked),
+            "[PR-16w] _uninstall 가 UnhookWinEvent (NOT UnhookWindowsHookEx) 호출",
+        )
+
+        self.step("(6) get_hook_manager 싱글톤 WinEvent property 노출")
+        m = _ih.get_hook_manager()
+        self.assert_true(
+            hasattr(m, "winevent_callback_count"),
+            "[PR-16w] 싱글톤도 동일 property 노출",
+        )
+
+    def test_171_recorder_window_focus_capture(self):
+        """[ADR 0004 PR-16w] Recorder start 시 winevent callback 등록 + stop 시 해제.
+
+        WinEvent 콜백 dispatch → window_focus RawEvent 가 buffer 에 적재되는지 검증
+        (실제 SetWinEventHook 호출 X — 직접 _on_winevent_event 주입).
+        """
+        from core.input_hooks import InputHookManager, WinEventEvent
+        from core.recorder import Recorder
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr)
+        try:
+            self.step("(1) start 후 winevent_callback_count == 1")
+            recorder.start()
+            self.assert_true(
+                hook_mgr.winevent_callback_count == 1,
+                f"[PR-16w] start 가 winevent callback 등록. 실제: {hook_mgr.winevent_callback_count}",
+            )
+
+            self.step("(2) WinEvent dispatch → window_focus RawEvent")
+            sess = recorder.current_session
+            self.assert_true(sess is not None, "current_session 존재")
+            recorder._on_winevent_event(
+                WinEventEvent(type="foreground", hwnd=42, window_title="Notepad")
+            )
+            self.assert_true(
+                recorder.event_count == 1,
+                f"[PR-16w] window_focus event 추가. 실제: {recorder.event_count}",
+            )
+            ev = sess.events[0]
+            self.assert_true(
+                ev.kind == "window_focus" and ev.hwnd == 42 and ev.window_title == "Notepad",
+                f"[PR-16w] window_focus 필드 보존. 실제: {ev!r}",
+            )
+
+            self.step("(3) 다른 type 의 WinEvent 는 무시")
+            # type 이 'foreground' 아닌 경우 (현재 Literal 이지만 향후 확장 대비)
+            # _append_winevent_event 의 분기 검증을 위해 mock 데이터 직접 주입
+            from core.recorder_models import RawEvent
+
+            fake_event = WinEventEvent.__new__(WinEventEvent)
+            fake_event.type = "other"  # type: ignore[assignment]
+            fake_event.hwnd = 99
+            fake_event.window_title = ""
+            fake_event.timestamp_ms = 0
+            recorder._on_winevent_event(fake_event)
+            self.assert_true(
+                recorder.event_count == 1,
+                "[PR-16w] foreground 외 type 은 무시",
+            )
+            _ = RawEvent  # ruff F401 회피
+
+            self.step("(4) stop 후 winevent_callback_count == 0")
+            recorder.stop()
+            self.assert_true(
+                hook_mgr.winevent_callback_count == 0,
+                f"[PR-16w] stop 가 winevent callback 해제. 실제: {hook_mgr.winevent_callback_count}",
+            )
+
+            self.step("(5) 재진입 — 새 winevent callback 재등록")
+            recorder.start()
+            self.assert_true(
+                hook_mgr.winevent_callback_count == 1,
+                "[PR-16w] 재진입 시 winevent callback 재등록",
+            )
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
+    def test_172_recorder_f8_marker_mapping(self):
+        """[ADR 0004 PR-16w + 사용자 추가 §7] F8 키다운 → marker RawEvent 자동 변환.
+
+        enable_f8_marker=True (default) 에서 vk_code=VK_F8 → kind="marker" (key event X).
+        평문 key event 가 아니므로 transform 의 `_VK_SPECIAL_KEYS` 가 `pyautogui.press('f8')`
+        를 생성하지 않음 — F8 가 generated_code 에 박히지 않는 보장.
+        """
+        from core.input_hooks import InputHookManager, KeyboardEvent
+        from core.recorder import VK_F8, Recorder
+        from core.recorder_models import TransformOptions
+
+        self.assert_true(VK_F8 == 0x77, "[PR-16w] VK_F8 = 0x77 (Win32 VK_F8 값)")
+
+        self.step("(1) enable_f8_marker=True (default) — F8 → marker")
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr)
+        try:
+            recorder.start()
+            recorder._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=VK_F8, scan_code=66))
+            sess = recorder.current_session
+            self.assert_true(sess is not None, "current_session 존재")
+            self.assert_true(
+                recorder.event_count == 1 and sess.events[0].kind == "marker",
+                f"[PR-16w] F8 keydown → marker (default). 실제: {sess.events[0]!r}",
+            )
+
+            self.step("(2) F8 marker event 의 vk_code 는 채우지 않음 (clean marker)")
+            self.assert_true(
+                sess.events[0].vk_code is None,
+                f"[PR-16w] marker 의 vk_code 는 None. 실제: {sess.events[0].vk_code!r}",
+            )
+
+            self.step("(3) 다른 키 (예: 'A' 0x41) 는 그대로 key event")
+            recorder._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=0x41, scan_code=30))
+            self.assert_true(
+                recorder.event_count == 2
+                and sess.events[1].kind == "key"
+                and sess.events[1].vk_code == 0x41,
+                f"[PR-16w] non-F8 키는 key event 유지. 실제: {sess.events[1]!r}",
+            )
+            recorder.stop()
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
+        self.step("(4) enable_f8_marker=False — F8 도 일반 key event")
+        hook_mgr2 = InputHookManager()
+        recorder2 = Recorder(hook_mgr2, opts=TransformOptions(enable_f8_marker=False))
+        try:
+            recorder2.start()
+            recorder2._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=VK_F8, scan_code=66))
+            sess2 = recorder2.current_session
+            self.assert_true(sess2 is not None, "current_session 존재")
+            self.assert_true(
+                recorder2.event_count == 1
+                and sess2.events[0].kind == "key"
+                and sess2.events[0].vk_code == VK_F8,
+                f"[PR-16w] enable_f8_marker=False 시 F8 → key event. 실제: {sess2.events[0]!r}",
+            )
+            recorder2.stop()
+        finally:
+            if recorder2.is_recording:
+                recorder2.stop()
+            hook_mgr2.uninstall_all()
+
+    def test_173_window_focus_transform_boundary_e2e(self):
+        """[ADR 0004 PR-16w] window_focus event 가 transform 에서 step batch 분리 신호로 작동.
+
+        recorder._on_winevent_event 가 채우는 window_focus RawEvent 가 PR-13 의
+        _split_into_batches (`auto_window_focus_boundary`) 에 의해 새 step 으로 분리.
+        F8 marker 도 동일 경계 신호 — PR-16w 끝단까지 end-to-end 동작 확인.
+        """
+        from datetime import datetime, timedelta
+
+        from core.recorder_models import RawEvent, RecordingSession, TransformOptions
+        from core.recorder_transform import transform
+
+        base = datetime.now()
+        # 같은 element 로 만들어 window_focus 이외의 분리 신호 (다른 element click) 를
+        # 제거 — 옵션 ON/OFF 차이가 순전히 window_focus 경계 때문임을 검증
+        meta_a = {"control_type": "Button", "name": "OK", "automation_id": "btn_ok"}
+
+        self.step("(1) window_focus → batch 분리 (default opts)")
+        sess = RecordingSession(id="wf", started_at=base)
+        sess.events.append(RawEvent(ts=base, kind="click", x=1, y=1, element_meta=meta_a))
+        sess.events.append(
+            RawEvent(
+                ts=base + timedelta(milliseconds=50),
+                kind="window_focus",
+                hwnd=99,
+                window_title="Calculator",
+            )
+        )
+        sess.events.append(
+            RawEvent(
+                ts=base + timedelta(milliseconds=100),
+                kind="click",
+                x=2,
+                y=2,
+                element_meta=meta_a,
+            )
+        )
+        steps = transform(sess, opts=TransformOptions(idle_boundary_ms=5000))
+        self.assert_true(
+            len(steps) == 2,
+            f"[PR-16w] window_focus 가 step 경계 신호. 실제: {len(steps)}",
+        )
+
+        self.step("(2) auto_window_focus_boundary=False — 경계 작동 X")
+        steps_no_boundary = transform(
+            sess,
+            opts=TransformOptions(idle_boundary_ms=5000, auto_window_focus_boundary=False),
+        )
+        self.assert_true(
+            len(steps_no_boundary) == 1,
+            f"[PR-16w] 옵션 OFF 시 1 step. 실제: {len(steps_no_boundary)}",
+        )
+
+        self.step("(3) window_focus 자체는 generated_code 에 안 박힘")
+        all_code = " ".join(s.generated_code for s in steps)
+        self.assert_true(
+            "window_focus" not in all_code and "Calculator" not in all_code,
+            f"[PR-16w] window_focus event 자체는 코드에 안 박힘. 실제: {all_code!r}",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 

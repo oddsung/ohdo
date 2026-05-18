@@ -8,11 +8,15 @@ EFP (ElementFromPoint) element 캡처는 별도 — `element_capture_fn` callbac
 주입한다 (PR-13/PR-15 에서 win_inspector 와 연결). PR-12 자체는 element_meta 를
 None 으로 둔다.
 
+R2 PR-16w 활성화:
+- foreground 창 전환 → WinEvent callback → `window_focus` RawEvent (auto_window_focus_boundary)
+- F8 키다운 → marker RawEvent 자동 변환 (enable_f8_marker; 평문 key event 안 박힘)
+
 녹화 lifecycle:
     recorder = Recorder(hook_manager, opts)
     recorder.start(target_session_id=...)
     # ... 사용자 작업 ...
-    recorder.add_marker()  # F8 수동 step 경계
+    recorder.add_marker()  # F8 수동 step 경계 (R2: 키보드 F8 도 자동 트리거)
     session = recorder.stop()
 """
 
@@ -24,7 +28,7 @@ from datetime import datetime
 from threading import Lock
 from typing import Callable, Optional
 
-from core.input_hooks import InputHookManager, KeyboardEvent, MouseEvent
+from core.input_hooks import InputHookManager, KeyboardEvent, MouseEvent, WinEventEvent
 from core.recorder_models import RawEvent, RecordingSession, TransformOptions
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,9 @@ _MOUSE_BUTTON_MAP: dict[str, str] = {
     "mbutton_down": "middle",
     "mbutton_up": "middle",
 }
+
+VK_F8 = 0x77
+"""VK_F8 = 0x77 — R2 PR-16w: enable_f8_marker 옵션 활성 시 marker 로 변환."""
 
 
 class RecorderAlreadyStartedError(RuntimeError):
@@ -80,6 +87,7 @@ class Recorder:
         self._session: Optional[RecordingSession] = None
         self._mouse_cb_id: Optional[int] = None
         self._keyboard_cb_id: Optional[int] = None
+        self._winevent_cb_id: Optional[int] = None
 
     @property
     def is_recording(self) -> bool:
@@ -116,6 +124,9 @@ class Recorder:
             self._keyboard_cb_id = self._hook_manager.install_keyboard_callback(
                 self._on_keyboard_event
             )
+            self._winevent_cb_id = self._hook_manager.install_winevent_callback(
+                self._on_winevent_event
+            )
 
             return session
 
@@ -136,6 +147,9 @@ class Recorder:
             if self._keyboard_cb_id is not None:
                 self._hook_manager.uninstall_keyboard_callback(self._keyboard_cb_id)
                 self._keyboard_cb_id = None
+            if self._winevent_cb_id is not None:
+                self._hook_manager.uninstall_winevent_callback(self._winevent_cb_id)
+                self._winevent_cb_id = None
 
             self._session.stopped_at = datetime.now()
             return self._session
@@ -166,6 +180,16 @@ class Recorder:
         except Exception:
             logger.exception("Recorder: keyboard event 처리 중 예외 (격리됨)")
         return False
+
+    def _on_winevent_event(self, event: WinEventEvent) -> None:
+        """WinEvent callback (R2 PR-16w). foreground 창 전환 → window_focus RawEvent.
+
+        반환값 없음 (WinEvent 차단 불가). 예외는 격리.
+        """
+        try:
+            self._append_winevent_event(event)
+        except Exception:
+            logger.exception("Recorder: winevent 처리 중 예외 (격리됨)")
 
     def _append_mouse_event(self, event: MouseEvent) -> None:
         if self._session is None or self._session.is_stopped:
@@ -212,12 +236,33 @@ class Recorder:
         if event.type not in ("keydown", "syskeydown"):
             return
 
+        if self._opts.enable_f8_marker and event.vk_code == VK_F8:
+            # R2 PR-16w: F8 → marker (사용자 추가 §7 의 수동 step 경계).
+            # transform 이 marker 자체를 drop 하므로 generated_code 에 안 박힘.
+            raw = RawEvent(ts=datetime.now(), kind="marker")
+        else:
+            raw = RawEvent(
+                ts=datetime.now(),
+                kind="key",
+                vk_code=event.vk_code,
+            )
+
+        with self._lock:
+            if self._session is not None and not self._session.is_stopped:
+                self._session.events.append(raw)
+
+    def _append_winevent_event(self, event: WinEventEvent) -> None:
+        if self._session is None or self._session.is_stopped:
+            return
+        if event.type != "foreground":
+            return
+
         raw = RawEvent(
             ts=datetime.now(),
-            kind="key",
-            vk_code=event.vk_code,
+            kind="window_focus",
+            hwnd=event.hwnd,
+            window_title=event.window_title,
         )
-
         with self._lock:
             if self._session is not None and not self._session.is_stopped:
                 self._session.events.append(raw)

@@ -23,8 +23,8 @@ RawEventKind = Literal["click", "key", "scroll", "window_focus", "marker"]
 - click: 마우스 좌/우/중 클릭 (single/double)
 - key: 키입력 (group_consecutive_keys 활성 시 PR-13 에서 텍스트 그룹핑)
 - scroll: 마우스 휠
-- window_focus: 활성 창 변경 (R2 PR-16 에서 SetWinEventHook 추가)
-- marker: F8 수동 step 경계 marker (R2 PR-16)
+- window_focus: 활성 창 변경 (R2 PR-16w 에서 SetWinEventHook 활성)
+- marker: F8 수동 step 경계 marker (R2 PR-16w 키보드 hook 자동 트리거)
 """
 
 
