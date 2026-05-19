@@ -9,10 +9,17 @@ WinEvent (`EVENT_SYSTEM_FOREGROUND`) 는 R2 PR-16w 에서 추가 — 활성 창 
 캡처 (recorder 가 step 자동 경계 신호로 사용). WinEvent 콜백은 반환값 없음
 (차단 불가능 — OS 알림 전용).
 
+R2 PR-18 — DPI / 멀티모니터 안정화:
+- `ensure_dpi_awareness()` 가 PROCESS_PER_MONITOR_AWARE_V2 보장 (Win10 1703+).
+- `get_dpi_for_point(x, y)` 가 좌표 별 모니터 effective DPI 반환 (100%=96).
+- `get_hook_manager()` 의 첫 호출 시 ensure_dpi_awareness 자동 트리거 — recorder
+  사용 시점에 process awareness 가 보장됨.
+
 element_picker 의 inline hook 코드는 별도 — Phase R2/R3 에서 점진 통합 예정
 ([architecture/25-recording-phase-r1-r2.md] PR-11 §"설계 결정" 참조).
 
-non-Windows 환경에서는 install/uninstall 모두 silent noop.
+non-Windows 환경에서는 install/uninstall 모두 silent noop. DPI helper 는
+DEFAULT_DPI(96) / "unsupported" 반환.
 """
 
 from __future__ import annotations
@@ -49,6 +56,26 @@ EVENT_SYSTEM_FOREGROUND = 0x0003
 WINEVENT_OUTOFCONTEXT = 0x0000
 WINEVENT_SKIPOWNPROCESS = 0x0002
 OBJID_WINDOW = 0
+
+# R2 PR-18 — DPI / 멀티모니터 안정화 (per-monitor DPI awareness 보장).
+# SetProcessDpiAwarenessContext (Win10 1703+) 우선, SetProcessDpiAwareness (Win8.1+) fallback.
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE = -3
+DPI_AWARENESS_CONTEXT_SYSTEM_AWARE = -2
+DPI_AWARENESS_CONTEXT_UNAWARE = -1
+PROCESS_PER_MONITOR_DPI_AWARE = 2
+MDT_EFFECTIVE_DPI = 0
+DEFAULT_DPI = 96
+"""Windows 표준 100% DPI. non-Windows 환경 또는 호출 실패 시 fallback 값."""
+
+DpiAwarenessMode = Literal[
+    "per_monitor_v2",
+    "per_monitor_v1",
+    "system",
+    "unaware",
+    "unsupported",
+    "error",
+]
 
 
 MouseEventType = Literal[
@@ -483,11 +510,139 @@ class InputHookManager:
 
 
 _singleton: Optional[InputHookManager] = None
+_dpi_awareness_mode: Optional[DpiAwarenessMode] = None
+"""ensure_dpi_awareness() 가 처음 호출되어 결정된 모드. idempotent 재호출은 캐시 반환."""
 
 
 def get_hook_manager() -> InputHookManager:
-    """모듈 레벨 싱글톤 반환. recorder + 향후 element_picker 통합 시 공유."""
+    """모듈 레벨 싱글톤 반환. recorder + 향후 element_picker 통합 시 공유.
+
+    R2 PR-18 — 매 호출 시 `ensure_dpi_awareness()` 트리거 (idempotent — cache hit
+    sub-µs). recorder 시작 path 에서 hook manager 를 얻으므로 hook 사용 시점에
+    DPI awareness 가 보장됨. cache reset 후 재호출에도 안전.
+    """
     global _singleton
+    ensure_dpi_awareness()
     if _singleton is None:
         _singleton = InputHookManager()
     return _singleton
+
+
+def ensure_dpi_awareness() -> DpiAwarenessMode:
+    """Windows process 의 DPI awareness 를 PER_MONITOR_AWARE_V2 로 설정 (R2 PR-18).
+
+    idempotent — 이미 설정됐으면 캐시된 모드 반환. Win10 1703+ 의
+    SetProcessDpiAwarenessContext 우선 시도, 실패 시 Win8.1+ 의
+    SetProcessDpiAwareness 로 fallback. 이미 다른 모드로 설정된 process 는
+    GetProcessDpiAwareness 로 현재 상태 확인하여 적절한 라벨 반환.
+
+    non-Windows 환경에선 "unsupported" 반환.
+
+    중요: 이 호출은 process 별로 한 번만 가능 — Qt 등이 이미 다른 awareness 로
+    초기화했다면 silent 실패하나 reading APIs 는 정상 동작. 우리가 capture 하는
+    좌표는 OS 가 어쨌든 logical/physical 으로 일관 제공 (per-monitor 모드).
+    """
+    global _dpi_awareness_mode
+    if _dpi_awareness_mode is not None:
+        return _dpi_awareness_mode
+
+    if sys.platform != "win32":
+        _dpi_awareness_mode = "unsupported"
+        return _dpi_awareness_mode
+
+    try:
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        shcore = None
+        try:
+            shcore = ctypes.windll.shcore  # type: ignore[attr-defined]
+        except OSError:
+            shcore = None
+
+        if hasattr(user32, "SetProcessDpiAwarenessContext"):
+            user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+            user32.SetProcessDpiAwarenessContext.restype = ctypes.c_bool
+            ok = user32.SetProcessDpiAwarenessContext(
+                ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+            )
+            if ok:
+                _dpi_awareness_mode = "per_monitor_v2"
+                return _dpi_awareness_mode
+
+        if shcore is not None and hasattr(shcore, "SetProcessDpiAwareness"):
+            shcore.SetProcessDpiAwareness.argtypes = [ctypes.c_int]
+            shcore.SetProcessDpiAwareness.restype = ctypes.c_long
+            hr = shcore.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)
+            if hr == 0:
+                _dpi_awareness_mode = "per_monitor_v1"
+                return _dpi_awareness_mode
+            if shcore is not None and hasattr(shcore, "GetProcessDpiAwareness"):
+                awareness = ctypes.c_int(0)
+                shcore.GetProcessDpiAwareness(None, ctypes.byref(awareness))
+                if awareness.value == 2:
+                    _dpi_awareness_mode = "per_monitor_v1"
+                elif awareness.value == 1:
+                    _dpi_awareness_mode = "system"
+                else:
+                    _dpi_awareness_mode = "unaware"
+                return _dpi_awareness_mode
+
+        _dpi_awareness_mode = "unaware"
+        return _dpi_awareness_mode
+    except Exception:
+        logger.exception("ensure_dpi_awareness: 예외 (격리됨)")
+        _dpi_awareness_mode = "error"
+        return _dpi_awareness_mode
+
+
+def get_dpi_for_point(x: int, y: int) -> int:
+    """좌표 (x, y) 가 속한 모니터의 effective DPI 반환 (R2 PR-18).
+
+    Win8.1+ 의 GetDpiForMonitor(MDT_EFFECTIVE_DPI) — 100%=96, 125%=120, 150%=144,
+    175%=168, 200%=192 등. non-Windows 또는 호출 실패 시 DEFAULT_DPI (96).
+
+    drain thread 에서 click event 처리 시 호출하므로 hot path 영향 X (drain 은
+    이미 비동기 분리됨, EFP 와 함께 캡처).
+    """
+    if sys.platform != "win32":
+        return DEFAULT_DPI
+
+    try:
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        try:
+            shcore = ctypes.windll.shcore  # type: ignore[attr-defined]
+        except OSError:
+            return DEFAULT_DPI
+
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+        MONITOR_DEFAULTTONEAREST = 0x00000002
+        user32.MonitorFromPoint.argtypes = [POINT, ctypes.c_uint]
+        user32.MonitorFromPoint.restype = ctypes.c_void_p
+        hmon = user32.MonitorFromPoint(POINT(x, y), MONITOR_DEFAULTTONEAREST)
+        if not hmon:
+            return DEFAULT_DPI
+
+        dpi_x = ctypes.c_uint(0)
+        dpi_y = ctypes.c_uint(0)
+        shcore.GetDpiForMonitor.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint),
+            ctypes.POINTER(ctypes.c_uint),
+        ]
+        shcore.GetDpiForMonitor.restype = ctypes.c_long
+        hr = shcore.GetDpiForMonitor(
+            hmon, MDT_EFFECTIVE_DPI, ctypes.byref(dpi_x), ctypes.byref(dpi_y)
+        )
+        if hr == 0 and dpi_x.value > 0:
+            return int(dpi_x.value)
+        return DEFAULT_DPI
+    except Exception:
+        return DEFAULT_DPI
+
+
+def reset_dpi_awareness_cache() -> None:
+    """테스트용 — `_dpi_awareness_mode` 캐시 초기화. 프로덕션 코드는 호출 X."""
+    global _dpi_awareness_mode
+    _dpi_awareness_mode = None

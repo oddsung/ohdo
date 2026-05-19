@@ -20,6 +20,11 @@ R2 PR-17 마이그레이션 모드:
 - `stop()` 이 hook 해제 후 sentinel 로 drain 자연 종료 (join 5s timeout) — 정상
   종료 시 남은 큐 전부 처리됨 (event loss 0).
 
+R2 PR-18 — DPI / 멀티모니터 안정화:
+- click event 적재 시 drain thread 가 `get_dpi_for_point(x, y)` 로 좌표 모니터의
+  effective DPI 캡처 (RawEvent.monitor_dpi). transform 의 fallback 좌표 코드에
+  코멘트로 첨부되어 재생 환경 DPI 와 불일치 진단 가능.
+
 녹화 lifecycle:
     recorder = Recorder(hook_manager, opts)
     recorder.start(target_session_id=...)
@@ -38,7 +43,13 @@ from datetime import datetime
 from threading import Event, Lock, Thread
 from typing import Callable, Optional
 
-from core.input_hooks import InputHookManager, KeyboardEvent, MouseEvent, WinEventEvent
+from core.input_hooks import (
+    InputHookManager,
+    KeyboardEvent,
+    MouseEvent,
+    WinEventEvent,
+    get_dpi_for_point,
+)
 from core.recorder_models import RawEvent, RecordingSession, TransformOptions
 
 logger = logging.getLogger(__name__)
@@ -394,12 +405,21 @@ class Recorder:
                 # sentinel — 정상 종료
                 break
 
-            # click event 에 한해 EFP 비동기 enrichment.
-            if raw.kind == "click" and self._element_capture_fn is not None:
+            # click event 에 한해 EFP + monitor DPI 비동기 enrichment.
+            if raw.kind == "click":
+                cx, cy = raw.x or 0, raw.y or 0
+                if self._element_capture_fn is not None:
+                    try:
+                        raw.element_meta = self._element_capture_fn(cx, cy)
+                    except Exception:
+                        logger.exception(
+                            "Recorder: element_capture_fn 예외 (element_meta None 유지)"
+                        )
+                # R2 PR-18 — 좌표 모니터의 effective DPI 캡처 (재생 시 좌표 진단용)
                 try:
-                    raw.element_meta = self._element_capture_fn(raw.x or 0, raw.y or 0)
+                    raw.monitor_dpi = get_dpi_for_point(cx, cy)
                 except Exception:
-                    logger.exception("Recorder: element_capture_fn 예외 (element_meta None 유지)")
+                    logger.exception("Recorder: get_dpi_for_point 예외 (monitor_dpi None 유지)")
 
             with self._lock:
                 if self._session is not None and not self._session.is_stopped:

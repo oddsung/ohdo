@@ -60,6 +60,14 @@ class RawEvent(BaseModel):
 
     wheel_delta: int = 0
 
+    monitor_dpi: Optional[int] = None
+    """R2 PR-18 — click 좌표가 속한 모니터의 effective DPI (100%=96).
+
+    drain thread 에서 `core.input_hooks.get_dpi_for_point(x, y)` 로 채움.
+    transform 이 fallback `pyautogui.click(x, y)` 코드 생성 시 코멘트로 첨부
+    (다른 DPI 환경 재생 시 좌표 차이 진단). non-Windows / 캡처 실패 시 None.
+    """
+
     model_config = {"extra": "allow"}
 
 

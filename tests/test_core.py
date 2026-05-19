@@ -8765,6 +8765,236 @@ if __name__ == "__main__":
                 recorder.stop()
             hook_mgr.uninstall_all()
 
+    def test_178_input_hooks_dpi_module_contract(self):
+        """[ADR 0004 PR-18] core.input_hooks DPI helper API + 상수.
+
+        가드:
+        1. ensure_dpi_awareness / get_dpi_for_point / reset_dpi_awareness_cache 함수 노출
+        2. Win32 상수 (DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4, DEFAULT_DPI = 96 등)
+        3. DpiAwarenessMode Literal — 6개 모드 (per_monitor_v2/v1/system/unaware/unsupported/error)
+        4. ensure_dpi_awareness idempotent — 같은 모드 캐시 반환
+        5. get_dpi_for_point 가 정수 반환 (>=96)
+        """
+        from core import input_hooks as _ih
+        from core.input_hooks import (
+            DEFAULT_DPI,
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            PROCESS_PER_MONITOR_DPI_AWARE,
+            ensure_dpi_awareness,
+            get_dpi_for_point,
+            reset_dpi_awareness_cache,
+        )
+
+        self.step("(1) Win32 상수 값")
+        self.assert_true(DEFAULT_DPI == 96, "[PR-18] DEFAULT_DPI=96 (100%)")
+        self.assert_true(
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 == -4,
+            "[PR-18] PER_MONITOR_AWARE_V2 = -4 (Win10 1703+)",
+        )
+        self.assert_true(
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE == -3,
+            "[PR-18] PER_MONITOR_AWARE = -3",
+        )
+        self.assert_true(
+            PROCESS_PER_MONITOR_DPI_AWARE == 2,
+            "[PR-18] SetProcessDpiAwareness 인자값 = 2 (per-monitor)",
+        )
+
+        self.step("(2) 함수 노출")
+        for name in ("ensure_dpi_awareness", "get_dpi_for_point", "reset_dpi_awareness_cache"):
+            self.assert_true(
+                callable(getattr(_ih, name, None)),
+                f"[PR-18] {name} 모듈 노출 + callable",
+            )
+
+        self.step("(3) ensure_dpi_awareness 호출 + 결과 모드")
+        reset_dpi_awareness_cache()
+        mode = ensure_dpi_awareness()
+        valid_modes = {
+            "per_monitor_v2",
+            "per_monitor_v1",
+            "system",
+            "unaware",
+            "unsupported",
+            "error",
+        }
+        self.assert_true(
+            mode in valid_modes,
+            f"[PR-18] ensure_dpi_awareness 가 정의된 mode 반환. 실제: {mode!r}",
+        )
+
+        self.step("(4) idempotent — 같은 모드 캐시 반환")
+        mode2 = ensure_dpi_awareness()
+        self.assert_true(
+            mode == mode2,
+            f"[PR-18] 재호출 시 같은 모드. {mode!r} == {mode2!r}",
+        )
+
+        self.step("(5) get_dpi_for_point 가 정수 반환")
+        dpi = get_dpi_for_point(100, 100)
+        self.assert_true(
+            isinstance(dpi, int) and dpi >= 96,
+            f"[PR-18] get_dpi_for_point >= 96. 실제: {dpi}",
+        )
+
+    def test_179_get_hook_manager_auto_ensures_dpi_awareness(self):
+        """[ADR 0004 PR-18] get_hook_manager() 의 첫 호출이 ensure_dpi_awareness 자동 트리거.
+
+        recorder 가 start 시 get_hook_manager() 를 사용하므로, hook 사용 시점에
+        process DPI awareness 가 보장됨.
+        """
+        import inspect as _inspect
+
+        from core import input_hooks as _ih
+
+        src = _inspect.getsource(_ih.get_hook_manager)
+        self.assert_true(
+            "ensure_dpi_awareness" in src,
+            "[PR-18] get_hook_manager 가 ensure_dpi_awareness 자동 호출",
+        )
+
+        # 동작 검증 — cache reset 후 hook manager 재호출 시 mode 가 None 아님
+        _ih.reset_dpi_awareness_cache()
+        _ih._dpi_awareness_mode  # type-check ignored
+        _ih.get_hook_manager()
+        self.assert_true(
+            _ih._dpi_awareness_mode is not None,
+            "[PR-18] get_hook_manager() 호출 후 _dpi_awareness_mode 결정됨",
+        )
+
+    def test_180_raw_event_monitor_dpi_field(self):
+        """[ADR 0004 PR-18] RawEvent.monitor_dpi: Optional[int] 필드 신규.
+
+        drain thread 가 click event 처리 시 get_dpi_for_point 로 채움. 기본 None.
+        non-Windows 또는 호출 실패 시 None 유지.
+        """
+        from core.recorder_models import RawEvent
+
+        self.step("(1) 기본 None — backwards compat")
+        ev = RawEvent(ts=__import__("datetime").datetime.now(), kind="click", x=10, y=20)
+        self.assert_true(
+            ev.monitor_dpi is None,
+            f"[PR-18] 기본 monitor_dpi=None. 실제: {ev.monitor_dpi!r}",
+        )
+
+        self.step("(2) 명시적 값 보존")
+        ev2 = RawEvent(
+            ts=__import__("datetime").datetime.now(),
+            kind="click",
+            x=10,
+            y=20,
+            monitor_dpi=144,
+        )
+        self.assert_true(
+            ev2.monitor_dpi == 144,
+            f"[PR-18] monitor_dpi=144 보존. 실제: {ev2.monitor_dpi!r}",
+        )
+
+        self.step("(3) drain 가 click event 적재 시 monitor_dpi 채움 (실 환경)")
+        from core.input_hooks import InputHookManager, MouseEvent
+        from core.recorder import Recorder
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr)
+        try:
+            recorder.start()
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=50, y=50))
+            self.assert_true(
+                recorder.wait_for_event_count(1, timeout=1.0),
+                "[PR-18] drain 완료 대기",
+            )
+            sess = recorder.current_session
+            self.assert_true(sess is not None, "current_session 존재")
+            click_ev = sess.events[0]
+            # Windows: DPI >= 96 (정수). non-Windows: 96 fallback.
+            self.assert_true(
+                click_ev.monitor_dpi is not None and click_ev.monitor_dpi >= 96,
+                f"[PR-18] click event monitor_dpi 채워짐 (>=96). 실제: {click_ev.monitor_dpi!r}",
+            )
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
+    def test_181_recorder_transform_dpi_comment_on_fallback(self):
+        """[ADR 0004 PR-18] transform 의 fallback pyautogui.click 좌표 코드에 DPI 코멘트 첨부.
+
+        element_meta None (owner-drawn / 캡처 실패) click 만 코멘트 — 정상 캡처된
+        pywinauto/Selenium 코드는 변경 X. monitor_dpi==96 (표준) 일 땐 코멘트 생략.
+        """
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import transform
+
+        self.step("(1) monitor_dpi=144 (125%) — 코멘트 첨부")
+        sess = RecordingSession(id="dpi", started_at=datetime.now())
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=300,
+                y=400,
+                element_meta=None,
+                monitor_dpi=144,
+            )
+        )
+        steps = transform(sess)
+        code = steps[0].generated_code
+        self.assert_true(
+            "pyautogui.click(300, 400" in code and "DPI=144" in code and "150%" in code,
+            f"[PR-18] DPI=144 (150%) 코멘트 첨부. 실제: {code!r}",
+        )
+
+        self.step("(2) monitor_dpi=96 (100% 표준) — 코멘트 생략")
+        sess2 = RecordingSession(id="dpi96", started_at=datetime.now())
+        sess2.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=1,
+                y=2,
+                element_meta=None,
+                monitor_dpi=96,
+            )
+        )
+        steps2 = transform(sess2)
+        code2 = steps2[0].generated_code
+        self.assert_true(
+            "DPI=" not in code2,
+            f"[PR-18] 표준 DPI 시 코멘트 생략. 실제: {code2!r}",
+        )
+
+        self.step("(3) monitor_dpi=None — 코멘트 생략 (backwards compat)")
+        sess3 = RecordingSession(id="dpinone", started_at=datetime.now())
+        sess3.events.append(RawEvent(ts=datetime.now(), kind="click", x=5, y=6, element_meta=None))
+        steps3 = transform(sess3)
+        code3 = steps3[0].generated_code
+        self.assert_true(
+            "DPI=" not in code3,
+            f"[PR-18] monitor_dpi None 시 코멘트 생략. 실제: {code3!r}",
+        )
+
+        self.step("(4) element_meta 있는 click 은 DPI 코멘트 무관 (pywinauto path)")
+        sess4 = RecordingSession(id="dpibutton", started_at=datetime.now())
+        sess4.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                element_meta={"control_type": "Button", "name": "OK"},
+                monitor_dpi=192,
+            )
+        )
+        steps4 = transform(sess4)
+        code4 = steps4[0].generated_code
+        self.assert_true(
+            "DPI=" not in code4 and "pywinauto" in code4,
+            f"[PR-18] pywinauto 경로는 DPI 코멘트 미부착. 실제: {code4!r}",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 

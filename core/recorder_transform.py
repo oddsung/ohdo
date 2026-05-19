@@ -236,7 +236,12 @@ def _emit_click(ev: RawEvent, code_lines: list[str], desc_parts: list[str]) -> N
     btn = ev.button or "left"
 
     if meta is None:
-        code_lines.append(f"pyautogui.click({ev.x}, {ev.y}, button='{btn}')")
+        # R2 PR-18 — 좌표 fallback 시 모니터 DPI 코멘트 첨부 (재생 환경 진단용)
+        dpi_comment = ""
+        if ev.monitor_dpi is not None and ev.monitor_dpi != 96:
+            scale_pct = round(ev.monitor_dpi / 96 * 100)
+            dpi_comment = f"  # captured at DPI={ev.monitor_dpi} ({scale_pct}%)"
+        code_lines.append(f"pyautogui.click({ev.x}, {ev.y}, button='{btn}'){dpi_comment}")
         desc_parts.append(f"({ev.x}, {ev.y}) {btn} 클릭")
         return
 
