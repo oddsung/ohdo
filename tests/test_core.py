@@ -7361,9 +7361,14 @@ if __name__ == "__main__":
             hook_mgr.uninstall_all()
 
     def test_151_recorder_buffer_capture(self):
-        """[ADR 0004 PR-12] mouse/keyboard hook callback 가 RawEvent buffer 에
+        """[ADR 0004 PR-12 + PR-17] mouse/keyboard hook callback 가 RawEvent buffer 에
         적절한 종류로 누적 + 시간순 정렬.
+
+        PR-17 비동기 drain thread 도입으로 hook callback 호출 후 wait_for_event_count
+        로 drain 완료 대기 (sub-second).
         """
+        import time as _time
+
         from core.input_hooks import InputHookManager, KeyboardEvent, MouseEvent
         from core.recorder import Recorder
 
@@ -7374,9 +7379,12 @@ if __name__ == "__main__":
             sess = recorder.current_session
             self.assert_true(sess is not None, "current_session 존재")
 
-            self.step("(1) lbutton_down → click event 추가")
+            self.step("(1) lbutton_down → click event 추가 (drain 대기)")
             recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=100, y=200))
-            self.assert_true(recorder.event_count == 1, "[PR-12] click 1 event")
+            self.assert_true(
+                recorder.wait_for_event_count(1, timeout=1.0),
+                "[PR-17] drain 후 click 1 event",
+            )
             ev = sess.events[0]
             self.assert_true(
                 ev.kind == "click" and ev.x == 100 and ev.button == "left",
@@ -7385,29 +7393,35 @@ if __name__ == "__main__":
 
             self.step("(2) lbutton_up → 무시 (down 만 캡처)")
             recorder._on_mouse_event(MouseEvent(type="lbutton_up", x=100, y=200))
+            _time.sleep(0.05)  # drain 가 처리할 시간 (실제로는 enqueue 안 함)
             self.assert_true(recorder.event_count == 1, "[PR-12] up 은 추가 X")
 
             self.step("(3) move → 무시 (PR-12 범위 외)")
             recorder._on_mouse_event(MouseEvent(type="move", x=50, y=50))
+            _time.sleep(0.05)
             self.assert_true(recorder.event_count == 1, "[PR-12] move 무시")
 
             self.step("(4) wheel → scroll event 추가 + wheel_delta 보존")
             recorder._on_mouse_event(MouseEvent(type="wheel", x=10, y=20, wheel_delta=120))
             self.assert_true(
-                recorder.event_count == 2
-                and sess.events[1].kind == "scroll"
-                and sess.events[1].wheel_delta == 120,
-                f"[PR-12] scroll 추가. {sess.events[1]!r}",
+                recorder.wait_for_event_count(2, timeout=1.0),
+                "[PR-17] drain 후 scroll 추가",
+            )
+            self.assert_true(
+                sess.events[1].kind == "scroll" and sess.events[1].wheel_delta == 120,
+                f"[PR-12] scroll 필드. {sess.events[1]!r}",
             )
 
             self.step("(5) keydown → key event 추가, keyup 무시")
             recorder._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=0x41, scan_code=30))
             recorder._on_keyboard_event(KeyboardEvent(type="keyup", vk_code=0x41, scan_code=30))
             self.assert_true(
-                recorder.event_count == 3
-                and sess.events[2].kind == "key"
-                and sess.events[2].vk_code == 0x41,
-                f"[PR-12] keydown 추가, keyup 무시. {sess.events[2]!r}",
+                recorder.wait_for_event_count(3, timeout=1.0),
+                "[PR-17] drain 후 keydown 추가",
+            )
+            self.assert_true(
+                sess.events[2].kind == "key" and sess.events[2].vk_code == 0x41,
+                f"[PR-12] keydown 필드, keyup 무시. {sess.events[2]!r}",
             )
 
             self.step("(6) 시간순 정렬 — ts 단조 증가")
@@ -7422,11 +7436,14 @@ if __name__ == "__main__":
             hook_mgr.uninstall_all()
 
     def test_152_recorder_element_capture_callback(self):
-        """[ADR 0004 PR-12] element_capture_fn 주입 — click 시 element_meta 채움.
+        """[ADR 0004 PR-12 + PR-17] element_capture_fn 주입 — click 시 element_meta 채움.
 
-        PR-13/PR-15 에서 win_inspector EFP 와 연결. callback 예외 시 element_meta
-        None 으로 진행 (event 자체는 정상 추가).
+        PR-17 이후 element_capture_fn 은 drain thread 에서 호출 (hook 스레드 fast
+        return 보장). 검증은 wait_for_event_count + 추가 sleep 으로 drain 처리 대기.
+        callback 예외 시 element_meta None 으로 진행 (event 자체는 정상 추가).
         """
+        import time as _time
+
         from core.input_hooks import InputHookManager, KeyboardEvent, MouseEvent
         from core.recorder import Recorder
 
@@ -7442,8 +7459,12 @@ if __name__ == "__main__":
             recorder.start()
             sess = recorder.current_session
 
-            self.step("(1) click → element_capture_fn 호출 + element_meta 채움")
+            self.step("(1) click → element_capture_fn 호출 (drain thread) + element_meta 채움")
             recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=300, y=400))
+            self.assert_true(
+                recorder.wait_for_event_count(1, timeout=1.0),
+                "[PR-17] drain 완료 대기 (click 1)",
+            )
             self.assert_true(
                 capture_calls == [(300, 400)],
                 f"[PR-12] element_capture_fn 좌표 전달. 실제: {capture_calls}",
@@ -7462,7 +7483,11 @@ if __name__ == "__main__":
             recorder._element_capture_fn = raising_capture
             recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=10, y=20))
             self.assert_true(
-                recorder.event_count == 2 and sess.events[1].element_meta is None,
+                recorder.wait_for_event_count(2, timeout=1.0),
+                "[PR-17] drain 완료 대기 (raising click 2)",
+            )
+            self.assert_true(
+                sess.events[1].element_meta is None,
                 "[PR-12] callback 예외 시 element_meta None + event 추가 진행",
             )
 
@@ -7471,9 +7496,12 @@ if __name__ == "__main__":
             before = len(capture_calls)
             recorder._on_mouse_event(MouseEvent(type="wheel", x=0, y=0, wheel_delta=1))
             recorder._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=0x42, scan_code=48))
+            # drain 가 처리 완료할 시간 확보 (scroll + key event 가 session 에 들어옴)
+            recorder.wait_for_event_count(4, timeout=1.0)
+            _time.sleep(0.05)  # drain idle 진입 보장 — 추가 capture 호출 가능성 제거
             self.assert_true(
                 len(capture_calls) == before,
-                "[PR-12] wheel/key 는 element_capture_fn 미호출",
+                f"[PR-12] wheel/key 는 element_capture_fn 미호출. before={before}, after={len(capture_calls)}",
             )
         finally:
             if recorder.is_recording:
@@ -7795,10 +7823,14 @@ if __name__ == "__main__":
             f"[PR-14] recording.started 이벤트 발화. 실제: {events}",
         )
 
-        self.step("(3) 녹화 중 event 누적 (element_capture_fn callback path)")
+        self.step("(3) 녹화 중 event 누적 (element_capture_fn callback path; PR-17 drain 대기)")
         click_meta = {"control_type": "Button", "name": "OK", "automation_id": "ok"}
         svc._recorder._element_capture_fn = lambda x, y: click_meta
         svc._recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=10, y=20))
+        self.assert_true(
+            svc._recorder.wait_for_event_count(1, timeout=1.0),
+            "[PR-17] drain 후 event_count 1",
+        )
         self.assert_true(svc.recording_event_count == 1, "[PR-14] event_count 1")
 
         self.step("(4) stop_recording → Step 리스트 반환 + recording.stopped 이벤트")
@@ -8343,15 +8375,15 @@ if __name__ == "__main__":
                 f"[PR-16w] start 가 winevent callback 등록. 실제: {hook_mgr.winevent_callback_count}",
             )
 
-            self.step("(2) WinEvent dispatch → window_focus RawEvent")
+            self.step("(2) WinEvent dispatch → window_focus RawEvent (drain 대기)")
             sess = recorder.current_session
             self.assert_true(sess is not None, "current_session 존재")
             recorder._on_winevent_event(
                 WinEventEvent(type="foreground", hwnd=42, window_title="Notepad")
             )
             self.assert_true(
-                recorder.event_count == 1,
-                f"[PR-16w] window_focus event 추가. 실제: {recorder.event_count}",
+                recorder.wait_for_event_count(1, timeout=1.0),
+                f"[PR-17] drain 후 window_focus event 추가. 실제: {recorder.event_count}",
             )
             ev = sess.events[0]
             self.assert_true(
@@ -8360,8 +8392,8 @@ if __name__ == "__main__":
             )
 
             self.step("(3) 다른 type 의 WinEvent 는 무시")
-            # type 이 'foreground' 아닌 경우 (현재 Literal 이지만 향후 확장 대비)
-            # _append_winevent_event 의 분기 검증을 위해 mock 데이터 직접 주입
+            import time as _time
+
             from core.recorder_models import RawEvent
 
             fake_event = WinEventEvent.__new__(WinEventEvent)
@@ -8370,6 +8402,7 @@ if __name__ == "__main__":
             fake_event.window_title = ""
             fake_event.timestamp_ms = 0
             recorder._on_winevent_event(fake_event)
+            _time.sleep(0.05)  # drain 처리 시간 — 실제로는 enqueue 안 함
             self.assert_true(
                 recorder.event_count == 1,
                 "[PR-16w] foreground 외 type 은 무시",
@@ -8407,7 +8440,7 @@ if __name__ == "__main__":
 
         self.assert_true(VK_F8 == 0x77, "[PR-16w] VK_F8 = 0x77 (Win32 VK_F8 값)")
 
-        self.step("(1) enable_f8_marker=True (default) — F8 → marker")
+        self.step("(1) enable_f8_marker=True (default) — F8 → marker (drain 대기)")
         hook_mgr = InputHookManager()
         recorder = Recorder(hook_mgr)
         try:
@@ -8416,7 +8449,11 @@ if __name__ == "__main__":
             sess = recorder.current_session
             self.assert_true(sess is not None, "current_session 존재")
             self.assert_true(
-                recorder.event_count == 1 and sess.events[0].kind == "marker",
+                recorder.wait_for_event_count(1, timeout=1.0),
+                "[PR-17] drain 후 F8 marker 1 event",
+            )
+            self.assert_true(
+                sess.events[0].kind == "marker",
                 f"[PR-16w] F8 keydown → marker (default). 실제: {sess.events[0]!r}",
             )
 
@@ -8429,9 +8466,11 @@ if __name__ == "__main__":
             self.step("(3) 다른 키 (예: 'A' 0x41) 는 그대로 key event")
             recorder._on_keyboard_event(KeyboardEvent(type="keydown", vk_code=0x41, scan_code=30))
             self.assert_true(
-                recorder.event_count == 2
-                and sess.events[1].kind == "key"
-                and sess.events[1].vk_code == 0x41,
+                recorder.wait_for_event_count(2, timeout=1.0),
+                "[PR-17] drain 후 'A' key 2 event",
+            )
+            self.assert_true(
+                sess.events[1].kind == "key" and sess.events[1].vk_code == 0x41,
                 f"[PR-16w] non-F8 키는 key event 유지. 실제: {sess.events[1]!r}",
             )
             recorder.stop()
@@ -8449,9 +8488,11 @@ if __name__ == "__main__":
             sess2 = recorder2.current_session
             self.assert_true(sess2 is not None, "current_session 존재")
             self.assert_true(
-                recorder2.event_count == 1
-                and sess2.events[0].kind == "key"
-                and sess2.events[0].vk_code == VK_F8,
+                recorder2.wait_for_event_count(1, timeout=1.0),
+                "[PR-17] drain 후 F8 key 1 event",
+            )
+            self.assert_true(
+                sess2.events[0].kind == "key" and sess2.events[0].vk_code == VK_F8,
                 f"[PR-16w] enable_f8_marker=False 시 F8 → key event. 실제: {sess2.events[0]!r}",
             )
             recorder2.stop()
@@ -8519,6 +8560,210 @@ if __name__ == "__main__":
             "window_focus" not in all_code and "Calculator" not in all_code,
             f"[PR-16w] window_focus event 자체는 코드에 안 박힘. 실제: {all_code!r}",
         )
+
+    def test_174_recorder_async_drain_pipeline(self):
+        """[ADR 0004 PR-17] hook callback → queue → drain thread → session 파이프라인.
+
+        가드:
+        1. start() 가 drain thread + queue 생성, stop() 이 자연 종료
+        2. hook callback 호출 직후엔 event 가 큐 안에 있을 수 있음 (sync 보장 X)
+        3. wait_for_event_count 로 drain 완료 확인 가능
+        4. queue_size / dropped_event_count property 노출 (모니터링용)
+        """
+        from core.input_hooks import InputHookManager, MouseEvent
+        from core.recorder import DEFAULT_QUEUE_MAXSIZE, Recorder
+
+        self.step("(1) DEFAULT_QUEUE_MAXSIZE 상수 노출")
+        self.assert_true(
+            DEFAULT_QUEUE_MAXSIZE >= 1000,
+            f"[PR-17] DEFAULT_QUEUE_MAXSIZE 합리적 (>=1000). 실제: {DEFAULT_QUEUE_MAXSIZE}",
+        )
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr)
+        try:
+            self.step("(2) start 전 모니터링 property 안전 — queue 없음")
+            self.assert_true(recorder.queue_size == 0, "[PR-17] start 전 queue_size=0")
+            self.assert_true(recorder.dropped_event_count == 0, "[PR-17] start 전 dropped=0")
+
+            self.step("(3) start 후 drain thread alive + queue 생성")
+            recorder.start()
+            self.assert_true(
+                recorder._drain_thread is not None and recorder._drain_thread.is_alive(),
+                "[PR-17] start 가 drain thread 시작 (daemon)",
+            )
+            self.assert_true(
+                recorder._raw_queue is not None,
+                "[PR-17] start 가 queue.Queue 생성",
+            )
+
+            self.step("(4) hook → 비동기 drain → session.events")
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=1, y=2))
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=3, y=4))
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=5, y=6))
+            self.assert_true(
+                recorder.wait_for_event_count(3, timeout=1.0),
+                f"[PR-17] drain 후 3 event 도달. 실제: {recorder.event_count}",
+            )
+
+            self.step("(5) stop 후 drain thread 정리")
+            recorder.stop()
+            self.assert_true(
+                recorder._drain_thread is None and recorder._raw_queue is None,
+                "[PR-17] stop 후 drain thread/queue 모두 None",
+            )
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
+    def test_175_recorder_hook_callback_fast_return(self):
+        """[ADR 0004 PR-17] hook callback 은 무거운 element_capture_fn 과 무관하게
+        수 밀리초 안에 반환 — Windows LL hook ~300ms 타임아웃 안전.
+
+        slow element_capture_fn (200ms sleep) 을 주입하고 _on_mouse_event 호출
+        시간을 측정. enqueue 만 하고 즉시 반환되므로 50ms 이내 (EFP sleep 영향 X).
+        """
+        import time as _time
+
+        from core.input_hooks import InputHookManager, MouseEvent
+        from core.recorder import Recorder
+
+        def slow_capture(x: int, y: int) -> dict:
+            _time.sleep(0.2)  # 200ms — 실제 EFP 보다 약간 무거움
+            return {"control_type": "Edit"}
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr, element_capture_fn=slow_capture)
+        try:
+            recorder.start()
+
+            self.step("(1) hook callback 처리 시간 측정 — slow capture 영향 X")
+            t0 = _time.monotonic()
+            recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=100, y=100))
+            elapsed_ms = (_time.monotonic() - t0) * 1000.0
+            self.assert_true(
+                elapsed_ms < 50.0,
+                f"[PR-17] hook callback fast return (<50ms). 실제: {elapsed_ms:.1f}ms",
+            )
+
+            self.step("(2) drain 은 slow capture 완료 후 session 에 적재")
+            self.assert_true(
+                recorder.wait_for_event_count(1, timeout=2.0),
+                "[PR-17] drain 가 slow capture 후 event 적재 (timeout=2s)",
+            )
+            sess = recorder.current_session
+            self.assert_true(
+                sess is not None
+                and sess.events[0].element_meta is not None
+                and sess.events[0].element_meta.get("control_type") == "Edit",
+                "[PR-17] element_meta 가 drain thread 에서 채워짐",
+            )
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
+    def test_176_recorder_queue_backpressure_drop_oldest(self):
+        """[ADR 0004 PR-17] queue full 시 oldest event drop + dropped_event_count 증가.
+
+        작은 queue (maxsize=3) + drain 차단 (blocking capture) 으로 큐를 의도적으로
+        채운 후 추가 enqueue → 가장 오래된 것부터 drop. dropped counter 누적.
+        """
+        from threading import Event as _ThreadEvent
+
+        from core.input_hooks import InputHookManager, MouseEvent
+        from core.recorder import Recorder
+
+        block = _ThreadEvent()
+
+        def blocking_capture(x: int, y: int) -> dict:
+            block.wait(timeout=5.0)  # release 까지 drain 차단
+            return None
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr, element_capture_fn=blocking_capture, queue_maxsize=3)
+        try:
+            recorder.start()
+
+            self.step("(1) drain 차단 상태에서 큐 채우기 — 첫 click 은 drain 이 픽업 (in-flight)")
+            # in-flight 1 (drain 가 capture 호출 대기) + queue 에 3 까지 가능
+            for i in range(8):
+                recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=i, y=i))
+
+            self.step("(2) overflow 발생 — dropped_event_count >= 1")
+            self.assert_true(
+                recorder.dropped_event_count >= 1,
+                f"[PR-17] backpressure drop 발생. 실제 dropped: {recorder.dropped_event_count}",
+            )
+            self.assert_true(
+                recorder.queue_size <= 3,
+                f"[PR-17] queue_size <= maxsize. 실제: {recorder.queue_size}",
+            )
+
+            self.step("(3) drain 차단 해제 후 stop — 남은 큐 처리 + event_count < 8")
+            block.set()
+            recorder.stop()
+            # in-flight 1 + queue 3 = 최대 4 events 만 session 에 적재 가능 (8 중 일부 drop)
+            self.assert_true(
+                recorder.event_count < 8,
+                f"[PR-17] 일부 event drop 됨. 실제 event_count: {recorder.event_count}",
+            )
+        finally:
+            block.set()  # 안전망 — drain 가 무한 대기하지 않도록
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
+
+    def test_177_recorder_stop_drains_remaining_queue(self):
+        """[ADR 0004 PR-17] stop() 호출 시 큐에 남은 모든 event 가 drain 처리됨.
+
+        backpressure 미발생 (queue_maxsize > 입력 수) 시 stop 은 sentinel 로 자연
+        종료하며 큐에 남은 events 모두 처리 — event loss 0 보장.
+
+        slow capture (100ms × N events) 로 큐를 가득 채우기 직전 상태에서 stop().
+        """
+        import time as _time
+
+        from core.input_hooks import InputHookManager, MouseEvent
+        from core.recorder import Recorder
+
+        capture_count = [0]
+
+        def slow_capture(x: int, y: int) -> dict:
+            capture_count[0] += 1
+            _time.sleep(0.05)  # 50ms per event
+            return {"i": x}
+
+        hook_mgr = InputHookManager()
+        recorder = Recorder(hook_mgr, element_capture_fn=slow_capture, queue_maxsize=100)
+        try:
+            recorder.start()
+
+            self.step("(1) 빠르게 5 events 주입 — drain 가 뒤따라옴")
+            for i in range(5):
+                recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=i, y=0))
+
+            # 모든 enqueue 직후엔 event_count 가 5 미만일 수 있음 (drain 중)
+            self.step("(2) stop() 호출 — 남은 큐 자연 드레인 + 모든 event 처리")
+            recorder.stop()
+
+            self.assert_true(
+                recorder.event_count == 5,
+                f"[PR-17] stop 후 모든 5 event 처리. 실제: {recorder.event_count}",
+            )
+            self.assert_true(
+                capture_count[0] == 5,
+                f"[PR-17] element_capture_fn 5번 호출. 실제: {capture_count[0]}",
+            )
+            self.assert_true(
+                recorder.dropped_event_count == 0,
+                f"[PR-17] event loss 0. 실제 dropped: {recorder.dropped_event_count}",
+            )
+        finally:
+            if recorder.is_recording:
+                recorder.stop()
+            hook_mgr.uninstall_all()
 
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.

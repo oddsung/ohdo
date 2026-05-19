@@ -121,6 +121,13 @@ class InputHookManager:
 
     non-Windows 환경에서는 install/uninstall 이 silent noop. is_*_hook_installed
     는 항상 False 반환.
+
+    **콜백 처리 시간 원칙 (R2 PR-17 마이그레이션 모드 전제)**:
+    Windows LL hook 의 콜백 처리 시간이 시스템 임계치 (~300ms) 를 초과하면 OS
+    가 해당 hook 을 자동 비활성화하거나 이벤트를 skip 한다. 등록된 callback 은
+    **수 밀리초 안에 반환** 해야 한다 — 무거운 호출 (UIA EFP, OCR, IO 등) 은
+    별도 thread/queue 로 비동기 분리 권장. recorder 는 `core/recorder.py` 의
+    drain thread 가 이 역할 수행.
     """
 
     def __init__(self) -> None:
