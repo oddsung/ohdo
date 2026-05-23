@@ -2152,10 +2152,18 @@ class MainWindowV2(QMainWindow):
 
         from .recorder_overlay import RecorderOverlay
 
+        # 2026-05-20 fix: Ctrl+Shift+R 글로벌 stop hotkey. main window minimize
+        # 상태에선 Qt QShortcut 이 focus 못 받아 작동 X — recorder LL keyboard
+        # hook 에서 직접 감지하여 callback 호출. callback 은 hook thread 에서
+        # 호출되므로 QTimer.singleShot(0, ...) 로 main thread 에 dispatch 필수.
+        def _hotkey_stop_safe() -> None:
+            QTimer.singleShot(0, self._do_stop_recording)
+
         try:
             self.app_service.start_recording(
                 target_session_id=target_session_id,
                 element_capture_fn=capture_element_at,
+                stop_hotkey_callback=_hotkey_stop_safe,
             )
         except Exception as e:  # noqa: BLE001
             self._toast(tr("ui_v2.recording.toast.error", error=str(e)), "error")
@@ -2180,6 +2188,12 @@ class MainWindowV2(QMainWindow):
     def _do_stop_recording(self) -> None:
         if not self.app_service.is_recording:
             return
+        # 2026-05-20 fix: target_session_id 를 local 로 보존. _teardown_recording_ui
+        # 가 self._recording_target_session_id 를 None 으로 reset 하는데, 그 후
+        # _show_review_dialog 가 호출되어 commit_recording 시점엔 이미 None
+        # → commit_recording 가 새 세션 자동 생성. 사용자가 만든 빈 세션과 별개로
+        # 또 다른 "Recording YYYYMMDD-HHMMSS" 세션이 생기는 UX 버그.
+        target_id = self._recording_target_session_id
         try:
             steps = self.app_service.stop_recording(self_window_titles=["ohdo"])
         except Exception as e:  # noqa: BLE001
@@ -2196,9 +2210,7 @@ class MainWindowV2(QMainWindow):
             self._toast(tr("ui_v2.recording.toast.empty_steps"), "warning")
             # raw events 가 비어있어도 commit_recording 호출해서 Recorder 정리.
             try:
-                self.app_service.commit_recording(
-                    [], target_session_id=self._recording_target_session_id
-                )
+                self.app_service.commit_recording([], target_session_id=target_id)
             except Exception:  # noqa: BLE001
                 pass
             return
@@ -2207,9 +2219,11 @@ class MainWindowV2(QMainWindow):
             tr("ui_v2.recording.toast.stopped", count=len(steps)),
             "success",
         )
-        self._show_review_dialog(steps)
+        self._show_review_dialog(steps, target_session_id=target_id)
 
-    def _show_review_dialog(self, initial_steps: list[Step]) -> None:
+    def _show_review_dialog(
+        self, initial_steps: list[Step], target_session_id: Optional[str] = None
+    ) -> None:
         from PySide6.QtWidgets import QDialog as _QDialog
 
         from .recording_review_dialog import RecordingReviewDialog
@@ -2225,9 +2239,7 @@ class MainWindowV2(QMainWindow):
         if result != _QDialog.DialogCode.Accepted:
             # cancel — recorder 정리 + 토스트
             try:
-                self.app_service.commit_recording(
-                    [], target_session_id=self._recording_target_session_id
-                )
+                self.app_service.commit_recording([], target_session_id=target_session_id)
             except Exception:  # noqa: BLE001
                 pass
             self._toast(tr("ui_v2.recording.toast.cancel"), "info")
@@ -2236,7 +2248,7 @@ class MainWindowV2(QMainWindow):
         try:
             session = self.app_service.commit_recording(
                 dlg.edited_steps,
-                target_session_id=self._recording_target_session_id,
+                target_session_id=target_session_id,
             )
         except Exception as e:  # noqa: BLE001
             self._toast(tr("ui_v2.recording.toast.commit_failed", error=str(e)), "error")
@@ -2244,6 +2256,13 @@ class MainWindowV2(QMainWindow):
 
         self._refresh_session_list()
         self._open_session_tab(session.session_id)
+        # 2026-05-23 fix: 사용자가 새 세션 만들고 그 세션에 녹화 commit 한 경우,
+        # _open_session_tab 의 setCurrentIndex 가 *동일* 인덱스 → currentChanged
+        # 미발화 → _switch_session 안 불려 self.current_session 이 commit 이전
+        # 빈 세션 객체 (steps=[]) 로 stale → _refresh_step_cards 가 빈 상태 카드
+        # 유지. commit 후 명시적으로 session reload + step cards refresh.
+        self.current_session = self.app_service.get_session(session.session_id)
+        self._refresh_step_cards()
         self._toast(
             tr("ui_v2.recording.toast.committed", count=len(dlg.edited_steps)),
             "success",

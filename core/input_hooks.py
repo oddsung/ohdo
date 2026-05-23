@@ -371,6 +371,15 @@ class InputHookManager:
         if nCode < 0:
             return self._user32.CallNextHookEx(None, nCode, wParam, lParam)
 
+        # 회귀 2026-05-20: mouse "move" 이벤트는 매우 빈번 (>100Hz). recorder 는
+        # build_mouse_raw 에서 어차피 None 반환 (move 무시) — Python entry + GIL
+        # 획득 비용이 누적되면 Qt main thread 와 경쟁하여 UI 지연 (특히 overlay
+        # 의 nested click-through hit-testing 과 결합 시 마우스 컨트롤 체감 저하).
+        # 그 결과 wParam==WM_MOUSEMOVE 는 callback dispatch 없이 즉시 CallNextHookEx.
+        # 미래에 drag 캡처 (R3) 필요 시 callback 시 subscribe 여부 플래그로 분기.
+        if wParam == WM_MOUSEMOVE:
+            return self._user32.CallNextHookEx(None, nCode, wParam, lParam)
+
         try:
             point = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_long * 4))[0]
             x, y = point[0], point[1]

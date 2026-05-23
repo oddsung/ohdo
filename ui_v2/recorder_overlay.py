@@ -5,17 +5,22 @@
 평상시처럼 작업할 수 있도록 main window 를 minimize 하고, 대신 이 floating
 overlay 만 표시한다.
 
-핵심:
-- 막대 전체는 ``WA_TransparentForMouseEvents`` 로 click-through (사용자
-  클릭이 overlay 를 통과해서 밑 창에 전달). 단 [중지] 버튼 영역만 mouse
-  통과를 끄고 받음.
+핵심 (2026-05-20 실측 fix 반영):
+- 막대 전체는 mouse 받음 (``WA_TransparentForMouseEvents=False``). 이전 nested
+  click-through 구조 (root True + 자식 False) 는 Qt mouse hit-test 부하 +
+  Win32 message routing 결합으로 overlay 영역에서 마우스 컨트롤 체감 지연
+  유발. **사용자는 Ctrl+Shift+R 글로벌 hotkey 로 stop** 하므로 [중지] 버튼
+  hover 안 해도 됨. overlay 가 작아 (~280x36px) 밑 앱 클릭 방해 미미.
 - ``WindowStaysOnTopHint | FramelessWindowHint | Tool`` + ``WA_ShowWithoutActivating``.
+- Win32 ``WS_EX_NOACTIVATE`` 명시 적용 — mouse 진입 시 OS 가 active window
+  전환을 시도하지 않음 + Qt 가 그 활성화 잡음 처리 안 함.
 - 0.5초마다 경과시간 / event_count 갱신 (AppService 가 emit 하는 이벤트 + 자체
   QTimer).
 """
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from typing import Callable, Optional
 
@@ -26,6 +31,11 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 from core.i18n import tr
 
 __all__ = ["RecorderOverlay"]
+
+# Win32 상수 — WS_EX_NOACTIVATE 적용용 (회귀 2026-05-20)
+_GWL_EXSTYLE = -20
+_WS_EX_NOACTIVATE = 0x08000000
+_WS_EX_TOOLWINDOW = 0x00000080
 
 
 # 디자인 토큰 (main_window_v2.COLORS 와 일관 — circular import 회피 위해 직접 정의)
@@ -63,9 +73,16 @@ class RecorderOverlay(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        # 전체 위젯은 click-through. 자식 [중지] 버튼만 명시적으로 false 로 재설정.
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # 2026-05-20 fix: 이전 nested click-through (root True + 자식 False) 는
+        # Qt mouse hit-test 부하 + Win32 routing 결합으로 마우스 컨트롤 체감
+        # 지연. root 도 mouse 받도록 변경 — overlay 가 작아 (~280x36px) 밑
+        # 앱 클릭 방해 미미하고, Ctrl+Shift+R 글로벌 hotkey 로 stop 가능 (사용자가
+        # [중지] 버튼 hover 안 해도 됨).
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        # mouseTracking 명시 off — mouse move 이벤트 dispatch 부담 제거 (기본 False
+        # 지만 안전망).
+        self.setMouseTracking(False)
 
         self._build_ui()
         self._timer = QTimer(self)
@@ -133,8 +150,9 @@ class RecorderOverlay(QWidget):
         self._stop_btn = QPushButton(tr("ui_v2.recording.overlay.btn_stop"))
         self._stop_btn.setObjectName("stopBtn")
         self._stop_btn.setToolTip(tr("ui_v2.recording.overlay.btn_stop_tooltip"))
-        # 부모는 click-through 지만 자식은 명시적으로 mouse 받기.
-        self._stop_btn.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        # 2026-05-20 fix: parent 도 mouse 받으므로 자식 별도 setAttribute X.
+        # mouseTracking 만 명시 off (move event 처리 회피).
+        self._stop_btn.setMouseTracking(False)
         self._stop_btn.clicked.connect(self._on_stop_clicked)
         row.addWidget(self._stop_btn)
 
@@ -146,7 +164,44 @@ class RecorderOverlay(QWidget):
         self._refresh_labels()
         self._position_top_right()
         self.show()
+        self._apply_no_activate()
         self._timer.start()
+
+    def _apply_no_activate(self) -> None:
+        """Win32 ``WS_EX_NOACTIVATE`` 비트를 overlay HWND 에 명시 적용.
+
+        Qt 의 ``WA_ShowWithoutActivating`` 은 show() 시점에만 영향 — 그 이후
+        mouse 가 overlay 영역에 들어와도 OS 가 activate 시도하지 않도록 보장하려면
+        HWND extended style 에 NOACTIVATE 를 박아두어야 함. 회귀 2026-05-20:
+        미적용 시 마우스가 [중지] 버튼 영역에 들어가면 OS 의 activate/deactivate
+        잡음 + Qt hit-test 가 결합해 마우스 컨트롤 체감 지연.
+
+        non-Windows 환경에서는 silent noop.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            hwnd = int(self.winId())
+            user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+            user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            user32.GetWindowLongPtrW.restype = ctypes.c_longlong
+            user32.SetWindowLongPtrW.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_int,
+                ctypes.c_longlong,
+            ]
+            user32.SetWindowLongPtrW.restype = ctypes.c_longlong
+            ex_style = user32.GetWindowLongPtrW(hwnd, _GWL_EXSTYLE)
+            new_style = ex_style | _WS_EX_NOACTIVATE | _WS_EX_TOOLWINDOW
+            if new_style != ex_style:
+                user32.SetWindowLongPtrW(hwnd, _GWL_EXSTYLE, new_style)
+        except Exception:
+            # overlay 작동을 막을 만한 critical 실패 X — silent fallback.
+            import logging
+
+            logging.getLogger(__name__).exception("RecorderOverlay WS_EX_NOACTIVATE 적용 실패")
 
     def stop_and_hide(self) -> None:
         """녹화 중지 시 호출 — timer 정지 + 숨김."""

@@ -362,6 +362,7 @@ class AppService:
         self,
         target_session_id: Optional[str] = None,
         element_capture_fn: Optional[Callable[[int, int], Optional[dict]]] = None,
+        stop_hotkey_callback: Optional[Callable[[], None]] = None,
     ) -> str:
         """녹화 시작. 신규 RecordingSession id 반환.
 
@@ -372,6 +373,9 @@ class AppService:
                 ``None`` 이면 commit_recording 에서 새 세션 자동 생성.
             element_capture_fn: 클릭 시점 element 메타 capture callback.
                 일반적으로 ``WindowInspector`` 의 EFP 함수 (PR-15 UI 가 주입).
+            stop_hotkey_callback: Ctrl+Shift+R 글로벌 stop hotkey trigger 시 호출
+                (2026-05-20 실측 fix). hook thread 에서 호출되므로 UI 측은
+                반드시 thread-safe (QTimer.singleShot 등) 으로 stop 처리해야 함.
         """
         from core.input_hooks import get_hook_manager
         from core.recorder import Recorder, RecorderAlreadyStartedError
@@ -382,6 +386,7 @@ class AppService:
         self._recorder = Recorder(
             hook_manager=get_hook_manager(),
             element_capture_fn=element_capture_fn,
+            stop_hotkey_callback=stop_hotkey_callback,
         )
         rec_session = self._recorder.start(target_session_id=target_session_id)
         self._emit_recording_event(

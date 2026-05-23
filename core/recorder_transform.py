@@ -331,6 +331,13 @@ def _browser_click_code(meta: dict) -> str:
 
 
 def _pywinauto_click_code(meta: dict, btn: str) -> str:
+    """pywinauto click 코드 생성.
+
+    `Application(...)` (unqualified) 사용 — `extract_library_block` 의 essential
+    imports 가 `from pywinauto import Application` 형태로 prepend 하므로 일치 필요.
+    `pywinauto.Application(...)` (fully qualified) 형태는 `import pywinauto` 가
+    library 블럭에 없어 NameError 발생 (실측 발견 2026-05-20).
+    """
     ctrl_type = meta.get("control_type") or "Unknown"
     name = meta.get("name") or ""
     auto_id = meta.get("automation_id") or ""
@@ -346,7 +353,7 @@ def _pywinauto_click_code(meta: dict, btn: str) -> str:
 
     click_method = "right_click_input" if btn == "right" else "click_input"
     return (
-        f'app = pywinauto.Application(backend="uia").connect(title_re={f".*{window_title}.*"!r})\n'
+        f'app = Application(backend="uia").connect(title_re={f".*{window_title}.*"!r})\n'
         f"win = app.top_window()\n"
         f"win.child_window({selector_args}).{click_method}()"
     )

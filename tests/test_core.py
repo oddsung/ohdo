@@ -7980,8 +7980,13 @@ if __name__ == "__main__":
             self.assert_true(key in src, f"[PR-15] tr 키 '{key}' main_window_v2 에서 사용")
 
     def test_163_recorder_overlay_clickthrough_and_stop_btn(self):
-        """[ADR 0004 PR-15] RecorderOverlay 가 click-through + 자식 [중지] 버튼만
-        mouse 받음 + frameless + always-on-top.
+        """[ADR 0004 PR-15 + 2026-05-20 fix] RecorderOverlay 가 frameless +
+        always-on-top + show-without-activating.
+
+        **2026-05-20 변경**: 이전 nested click-through (root True + 자식 False)
+        구조는 Qt mouse hit-test 부하로 마우스 컨트롤 체감 지연 — 사용자가 글로벌
+        Ctrl+Shift+R 핫키로 stop 가능하므로 root 도 mouse 받도록 변경 (overlay
+        가 ~280x36px 로 작아 밑 앱 클릭 방해 미미).
         """
         import inspect as _inspect
 
@@ -7996,8 +8001,7 @@ if __name__ == "__main__":
             ("WindowStaysOnTopHint", "always-on-top"),
             ("Tool", "Qt.Tool window type"),
             ("WA_ShowWithoutActivating", "show without activating (다른 창 focus 유지)"),
-            ("WA_TransparentForMouseEvents, True", "overlay 자체 click-through"),
-            ("WA_TransparentForMouseEvents, False", "[중지] 버튼은 mouse 받기"),
+            ("WA_TransparentForMouseEvents, False", "root 가 mouse 받음 (2026-05-20 fix)"),
             ("def start", "start lifecycle"),
             ("def stop_and_hide", "stop_and_hide lifecycle"),
             ("get_event_count", "event count callable 주입"),
@@ -8007,6 +8011,12 @@ if __name__ == "__main__":
                 needle in src,
                 f"[PR-15] RecorderOverlay 에 '{desc}' 패턴 필수: '{needle}'",
             )
+
+        # 2026-05-20 회귀 가드 — 이전 nested click-through 잔재 X
+        self.assert_true(
+            "WA_TransparentForMouseEvents, True" not in src,
+            "[회귀 2026-05-20] WA_TransparentForMouseEvents=True (root) 잔재 금지",
+        )
 
         # callable 시그니처
         sig = _inspect.signature(RecorderOverlay.__init__)
@@ -8991,8 +9001,326 @@ if __name__ == "__main__":
         steps4 = transform(sess4)
         code4 = steps4[0].generated_code
         self.assert_true(
-            "DPI=" not in code4 and "pywinauto" in code4,
+            "DPI=" not in code4 and "click_input" in code4,
             f"[PR-18] pywinauto 경로는 DPI 코멘트 미부착. 실제: {code4!r}",
+        )
+
+    def test_182_recorder_transform_uses_unqualified_Application(self):
+        """[회귀 2026-05-20 실측] recorder_transform 은 `Application(...)` (unqualified)
+        형태로 코드 생성 — `pywinauto.Application(...)` (fully qualified) 는 X.
+
+        Bug (사용자 실측 2026-05-20): recorder 생성 코드가 `pywinauto.Application(...)`
+        형태였는데 library 블럭의 essential imports 는 `from pywinauto import Application`
+        형태로 prepend → `pywinauto` namespace 가 import 안 되어 NameError 발생.
+        Fix: `_pywinauto_click_code` 가 `Application(...)` 으로 생성.
+
+        가드:
+        1. recorder_transform 의 click 코드에 `pywinauto.Application` (fully qualified)
+           문자열이 들어가지 않음
+        2. `Application(backend="uia").connect(` 패턴은 그대로
+        3. extract_library_block 의 essential imports 에 `from pywinauto import Application`
+           이 존재 (recorder 코드와 매치)
+        """
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import transform
+        from core.workflow_engine import _ESSENTIAL_LIBRARY_IMPORTS
+
+        self.step("(1) recorder 가 생성한 desktop click 코드 형태")
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                button="left",
+                element_meta={
+                    "control_type": "Button",
+                    "name": "시작",
+                    "automation_id": "StartButton",
+                    "window_title": "데스크톱 1",
+                },
+            )
+        )
+        steps = transform(sess)
+        code = steps[0].generated_code
+
+        self.assert_true(
+            "pywinauto.Application" not in code,
+            f"[회귀] fully qualified `pywinauto.Application` 금지. 실제: {code!r}",
+        )
+        self.assert_true(
+            'Application(backend="uia").connect(' in code,
+            f'[회귀] unqualified `Application(backend="uia").connect(` 형태 필수. 실제: {code!r}',
+        )
+
+        self.step("(2) extract_library_block 의 essential imports 와 매치")
+        essential = "\n".join(_ESSENTIAL_LIBRARY_IMPORTS)
+        self.assert_true(
+            "from pywinauto import Application" in essential,
+            f"[회귀] essential imports 에 `from pywinauto import Application` 필수 — "
+            f"recorder 코드 매치용. 실제: {_ESSENTIAL_LIBRARY_IMPORTS!r}",
+        )
+
+    def test_183_input_hooks_mouse_move_fast_path(self):
+        """[회귀 2026-05-20 실측] LL hook dispatch 가 WM_MOUSEMOVE 를 fast-path
+        (Python entry + GIL 획득 + MouseEvent 생성 + callback dispatch 전부 skip).
+
+        Bug (사용자 실측 2026-05-20): recorder overlay 의 [중지] 버튼 영역에
+        마우스 진입 시 마우스 이동 속도가 체감 지연. 원인 — mouse move event
+        가 200Hz 로 LL hook 을 거치며 Python entry + GIL 획득이 Qt main thread
+        와 경쟁. recorder 의 build_mouse_raw 가 어차피 move 를 무시하므로 dispatch
+        진입 전 fast-path 가 안전.
+
+        가드:
+        1. `_mouse_hook_dispatch` source 에 WM_MOUSEMOVE 분기 + CallNextHookEx 직접 호출
+        2. callback dispatch 를 거치지 않음 — recorder._on_mouse_event 가
+           move 직접 호출은 그대로 가능 (단위 테스트용)
+        """
+        import inspect as _inspect
+
+        from core.input_hooks import InputHookManager
+
+        src = _inspect.getsource(InputHookManager._mouse_hook_dispatch)
+        self.assert_true(
+            "WM_MOUSEMOVE" in src,
+            f"[회귀] _mouse_hook_dispatch 에 WM_MOUSEMOVE 분기 필수. src:\n{src!r}",
+        )
+        # 본문 구조 검증 — wParam == WM_MOUSEMOVE 비교 후 CallNextHookEx 직접 반환
+        self.assert_true(
+            "if wParam == WM_MOUSEMOVE" in src,
+            "[회귀] 'if wParam == WM_MOUSEMOVE' fast-path 분기 필수",
+        )
+        # MouseEvent 생성 라인보다 fast-path 가 먼저 와야 함 (line index 비교)
+        idx_move = src.find("wParam == WM_MOUSEMOVE")
+        idx_event_build = src.find("event = MouseEvent(")
+        self.assert_true(
+            0 < idx_move < idx_event_build,
+            f"[회귀] WM_MOUSEMOVE fast-path 가 MouseEvent 생성보다 먼저 위치 필수. "
+            f"move_idx={idx_move}, build_idx={idx_event_build}",
+        )
+
+    def test_184_recorder_overlay_no_activate_and_mouse_tracking(self):
+        """[회귀 2026-05-20 실측] RecorderOverlay 가 WS_EX_NOACTIVATE 적용 + mouseTracking off.
+
+        Bug (사용자 실측 2026-05-20): overlay [중지] 버튼 영역에서 마우스 컨트롤
+        체감 지연. Qt 의 ``WA_ShowWithoutActivating`` 은 show() 시점만 영향 —
+        그 이후 mouse hover 시 OS 가 activate 시도 → 잡음 + Qt hit-test 결합 지연.
+        Fix: Win32 WS_EX_NOACTIVATE 비트를 HWND extended style 에 명시 적용 +
+        부모/자식 모두 mouseTracking 명시 off.
+
+        가드:
+        1. `_apply_no_activate` 메서드 존재 + start() 가 호출
+        2. _GWL_EXSTYLE / _WS_EX_NOACTIVATE 상수 노출 + SetWindowLongPtrW 호출
+        3. setMouseTracking(False) 가 부모/자식 모두 적용
+        """
+        import inspect as _inspect
+
+        from ui_v2 import recorder_overlay as _ro
+        from ui_v2.recorder_overlay import RecorderOverlay
+
+        self.step("(1) WS_EX_NOACTIVATE 상수 노출")
+        self.assert_true(
+            hasattr(_ro, "_WS_EX_NOACTIVATE") and _ro._WS_EX_NOACTIVATE == 0x08000000,
+            f"[회귀] _WS_EX_NOACTIVATE = 0x08000000. 실제: {getattr(_ro, '_WS_EX_NOACTIVATE', None)!r}",
+        )
+        self.assert_true(
+            hasattr(_ro, "_GWL_EXSTYLE") and _ro._GWL_EXSTYLE == -20,
+            "[회귀] _GWL_EXSTYLE = -20 (SetWindowLongPtr index)",
+        )
+
+        self.step("(2) _apply_no_activate 메서드 + Win32 호출")
+        self.assert_true(
+            callable(getattr(RecorderOverlay, "_apply_no_activate", None)),
+            "[회귀] RecorderOverlay._apply_no_activate 메서드 필수",
+        )
+        apply_src = _inspect.getsource(RecorderOverlay._apply_no_activate)
+        for needle, desc in (
+            ("SetWindowLongPtrW", "Win32 ex-style set 호출"),
+            ("_WS_EX_NOACTIVATE", "NOACTIVATE 비트 OR"),
+            ('sys.platform != "win32"', "non-Windows silent noop"),
+        ):
+            self.assert_true(
+                needle in apply_src,
+                f"[회귀] _apply_no_activate 에 '{desc}' 필수: '{needle}'",
+            )
+
+        self.step("(3) start() 가 _apply_no_activate 호출")
+        start_src = _inspect.getsource(RecorderOverlay.start)
+        self.assert_true(
+            "_apply_no_activate" in start_src,
+            "[회귀] start() 가 _apply_no_activate() 호출 필수",
+        )
+
+        self.step("(4) setMouseTracking(False) 명시 — 부모 + [중지] 버튼")
+        init_src = _inspect.getsource(RecorderOverlay.__init__)
+        build_src = _inspect.getsource(RecorderOverlay._build_ui)
+        self.assert_true(
+            "setMouseTracking(False)" in init_src,
+            "[회귀] __init__ 가 self.setMouseTracking(False) 명시 호출",
+        )
+        self.assert_true(
+            "setMouseTracking(False)" in build_src,
+            "[회귀] _build_ui 가 [중지] 버튼 setMouseTracking(False) 명시 호출",
+        )
+
+    def test_185_recorder_stop_hotkey_ctrl_shift_r(self):
+        """[회귀 2026-05-20 실측] Ctrl+Shift+R 글로벌 stop hotkey — recorder 의
+        LL keyboard hook 에서 직접 감지.
+
+        Bug (사용자 실측 2026-05-20): main window minimize 상태에선 Qt QShortcut
+        이 focus 못 받아 Ctrl+Shift+R 작동 X. recorder LL keyboard hook 은 항상
+        active 이므로 hook 안에서 modifier+R 패턴 감지 후 callback 호출.
+
+        가드:
+        1. recorder.Recorder.__init__ 에 stop_hotkey_callback 인자
+        2. recorder 모듈에 VK_R / VK_CONTROL / VK_SHIFT / _is_modifier_pressed 노출
+        3. _build_keyboard_raw 가 Ctrl+Shift+R 감지 시 callback 호출 + raw event 안 만듦
+        4. AppService.start_recording 가 stop_hotkey_callback 전달
+        5. main_window_v2._do_start_recording 가 QTimer.singleShot thread-safe wrapper 주입
+        """
+        import inspect as _inspect
+
+        from core import recorder as _rec
+        from core.app_service import AppService
+        from core.recorder import Recorder
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        self.step("(1) 상수 + helper 노출")
+        self.assert_true(
+            hasattr(_rec, "VK_R") and _rec.VK_R == 0x52,
+            f"[회귀] VK_R = 0x52 (R 키). 실제: {getattr(_rec, 'VK_R', None)!r}",
+        )
+        self.assert_true(
+            hasattr(_rec, "VK_CONTROL") and _rec.VK_CONTROL == 0x11,
+            "[회귀] VK_CONTROL = 0x11",
+        )
+        self.assert_true(
+            hasattr(_rec, "VK_SHIFT") and _rec.VK_SHIFT == 0x10,
+            "[회귀] VK_SHIFT = 0x10",
+        )
+        self.assert_true(
+            callable(getattr(_rec, "_is_modifier_pressed", None)),
+            "[회귀] _is_modifier_pressed helper 함수 노출",
+        )
+
+        self.step("(2) Recorder.__init__ 의 stop_hotkey_callback 인자")
+        sig = _inspect.signature(Recorder.__init__)
+        self.assert_true(
+            "stop_hotkey_callback" in sig.parameters,
+            f"[회귀] Recorder.__init__ stop_hotkey_callback 인자 필수. 실제: {list(sig.parameters)!r}",
+        )
+
+        self.step("(3) _build_keyboard_raw 가 Ctrl+Shift+R 감지 + callback 호출")
+        build_src = _inspect.getsource(Recorder._build_keyboard_raw)
+        for needle, desc in (
+            ("VK_R", "R 키 감지"),
+            ("_is_modifier_pressed(VK_CONTROL)", "Ctrl modifier 검사"),
+            ("_is_modifier_pressed(VK_SHIFT)", "Shift modifier 검사"),
+            ("_stop_hotkey_callback", "callback 호출"),
+        ):
+            self.assert_true(
+                needle in build_src,
+                f"[회귀] _build_keyboard_raw 에 '{desc}' 필수: '{needle}'",
+            )
+
+        self.step("(4) _is_modifier_pressed 가 GetAsyncKeyState 사용")
+        helper_src = _inspect.getsource(_rec._is_modifier_pressed)
+        self.assert_true(
+            "GetAsyncKeyState" in helper_src and "0x8000" in helper_src,
+            f"[회귀] _is_modifier_pressed GetAsyncKeyState + 0x8000 비트 필수. 실제:\n{helper_src!r}",
+        )
+
+        self.step("(5) AppService.start_recording 가 stop_hotkey_callback 전달")
+        start_src = _inspect.getsource(AppService.start_recording)
+        self.assert_true(
+            "stop_hotkey_callback" in start_src
+            and "stop_hotkey_callback=stop_hotkey_callback" in start_src,
+            f"[회귀] start_recording 가 stop_hotkey_callback 인자 + Recorder 전달 필수.\n{start_src!r}",
+        )
+
+        self.step(
+            "(6) main_window_v2._do_start_recording 가 QTimer.singleShot thread-safe wrapper 주입"
+        )
+        do_start_src = _inspect.getsource(MainWindowV2._do_start_recording)
+        self.assert_true(
+            "stop_hotkey_callback" in do_start_src
+            and "QTimer.singleShot(0, self._do_stop_recording)" in do_start_src,
+            f"[회귀] _do_start_recording 가 QTimer.singleShot thread-safe wrapper 로 callback 주입 필수.\n"
+            f"{do_start_src!r}",
+        )
+
+    def test_186_stop_recording_preserves_target_session_id(self):
+        """[회귀 2026-05-20 실측] 사용자가 새 세션 만들고 D25 빈 상태에서 녹화 시작 시,
+        녹화 결과가 그 세션에 commit 되어야 함 (별개 'Recording YYYYMMDD-HHMMSS' 세션 X).
+
+        Bug (사용자 실측 2026-05-20): _teardown_recording_ui 가 self._recording_target_session_id
+        를 None 으로 reset → _show_review_dialog 의 commit_recording 호출 시 target_session_id=None
+        → commit_recording 가 새 세션 자동 생성. 사용자가 만든 빈 세션은 그대로 남고
+        별도 "Recording YYYYMMDD-HHMMSS" 세션이 생성됨 → 직관적 UX 깨짐.
+
+        Fix: _do_stop_recording 가 target_id 를 local 로 보존 + _show_review_dialog
+        에 인자로 전달. _teardown 의 reset 는 무관 (state cleanup 책임).
+
+        가드:
+        1. _do_stop_recording source 에 target_id local 보존 라인 + _teardown 호출 전 위치
+        2. _show_review_dialog 시그니처에 target_session_id 인자
+        3. _show_review_dialog 의 commit_recording 호출이 인자 사용
+        """
+        import inspect as _inspect
+
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        self.step("(1) _do_stop_recording 가 target_id 보존 (teardown 호출 전)")
+        stop_src = _inspect.getsource(MainWindowV2._do_stop_recording)
+        self.assert_true(
+            "target_id = self._recording_target_session_id" in stop_src,
+            f"[회귀] _do_stop_recording 가 target_id 를 local 로 보존 필수.\n{stop_src!r}",
+        )
+        teardown_idx = stop_src.find("self._teardown_recording_ui()")
+        save_idx = stop_src.find("target_id = self._recording_target_session_id")
+        self.assert_true(
+            0 < save_idx < teardown_idx,
+            f"[회귀] target_id 보존이 _teardown_recording_ui 호출 *전* 위치 필수. "
+            f"save_idx={save_idx}, teardown_idx={teardown_idx}",
+        )
+
+        self.step("(2) _show_review_dialog 시그니처에 target_session_id 인자")
+        sig = _inspect.signature(MainWindowV2._show_review_dialog)
+        self.assert_true(
+            "target_session_id" in sig.parameters,
+            f"[회귀] _show_review_dialog target_session_id 인자 필수. 실제: {list(sig.parameters)!r}",
+        )
+
+        self.step("(3) _show_review_dialog 가 인자 target_session_id 사용")
+        review_src = _inspect.getsource(MainWindowV2._show_review_dialog)
+        self.assert_true(
+            "target_session_id=target_session_id" in review_src,
+            f"[회귀] _show_review_dialog 가 commit_recording 호출 시 인자 target_session_id 사용 필수.\n"
+            f"{review_src!r}",
+        )
+
+        self.step("(4) commit 후 current_session reload + _refresh_step_cards 명시 호출")
+        # 사용자 보고 (2026-05-23): 이미 열린 탭에 녹화 commit 시 step cards 가
+        # 빈 상태 그대로 유지 — _open_session_tab 의 setCurrentIndex 동일 idx →
+        # currentChanged 미발화 → _switch_session 안 불림 → stale current_session.
+        # Fix: accept path 에 명시적 current_session reload + _refresh_step_cards.
+        accept_idx = review_src.find("self.app_service.commit_recording(")
+        # 두 번째 commit_recording (try-except 안의 accept path)
+        accept_idx = review_src.find("self.app_service.commit_recording(", accept_idx + 1)
+        self.assert_true(accept_idx > 0, "[회귀] accept path 의 commit_recording 호출 찾음")
+        # accept 이후의 코드에 reload 패턴 있어야 함
+        after_accept = review_src[accept_idx:]
+        self.assert_true(
+            "self.current_session = self.app_service.get_session(session.session_id)"
+            in after_accept,
+            f"[회귀] commit 후 self.current_session reload 필수.\n{after_accept!r}",
+        )
+        self.assert_true(
+            "self._refresh_step_cards()" in after_accept,
+            f"[회귀] commit 후 _refresh_step_cards() 명시 호출 필수.\n{after_accept!r}",
         )
 
     def test_72_codeviewer_clear_resets_block_view(self):

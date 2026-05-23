@@ -75,6 +75,33 @@ _MOUSE_BUTTON_MAP: dict[str, str] = {
 VK_F8 = 0x77
 """VK_F8 = 0x77 — R2 PR-16w: enable_f8_marker 옵션 활성 시 marker 로 변환."""
 
+VK_R = 0x52
+"""VK_R = 0x52 — Ctrl+Shift+R 글로벌 stop hotkey 감지용 (2026-05-20 실측 fix)."""
+
+VK_CONTROL = 0x11
+VK_SHIFT = 0x10
+
+
+def _is_modifier_pressed(vk_code: int) -> bool:
+    """Win32 GetAsyncKeyState 로 modifier 키 현재 상태 확인 (Ctrl/Shift 등).
+
+    LL hook callback 에서 호출 — 별도 keystate 추적 없이 OS 가 보유한 정확한
+    real-time 상태 사용. high-order bit (0x8000) 가 set 이면 현재 눌림 상태.
+    non-Windows 환경에서는 False 반환 (Ctrl+Shift+R hotkey 미작동, 정상).
+    """
+    import sys
+
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        state = ctypes.windll.user32.GetAsyncKeyState(vk_code)  # type: ignore[attr-defined]
+        return bool(state & 0x8000)
+    except Exception:
+        return False
+
+
 DEFAULT_QUEUE_MAXSIZE = 10000
 """R2 PR-17 마이그레이션 모드 — drain queue 기본 상한.
 
@@ -113,10 +140,16 @@ class Recorder:
         opts: Optional[TransformOptions] = None,
         element_capture_fn: Optional[ElementCaptureFn] = None,
         queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
+        stop_hotkey_callback: Optional[Callable[[], None]] = None,
     ) -> None:
         self._hook_manager = hook_manager
         self._opts = opts or TransformOptions()
         self._element_capture_fn = element_capture_fn
+        # 2026-05-20 fix: Ctrl+Shift+R 글로벌 stop hotkey. main window 가 minimize
+        # 된 상태에서 Qt QShortcut 이 focus 못 받아 작동 X. recorder 의 LL keyboard
+        # hook 이 항상 활성이므로 여기서 modifier+R 패턴 직접 감지. callback 은
+        # hook thread 에서 호출되므로 UI 측에서 thread-safe (QTimer.singleShot) 처리 필수.
+        self._stop_hotkey_callback = stop_hotkey_callback
 
         self._lock = Lock()
         self._session: Optional[RecordingSession] = None
@@ -336,6 +369,20 @@ class Recorder:
         if self._session is None or self._session.is_stopped:
             return None
         if event.type not in ("keydown", "syskeydown"):
+            return None
+
+        # 2026-05-20 fix: Ctrl+Shift+R 글로벌 stop hotkey 감지 — keydown 만, R 키만.
+        # 트리거 시 callback 호출 + raw event 생성 안 함 (R 키 자체가 녹화에 박히지 않음).
+        if (
+            event.vk_code == VK_R
+            and self._stop_hotkey_callback is not None
+            and _is_modifier_pressed(VK_CONTROL)
+            and _is_modifier_pressed(VK_SHIFT)
+        ):
+            try:
+                self._stop_hotkey_callback()
+            except Exception:
+                logger.exception("Recorder: stop_hotkey_callback 예외 (격리됨)")
             return None
 
         if self._opts.enable_f8_marker and event.vk_code == VK_F8:
