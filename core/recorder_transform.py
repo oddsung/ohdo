@@ -26,6 +26,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from core.pywinauto_codegen import build_pywinauto_click_code
 from core.recorder_models import RawEvent, RecordingSession, TransformOptions
 from core.session_manager import Step
 
@@ -53,7 +54,29 @@ _VK_SPECIAL_KEYS: dict[int, str] = {
     0x1B: "esc",
     0x71: "f2", 0x72: "f3", 0x73: "f4", 0x74: "f5",
     0x76: "f7", 0x77: "f8", 0x78: "f9",
+    0x25: "left", 0x26: "up", 0x27: "right", 0x28: "down",
+    0x2E: "delete", 0x2D: "insert", 0x24: "home", 0x23: "end",
+    0x21: "pageup", 0x22: "pagedown",
 }  # fmt: skip
+
+# PR-19f (2026-05-24): modifier 자체 키 VK codes. _emit_key_group 가 이 키들을
+# 단독 emit 안 함 — 다음 char/special 키의 RawEvent.modifiers 정보로 활용됨.
+# 양쪽 modifier (LCtrl/RCtrl 등) + 일반 modifier 모두 포함.
+_MODIFIER_VK_CODES: frozenset[int] = frozenset(
+    {
+        0x10,
+        0x11,
+        0x12,  # VK_SHIFT, VK_CONTROL, VK_MENU(Alt)
+        0x5B,
+        0x5C,  # VK_LWIN, VK_RWIN
+        0xA0,
+        0xA1,
+        0xA2,
+        0xA3,  # VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL
+        0xA4,
+        0xA5,  # VK_LMENU, VK_RMENU
+    }
+)
 
 
 def transform(
@@ -87,10 +110,37 @@ def transform(
     return steps
 
 
+def _is_uwp_popup_dismiss_overlay(meta: Optional[dict]) -> bool:
+    """[PR-19g 2026-05-24] UWP popup overlay 의 invisible click receptor 감지.
+
+    Win11 메모장 등 UWP/WinUI 앱은 popup (메뉴/dialog/toast) 이 떠 있을 때
+    popup 영역 밖에 화면 전체를 덮는 invisible click receptor 를 깔아둠.
+    사용자가 popup 외부 클릭 시 popup 을 닫는 ("light dismiss") 용도. EFP
+    (ElementFromPoint) 가 이 invisible element 를 잡으면 element_meta 는:
+
+        automation_id = "Light Dismiss"
+        class_name = "PopupRoot"
+        name = "닫기" (또는 빈 문자열)
+        control_type = "Button"
+
+    사용자가 의도하지 않은 무관한 click 이므로 transform 단계에서 drop.
+    재생성 시 fallback chain 의 ``title="닫기"`` 매칭이 메모장의 진짜 X 버튼을
+    찾아 클릭 → 메모장 종료 → 후속 step 모두 connect 실패 회귀 (사용자 실측
+    v2-새세션-005917 Step 2). 시그니처 정확 매칭만 — 일반 "닫기" 라벨 버튼
+    (다른 class_name) 은 그대로 통과.
+    """
+    if not meta:
+        return False
+    auto_id = (meta.get("automation_id") or "").strip().lower()
+    cls = (meta.get("class_name") or "").strip().lower()
+    return auto_id == "light dismiss" or cls == "popuproot"
+
+
 def _filter_noise(
     events: list[RawEvent], opts: TransformOptions, self_titles: list[str]
 ) -> list[RawEvent]:
     out: list[RawEvent] = []
+    dropped_overlay = 0
     for ev in events:
         if opts.drop_self_window_clicks and ev.kind == "click":
             wt = (ev.element_meta or {}).get("window_title") or ev.window_title or ""
@@ -98,7 +148,17 @@ def _filter_noise(
                 continue
         if opts.drop_empty_space_clicks and ev.kind == "click" and ev.element_meta is None:
             continue
+        # PR-19g: UWP popup overlay invisible click receptor drop
+        if ev.kind == "click" and _is_uwp_popup_dismiss_overlay(ev.element_meta):
+            dropped_overlay += 1
+            continue
         out.append(ev)
+    if dropped_overlay:
+        logger.info(
+            "recorder_transform: UWP popup Light Dismiss / PopupRoot click %d 개 drop "
+            "(재생성 시 메모장 등 종료 회귀 차단)",
+            dropped_overlay,
+        )
     return out
 
 
@@ -182,6 +242,7 @@ def _batch_to_step(batch: list[RawEvent], opts: TransformOptions) -> Optional[St
     desc_parts: list[str] = []
 
     click_event: Optional[RawEvent] = None
+    first_click_meta: Optional[dict] = None
     key_buffer: list[RawEvent] = []
 
     for ev in batch:
@@ -191,6 +252,11 @@ def _batch_to_step(batch: list[RawEvent], opts: TransformOptions) -> Optional[St
                 key_buffer = []
             _emit_click(ev, code_lines, desc_parts)
             click_event = ev
+            # PR-19d: batch 의 첫 click 의 element_meta 를 Step.element_meta 에 보존
+            # 보존. AI 재생성 시 element_context 변환에 사용. 같은 batch 내 후속 click
+            # 은 동일 element (또는 같은 흐름) 이므로 첫 click 으로 대표.
+            if first_click_meta is None and ev.element_meta:
+                first_click_meta = dict(ev.element_meta)
         elif ev.kind == "key":
             key_buffer.append(ev)
         elif ev.kind == "scroll":
@@ -212,6 +278,7 @@ def _batch_to_step(batch: list[RawEvent], opts: TransformOptions) -> Optional[St
         user_request=user_request,
         generated_code=generated_code,
         step_code=generated_code,
+        element_meta=first_click_meta,
     )
     step.conversation = [
         {
@@ -274,8 +341,40 @@ def _emit_key_group(
         label = last_click.element_meta.get("_ohdo_label")
 
     text_chars: list[str] = []
+
+    def _flush_text() -> None:
+        nonlocal text_chars
+        if text_chars:
+            _emit_text(text_chars, is_password, label, opts, code_lines, desc_parts)
+            text_chars = []
+
     for ev in key_events:
         vk = ev.vk_code or 0
+
+        # PR-19f: modifier 자체 키 (Ctrl/Shift/Alt/Win) 는 단독 emit 안 함.
+        # 다음 char/special 키의 RawEvent.modifiers 로 활용됨.
+        if vk in _MODIFIER_VK_CODES:
+            continue
+
+        modifiers = [m for m in (ev.modifiers or []) if m]
+
+        # PR-19f: modifier + char/special → pyautogui.hotkey(...) 변환
+        if modifiers:
+            _flush_text()
+            char = _VK_CHAR_MAP.get(vk)
+            special = _VK_SPECIAL_KEYS.get(vk)
+            key_name = char or special
+            if key_name is None:
+                # 인식 안 되는 vk + modifier — skip (예: 특수 키)
+                continue
+            # hotkey 인자: modifier 들 순서대로 + 최종 키
+            hotkey_parts = modifiers + [key_name]
+            args_repr = ", ".join(f"'{p}'" for p in hotkey_parts)
+            code_lines.append(f"pyautogui.hotkey({args_repr})")
+            desc_parts.append(f"단축키 {'+'.join(hotkey_parts)}")
+            continue
+
+        # modifier 없음 — 기존 text/special 로직
         char = _VK_CHAR_MAP.get(vk)
         if char is not None:
             text_chars.append(char)
@@ -283,14 +382,11 @@ def _emit_key_group(
 
         special = _VK_SPECIAL_KEYS.get(vk)
         if special is not None:
-            if text_chars:
-                _emit_text(text_chars, is_password, label, opts, code_lines, desc_parts)
-                text_chars = []
+            _flush_text()
             code_lines.append(f"pyautogui.press('{special}')")
             desc_parts.append(f"키 '{special}' 입력")
 
-    if text_chars:
-        _emit_text(text_chars, is_password, label, opts, code_lines, desc_parts)
+    _flush_text()
 
 
 def _emit_text(
@@ -333,30 +429,17 @@ def _browser_click_code(meta: dict) -> str:
 def _pywinauto_click_code(meta: dict, btn: str) -> str:
     """pywinauto click 코드 생성.
 
-    `Application(...)` (unqualified) 사용 — `extract_library_block` 의 essential
-    imports 가 `from pywinauto import Application` 형태로 prepend 하므로 일치 필요.
-    `pywinauto.Application(...)` (fully qualified) 형태는 `import pywinauto` 가
-    library 블럭에 없어 NameError 발생 (실측 발견 2026-05-20).
+    [PR-19a — 2026-05-23] ``core.pywinauto_codegen.build_pywinauto_click_code``
+    helper 로 위임. 이전엔 minimal 3줄 (``title_re=".*<full_title>.*"`` hardcode)
+    이었는데 메모장처럼 문서 내용이 title 에 들어가는 앱 재실행 시 매칭 실패
+    회귀 — helper 가 ``program_name`` (`` - `` 마지막 segment) ``.*<프로그램명>``
+    로 안전 매칭 + DPI Awareness + selector fallback chain + 창 활성화 +
+    pyautogui PRIMARY click 까지 포함한 robust 코드 생성.
+
+    `Application(...)` (unqualified) — essential imports
+    ``from pywinauto import Application`` 매치 (test_182 회귀 가드).
     """
-    ctrl_type = meta.get("control_type") or "Unknown"
-    name = meta.get("name") or ""
-    auto_id = meta.get("automation_id") or ""
-    window_title = meta.get("window_title") or ""
-
-    selectors: list[str] = []
-    if auto_id and not str(auto_id).isdigit():
-        selectors.append(f"auto_id={auto_id!r}")
-    if name:
-        selectors.append(f"title={name!r}")
-    selectors.append(f"control_type={ctrl_type!r}")
-    selector_args = ", ".join(selectors)
-
-    click_method = "right_click_input" if btn == "right" else "click_input"
-    return (
-        f'app = Application(backend="uia").connect(title_re={f".*{window_title}.*"!r})\n'
-        f"win = app.top_window()\n"
-        f"win.child_window({selector_args}).{click_method}()"
-    )
+    return build_pywinauto_click_code(meta, button=btn)
 
 
 def _browser_desc(meta: dict, verb: str) -> str:

@@ -174,8 +174,78 @@ class InputHookManager:
 
         if sys.platform == "win32":
             self._user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+            self._configure_user32_signatures()
         else:
             self._user32 = None
+
+    def _configure_user32_signatures(self) -> None:
+        """user32 함수들의 argtypes/restype 명시 설정 (2026-05-23 사용자 GUI 실측 fix).
+
+        Bug: argtypes 미설정 시 ctypes 가 default ``c_int`` (32-bit) 로 마샬링 시도.
+        LL hook 의 ``lParam`` (MSLLHOOKSTRUCT 포인터, x64 에서 64-bit 주소 예:
+        ``0x0000024BB9D1D300``) 이 32-bit 범위 초과 → ``OverflowError: int too long
+        to convert`` → ``CallNextHookEx`` 호출 실패 → event 가 next hook chain 으로
+        propagate 안 됨 + Python exception 처리 / stderr write 비용 누적 → 사용자
+        체감 input 씹힘 + 더블 클릭 필요. 매 mouse/keyboard event 마다 발생.
+
+        Windows 공식 타입 매핑 (x64):
+        - ``HHOOK`` = HANDLE = void* → ``c_void_p``
+        - ``WPARAM`` = UINT_PTR = unsigned size → ``c_size_t``
+        - ``LPARAM`` = LONG_PTR = signed size → ``c_ssize_t``
+        - ``LRESULT`` = LONG_PTR → ``c_ssize_t``
+        - ``BOOL`` = int → ``c_int``
+        - ``DWORD`` = unsigned 32-bit → ``c_uint``
+        """
+        if self._user32 is None:
+            return
+
+        # CallNextHookEx(HHOOK hhk, int nCode, WPARAM wParam, LPARAM lParam) → LRESULT
+        self._user32.CallNextHookEx.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_size_t,
+            ctypes.c_ssize_t,
+        ]
+        self._user32.CallNextHookEx.restype = ctypes.c_ssize_t
+
+        # SetWindowsHookExW(int idHook, HOOKPROC lpfn, HINSTANCE hMod, DWORD dwThreadId) → HHOOK
+        self._user32.SetWindowsHookExW.argtypes = [
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_uint,
+        ]
+        self._user32.SetWindowsHookExW.restype = ctypes.c_void_p
+
+        # UnhookWindowsHookEx(HHOOK hhk) → BOOL
+        self._user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+        self._user32.UnhookWindowsHookEx.restype = ctypes.c_int
+
+        # SetWinEventHook(...) → HWINEVENTHOOK
+        self._user32.SetWinEventHook.argtypes = [
+            ctypes.c_uint,
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.c_uint,
+            ctypes.c_uint,
+        ]
+        self._user32.SetWinEventHook.restype = ctypes.c_void_p
+
+        # UnhookWinEvent(HWINEVENTHOOK) → BOOL
+        self._user32.UnhookWinEvent.argtypes = [ctypes.c_void_p]
+        self._user32.UnhookWinEvent.restype = ctypes.c_int
+
+        # GetWindowTextW(HWND hWnd, LPWSTR lpString, int nMaxCount) → int
+        # _winevent_dispatch 가 hwnd 를 int 로 전달하는데 hWnd 도 포인터 (64-bit)
+        # 라 argtypes 명시로 동일 OverflowError 방지.
+        self._user32.GetWindowTextW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_wchar_p,
+            ctypes.c_int,
+        ]
+        self._user32.GetWindowTextW.restype = ctypes.c_int
 
     def install_mouse_callback(self, callback: MouseCallback) -> int:
         """callback 등록 + (필요 시) hook 설치. 등록 ID 반환."""

@@ -446,6 +446,28 @@ class AppService:
         """
         from datetime import datetime
 
+        # PR-19f (2026-05-24): commit 시점에 녹화 metadata 추출 (cleanup 전).
+        # 사용자 사후 분석 / 디버깅 / 미래 raw event 재변환 시 유용.
+        rec_meta: Optional[dict] = None
+        if self._recorder is not None and self._recorder.current_session is not None:
+            rs = self._recorder.current_session
+            duration_sec: Optional[float] = None
+            try:
+                if rs.stopped_at is not None:
+                    duration_sec = (rs.stopped_at - rs.started_at).total_seconds()
+            except Exception:
+                duration_sec = None
+            rec_meta = {
+                "recording_session_id": rs.id,
+                "started_at": rs.started_at.isoformat(),
+                "stopped_at": rs.stopped_at.isoformat() if rs.stopped_at else None,
+                "duration_sec": duration_sec,
+                "raw_event_count": rs.event_count,
+                "transformed_step_count": len(edited_steps),
+                "dropped_event_count": self._recorder.dropped_event_count,
+                "committed_at": datetime.now().isoformat(),
+            }
+
         if target_session_id is None:
             title = new_session_title or f"Recording {datetime.now().strftime('%Y%m%d-%H%M%S')}"
             session = self.create_session(title=title, description="작업 녹화로 자동 생성")
@@ -455,6 +477,18 @@ class AppService:
 
         for step in edited_steps:
             self._repo.add_step(session, step)
+
+        # PR-19f: 녹화 metadata 를 Session 에 보존 + 저장
+        if rec_meta is not None:
+            committed_step_ids = [
+                getattr(s, "step_id", None) if not isinstance(s, dict) else s.get("step_id")
+                for s in session.steps[-len(edited_steps) :]
+            ]
+            rec_meta["committed_step_ids"] = [sid for sid in committed_step_ids if sid]
+            if not hasattr(session, "recording_meta") or session.recording_meta is None:
+                session.recording_meta = []
+            session.recording_meta.append(rec_meta)
+            self._repo.save_session(session)
 
         self._emit_recording_event(
             "recording.committed",

@@ -80,6 +80,35 @@ VK_R = 0x52
 
 VK_CONTROL = 0x11
 VK_SHIFT = 0x10
+VK_MENU = 0x12  # Alt
+VK_LWIN = 0x5B
+VK_RWIN = 0x5C
+
+# PR-19f (2026-05-24) — modifier 키 인식. _build_keyboard_raw 가 매 keydown 시
+# 현재 OS modifier 상태를 GetAsyncKeyState 로 캡처해 RawEvent.modifiers 에 채움.
+# recorder_transform._emit_key_group 가 modifier 있는 char/special 키를
+# pyautogui.hotkey(...) 로 변환 (예: Ctrl+A → pyautogui.hotkey('ctrl', 'a')).
+_MODIFIER_CHECKS = (
+    ("ctrl", VK_CONTROL),
+    ("shift", VK_SHIFT),
+    ("alt", VK_MENU),
+    ("win", VK_LWIN),
+    ("win", VK_RWIN),
+)
+
+
+def _capture_modifier_state() -> list[str]:
+    """현재 눌려 있는 modifier 키 리스트 (``["ctrl", "shift"]`` 등).
+
+    ``GetAsyncKeyState`` 로 OS real-time 상태 조회. modifier 자체 keydown 의
+    경우도 자기 자신이 modifier 로 포함됨 (예: Ctrl 눌림 RawEvent.modifiers =
+    ``["ctrl"]``) — transform 단계에서 modifier 자체 키는 skip 하므로 무해.
+    """
+    out: list[str] = []
+    for label, vk in _MODIFIER_CHECKS:
+        if _is_modifier_pressed(vk) and label not in out:
+            out.append(label)
+    return out
 
 
 def _is_modifier_pressed(vk_code: int) -> bool:
@@ -114,6 +143,15 @@ _DRAIN_JOIN_TIMEOUT_SEC = 5.0
 
 _DRAIN_POLL_TIMEOUT_SEC = 0.1
 """drain thread 의 queue.get 타임아웃. _drain_stop_event 체크 주기."""
+
+
+# 2026-05-23 input 씹힘 원인 진단 history:
+# - 옵션 A (WinEvent disable): 무효 → WinEvent 가 원인 X
+# - 옵션 B (EFP disable): 무효 → EFP 가 원인 X
+# - **실제 root cause**: core/input_hooks.py 의 CallNextHookEx argtypes 미설정 →
+#   x64 LL hook lParam (64-bit 포인터) 가 default c_int 마샬링에서 OverflowError →
+#   매 mouse/keyboard event 마다 stderr 예외 + propagation 실패. fix: argtypes/restype
+#   명시 설정 (InputHookManager._configure_user32_signatures).
 
 
 class RecorderAlreadyStartedError(RuntimeError):
@@ -388,10 +426,13 @@ class Recorder:
         if self._opts.enable_f8_marker and event.vk_code == VK_F8:
             # R2 PR-16w: F8 → marker. transform 이 marker 자체 drop.
             return RawEvent(ts=datetime.now(), kind="marker")
+        # PR-19f (2026-05-24): modifier 상태 캡처 → transform 이 hotkey 변환에 사용.
+        modifiers = _capture_modifier_state()
         return RawEvent(
             ts=datetime.now(),
             kind="key",
             vk_code=event.vk_code,
+            modifiers=modifiers,
         )
 
     def _build_winevent_raw(self, event: WinEventEvent) -> Optional[RawEvent]:

@@ -93,6 +93,13 @@ class Step:
     # 각 원소: {"kind": "syntax"|"redefined_var"|"missing_try"|"import_misplaced",
     #          "message": str, "line": int}. UI 표시 / 재생성은 G7-C/D.
     validation_warnings: list = field(default_factory=list)
+    # PR-19d (2026-05-24): 작업 녹화 step 의 element 메타 보존. recorder_transform
+    # 이 batch 의 첫 click element_meta (control_type / name / automation_id /
+    # class_name / window_title / hwnd / process_id / exe_name / rect /
+    # is_password_field) 를 그대로 저장. AI 재생성 시 element_context 로 변환되어
+    # selector / 창 정보가 전달됨. 녹화로 생성 안 된 step (사용자 채팅 path) 은
+    # None — 기존 _pending_elements (F3 picker) path 그대로 동작.
+    element_meta: Optional[dict] = None
 
 
 @dataclass
@@ -128,6 +135,14 @@ class Session:
             "run_count": 0,
         }
     )
+
+    # PR-19f (2026-05-24): 작업 녹화로 commit 된 step 들의 metadata 리스트.
+    # 한 세션에 여러 번 녹화 append 가능 — 각 commit_recording 호출이 하나의 entry
+    # 추가. 사후 분석/디버깅 용 (raw event count, 녹화 시간, transform 결과 step 수,
+    # 사용된 transform options 등). 녹화 안 거친 세션 (수동 채팅 path) 은 빈 list.
+    # 각 entry 형식: {recording_session_id, started_at, stopped_at, duration_sec,
+    # raw_event_count, transformed_step_count, committed_step_ids, opts}.
+    recording_meta: list = field(default_factory=list)
 
 
 @dataclass

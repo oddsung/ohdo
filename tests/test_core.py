@@ -9323,6 +9323,1062 @@ if __name__ == "__main__":
             f"[회귀] commit 후 _refresh_step_cards() 명시 호출 필수.\n{after_accept!r}",
         )
 
+    def test_187_pywinauto_codegen_helper_core_patterns(self):
+        """[PR-19a 2026-05-23] core/pywinauto_codegen.build_pywinauto_click_code
+        helper 의 핵심 deterministic 패턴 보장.
+
+        목적: helper 가 win_inspector 의 stable selector 로직 + 메모장류 동적
+        title 안전 매칭 + DPI Awareness + selector fallback chain + 창 활성화 +
+        walk_up + pyautogui PRIMARY click 까지 robust 코드 생성. recorder_transform
+        의 이전 6줄 minimal 형태 (title_re=".*<full_title>.*") 가 메모장처럼
+        문서 내용이 title 에 들어가는 앱 재실행 시 매칭 실패하던 회귀 차단.
+
+        가드:
+        1. 메모장 케이스 (window_title="*hello world - 메모장") → program_name 만
+           추출한 title_re='.*메모장' 매칭 (full title hardcode X)
+        2. 브라우저 케이스 (is_browser_process=True) → full title hardcode +
+           found_index=0 (페이지별 식별)
+        3. DPI Awareness 설정 코드 (SetProcessDpiAwarenessContext / shcore fallback)
+        4. Application(...) unqualified (test_182 회귀 가드 — fully qualified 금지)
+        5. selector fallback chain (_resolve_element + _selectors list)
+        6. 창 활성화 (BringWindowToTop + SetForegroundWindow + IsIconic 분기)
+        7. walk_up to clickable parent (_clickable_types set + parent() loop)
+        8. pyautogui PRIMARY + element.click_input() fallback (try/except 이중)
+        9. right button 시 right_click_input fallback + button='right' 인자
+        10. name+auto_id(non-dynamic) 결합 selector (recorder baseline)
+        """
+        from core.pywinauto_codegen import build_pywinauto_click_code
+
+        self.step("(1) 메모장 program_name title_re 매칭 (동적 title 안전)")
+        memo_code = build_pywinauto_click_code(
+            {
+                "control_type": "MenuItem",
+                "name": "파일",
+                "window_title": "*hello world - 메모장",
+            }
+        )
+        # PR-19e: _safe_str_literal (json.dumps) 사용으로 double quote literal.
+        # 단/이중 인용 둘 다 허용 (회귀 안전망).
+        self.assert_true(
+            'title_re=".*메모장"' in memo_code or "title_re='.*메모장'" in memo_code,
+            f"[PR-19a/e] 메모장 케이스 program_name (.*메모장) title_re 필수. 실제: {memo_code!r}",
+        )
+        self.assert_true(
+            "hello world" not in memo_code,
+            f"[PR-19a] full title hardcode 금지 (동적 변화 매칭 실패 회귀). 실제: {memo_code!r}",
+        )
+
+        self.step("(2) 브라우저 케이스 full title hardcode + found_index=0")
+        browser_code = build_pywinauto_click_code(
+            {
+                "control_type": "Button",
+                "name": "Submit",
+                "window_title": "GitHub - Chrome",
+                "is_browser_process": True,
+            }
+        )
+        self.assert_true(
+            'title="GitHub - Chrome"' in browser_code and "found_index=0" in browser_code,
+            f"[PR-19a] 브라우저 full title + found_index=0 필수. 실제: {browser_code!r}",
+        )
+
+        self.step("(3) DPI Awareness 코드 포함")
+        self.assert_true(
+            "SetProcessDpiAwarenessContext" in memo_code
+            and "shcore.SetProcessDpiAwareness" in memo_code,
+            f"[PR-19a] DPI Awareness (PER_MONITOR_AWARE_V2 + shcore fallback) 필수. "
+            f"실제: {memo_code!r}",
+        )
+
+        self.step("(4) Application(...) unqualified (test_182 회귀 가드)")
+        self.assert_true(
+            "pywinauto.Application" not in memo_code,
+            f"[PR-19a] fully qualified pywinauto.Application 금지. 실제: {memo_code!r}",
+        )
+        self.assert_true(
+            'Application(backend="uia").connect(' in memo_code,
+            f'[PR-19a] unqualified Application(backend="uia").connect( 필수. 실제: {memo_code!r}',
+        )
+
+        self.step("(5) selector fallback chain (_resolve_element)")
+        self.assert_true(
+            "def _resolve_element():" in memo_code
+            and "_selectors" in memo_code
+            and "for _build in _selectors:" in memo_code,
+            f"[PR-19a] _resolve_element fallback chain 필수. 실제: {memo_code!r}",
+        )
+
+        self.step("(6) 창 활성화 (BringWindowToTop + SetForegroundWindow + IsIconic)")
+        self.assert_true(
+            "user32.BringWindowToTop(hwnd)" in memo_code
+            and "user32.SetForegroundWindow(hwnd)" in memo_code
+            and "user32.IsIconic(hwnd)" in memo_code,
+            f"[PR-19a] 창 활성화 3 신호 필수. 실제: {memo_code!r}",
+        )
+
+        self.step("(7) walk_up to clickable parent")
+        self.assert_true(
+            "_clickable_types" in memo_code
+            and "click_target = element" in memo_code
+            and "_cur.parent()" in memo_code,
+            f"[PR-19a] walk_up to clickable parent 필수. 실제: {memo_code!r}",
+        )
+
+        self.step("(8) pyautogui PRIMARY + element fallback (try/except 이중)")
+        self.assert_true(
+            "pyautogui.click(center_x, center_y" in memo_code
+            and "click_target.click_input()" in memo_code,
+            f"[PR-19a] pyautogui PRIMARY + click_input fallback 필수. 실제: {memo_code!r}",
+        )
+
+        self.step("(9) right button → right_click_input + button='right'")
+        right_code = build_pywinauto_click_code(
+            {"control_type": "Button", "name": "OK", "window_title": "App"},
+            button="right",
+        )
+        self.assert_true(
+            "click_target.right_click_input()" in right_code and "button='right'" in right_code,
+            f"[PR-19a] right button 시 right_click_input + button='right' 인자. "
+            f"실제: {right_code!r}",
+        )
+
+        self.step("(10) name+auto_id(non-dynamic) 결합 selector (recorder baseline)")
+        combined_code = build_pywinauto_click_code(
+            {
+                "control_type": "Button",
+                "name": "확인",
+                "automation_id": "btn_ok",
+                "window_title": "Dialog",
+            }
+        )
+        self.assert_true(
+            'title="확인"' in combined_code
+            and 'auto_id="btn_ok"' in combined_code
+            and 'control_type="Button"' in combined_code,
+            f"[PR-19a] name+auto_id+control_type 결합 selector (가장 discriminating) "
+            f"필수. 실제: {combined_code!r}",
+        )
+
+        self.step("(11) auto_id 가 순수 숫자 (동적) 면 combined 미사용 → name+ctrl_type")
+        dynamic_code = build_pywinauto_click_code(
+            {
+                "control_type": "Edit",
+                "name": "입력",
+                "automation_id": "12345",
+                "window_title": "App",
+            }
+        )
+        self.assert_true(
+            'auto_id="12345"' not in dynamic_code,
+            f"[PR-19a] 동적 (숫자만) auto_id 는 primary selector 에서 제외. 실제: {dynamic_code!r}",
+        )
+
+    def test_188_recorder_transform_delegates_to_pywinauto_codegen(self):
+        """[PR-19a 2026-05-23] recorder_transform._pywinauto_click_code 가
+        core.pywinauto_codegen.build_pywinauto_click_code 로 위임.
+
+        목적: recorder 가 helper 의 robust 코드 (DPI / program_name title_re /
+        fallback chain / 창 활성화 / walk_up / pyautogui PRIMARY) 를 그대로
+        emit 하여 사용자 실측 회귀 (메모장류 매칭 실패, NameError) 차단.
+
+        가드:
+        1. recorder_transform 모듈이 helper 를 import (의존 명시)
+        2. _pywinauto_click_code source 가 build_pywinauto_click_code 호출
+        3. end-to-end transform 결과에 helper 의 핵심 패턴 포함
+           (program_name title_re, DPI, fallback chain, walk_up, pyautogui PRIMARY)
+        """
+        import inspect as _inspect
+        from datetime import datetime
+
+        from core import recorder_transform as _rt
+        from core.recorder_models import RawEvent, RecordingSession
+
+        self.step("(1) recorder_transform 이 helper import")
+        rt_src = _inspect.getsource(_rt)
+        self.assert_true(
+            "from core.pywinauto_codegen import build_pywinauto_click_code" in rt_src,
+            "[PR-19a] recorder_transform 이 pywinauto_codegen helper import 필수",
+        )
+
+        self.step("(2) _pywinauto_click_code 가 helper 호출 위임")
+        click_src = _inspect.getsource(_rt._pywinauto_click_code)
+        self.assert_true(
+            "build_pywinauto_click_code(" in click_src,
+            f"[PR-19a] _pywinauto_click_code 가 helper 호출 필수. 실제:\n{click_src}",
+        )
+
+        self.step("(3) end-to-end transform 결과에 robust 패턴")
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                button="left",
+                element_meta={
+                    "control_type": "MenuItem",
+                    "name": "파일",
+                    "window_title": "*untitled - 메모장",
+                },
+            )
+        )
+        steps = _rt.transform(sess)
+        code = steps[0].generated_code
+        # PR-19e: _safe_str_literal 로 double quote. program_name title_re sentinel 만
+        # 양 인용 부호 허용 (escape 안전 fix 후속 회귀 방지).
+        self.assert_true(
+            'title_re=".*메모장"' in code or "title_re='.*메모장'" in code,
+            f"[PR-19a/e] program_name title_re (.*메모장) 필수 (single/double quote 모두 허용). "
+            f"실제 generated_code:\n{code}",
+        )
+        for pattern, desc in [
+            ("SetProcessDpiAwarenessContext", "DPI Awareness"),
+            ("def _resolve_element():", "selector fallback chain"),
+            ("BringWindowToTop", "창 활성화"),
+            ("_clickable_types", "walk_up"),
+            ("pyautogui.click(center_x, center_y)", "pyautogui PRIMARY"),
+            ("click_target.click_input()", "element fallback"),
+        ]:
+            self.assert_true(
+                pattern in code,
+                f"[PR-19a] end-to-end transform 결과에 {desc} 패턴 ({pattern!r}) 필수. "
+                f"실제 generated_code:\n{code}",
+            )
+        self.assert_true(
+            "untitled" not in code,
+            f"[PR-19a] full title hardcode 회귀 — 'untitled' 가 코드에 들어가면 안 됨 "
+            f"(program_name '메모장' 만 추출되어야 함). 실제:\n{code}",
+        )
+
+    def test_189_win_inspector_pywinauto_codegen_sentinel_consistency(self):
+        """[PR-19a 2026-05-23] win_inspector 의 inline desktop click 코드 emit
+        과 pywinauto_codegen helper 의 출력이 핵심 deterministic 패턴에서
+        일치 (divergence 방지 sentinel).
+
+        목적: PR-19a 가 helper 만 추출 + recorder_transform 만 통합 (win_inspector
+        리팩은 PR-19a' 로 분리 — AI quality 회귀 risk 분리). 두 path 가 시간이
+        지나며 divergence 되지 않도록 sentinel — 둘 다 같은 핵심 패턴 emit.
+
+        가드 (win_inspector._get_desktop_element_info_text source + helper output
+        양쪽 모두):
+        - DPI Awareness (SetProcessDpiAwarenessContext + shcore)
+        - Application unqualified (`pywinauto.Application` 금지)
+        - program_name title_re 패턴
+        - fallback chain (_resolve_element)
+        - walk_up (_clickable_types)
+        - pyautogui PRIMARY click 분기
+
+        win_inspector 가 helper 호출로 교체되면 (PR-19a') 이 sentinel 은
+        자동 만족. 둘 중 하나가 변경되어 divergence 되면 즉시 fail.
+        """
+        import inspect as _inspect
+
+        from core.pywinauto_codegen import build_pywinauto_click_code
+        from core.win_inspector import WindowInspector
+
+        wi_src = _inspect.getsource(WindowInspector._get_desktop_element_info_text)
+        helper_out = build_pywinauto_click_code(
+            {
+                "control_type": "Button",
+                "name": "확인",
+                "automation_id": "btnOK",
+                "window_title": "Dialog",
+            }
+        )
+
+        sentinels = [
+            ("SetProcessDpiAwarenessContext", "DPI Awareness PER_MONITOR_AWARE_V2"),
+            ("shcore.SetProcessDpiAwareness", "DPI Awareness shcore fallback"),
+            ("_resolve_element", "selector fallback chain"),
+            ("_clickable_types", "walk_up clickable parent"),
+            ("BringWindowToTop", "창 활성화 BringWindowToTop"),
+            ("SetForegroundWindow", "창 활성화 SetForegroundWindow"),
+            ("pyautogui.click(center_x, center_y", "pyautogui PRIMARY click"),
+        ]
+        for pattern, desc in sentinels:
+            self.assert_true(
+                pattern in wi_src,
+                f"[PR-19a sentinel] win_inspector 가 {desc} 패턴 ({pattern!r}) emit 필수",
+            )
+            self.assert_true(
+                pattern in helper_out,
+                f"[PR-19a sentinel] pywinauto_codegen helper 가 {desc} 패턴 ({pattern!r}) emit 필수",
+            )
+
+        self.step("[anti-pattern] 양쪽 모두 fully qualified pywinauto.Application 금지")
+        # win_inspector source 는 pywinauto import 코멘트가 있을 수 있어 emit 부분만 검사:
+        # connect_line 변수 + lines.append(f"app = {connect_line}") 패턴.
+        # emit 되는 connect_line 자체에 fully qualified 가 들어가면 안 됨.
+        wi_emits_fully_qualified = (
+            'f"app = pywinauto.Application' in wi_src
+            or "'app = pywinauto.Application" in wi_src
+            or '"app = pywinauto.Application' in wi_src
+            or 'connect_line = f"pywinauto.Application' in wi_src
+            or "connect_line = (\n            f'pywinauto.Application" in wi_src
+        )
+        self.assert_true(
+            not wi_emits_fully_qualified,
+            "[PR-19a sentinel] win_inspector 가 fully qualified pywinauto.Application emit 금지",
+        )
+        self.assert_true(
+            "pywinauto.Application" not in helper_out,
+            f"[PR-19a sentinel] helper output 에 fully qualified pywinauto.Application 금지. "
+            f"실제: {helper_out!r}",
+        )
+
+    def test_190_input_hooks_user32_argtypes_configured(self):
+        """[회귀 2026-05-23 실측] InputHookManager 가 user32 함수들의 argtypes/restype
+        명시 설정. CallNextHookEx 의 lParam (x64 64-bit 포인터) OverflowError 방지.
+
+        Bug (사용자 실측 2026-05-23): 녹화 중 매 mouse/keyboard event 마다 stderr 에
+        ``ctypes.ArgumentError: argument 4: OverflowError: int too long to convert``
+        반복 출력. 원인 — ``CallNextHookEx`` 의 argtypes 미설정 → ctypes 가 default
+        ``c_int`` (32-bit) 로 마샬링 시도 → LL hook 의 lParam (MSLLHOOKSTRUCT 포인터,
+        x64 에서 64-bit 주소 예: ``0x0000024BB9D1D300``) 이 32-bit 범위 초과 →
+        OverflowError → CallNextHookEx 호출 실패 → event 가 next hook chain 으로
+        propagate 안 됨 + Python exception 처리 / stderr write 비용 누적 → 사용자
+        체감 input 씹힘 + 더블 클릭 필요. 옵션 A (WinEvent disable) / 옵션 B (EFP
+        disable) 모두 무효 였던 이유 — 둘 다 dispatch path 의 이 버그를 해결 못 함.
+
+        Fix: ``InputHookManager._configure_user32_signatures()`` 가 __init__ 에서
+        호출되어 user32 함수들의 argtypes/restype 명시 설정. Windows 타입 매핑:
+        ``WPARAM``=``c_size_t``, ``LPARAM``=``c_ssize_t``, ``LRESULT``=``c_ssize_t``,
+        ``HHOOK``=``c_void_p``.
+
+        가드:
+        1. InputHookManager 가 _configure_user32_signatures 메서드 보유
+        2. __init__ 끝에 _configure_user32_signatures 호출 (Win 환경 분기)
+        3. CallNextHookEx.argtypes = [void_p, c_int, size_t, ssize_t], restype = ssize_t
+           (x64 에서 size_t=c_ulonglong, ssize_t=c_longlong 로 정규화됨)
+        4. SetWindowsHookExW.restype = c_void_p (HHOOK 64-bit 보장)
+        5. UnhookWindowsHookEx.argtypes = [c_void_p]
+        6. non-Windows 환경에선 _user32 가 None → _configure 가 silent noop
+        """
+        import ctypes
+        import inspect as _inspect
+        import sys
+
+        from core.input_hooks import InputHookManager
+
+        self.step("(1) _configure_user32_signatures 메서드 존재")
+        self.assert_true(
+            hasattr(InputHookManager, "_configure_user32_signatures"),
+            "[회귀] InputHookManager 가 _configure_user32_signatures 메서드 보유 필수",
+        )
+
+        self.step("(2) __init__ 에서 _configure_user32_signatures 호출 sentinel")
+        init_src = _inspect.getsource(InputHookManager.__init__)
+        self.assert_true(
+            "self._configure_user32_signatures()" in init_src,
+            f"[회귀] __init__ 가 _configure_user32_signatures 호출 필수.\n{init_src}",
+        )
+
+        self.step("(3) 실제 인스턴스의 user32 함수 argtypes/restype 검증 (Windows 만)")
+        if sys.platform != "win32":
+            self.step("non-Windows 환경 — skip (recorder 자체 non-Windows 미지원)")
+            return
+
+        mgr = InputHookManager()
+
+        # CallNextHookEx — 가장 중요 (실측 OverflowError 발생 지점)
+        cnh_argtypes = mgr._user32.CallNextHookEx.argtypes
+        self.assert_true(
+            cnh_argtypes is not None and len(cnh_argtypes) == 4,
+            f"[회귀] CallNextHookEx.argtypes 4개 명시 필수. 실제: {cnh_argtypes!r}",
+        )
+        # x64 에서 c_size_t 는 c_ulonglong 으로, c_ssize_t 는 c_longlong 으로 정규화
+        expected_lparam_types = (ctypes.c_ssize_t, ctypes.c_longlong, ctypes.c_long)
+        self.assert_true(
+            cnh_argtypes[3] in expected_lparam_types,
+            f"[회귀] CallNextHookEx.argtypes[3] (lParam) signed pointer-size 타입 필수 "
+            f"(c_ssize_t/c_longlong). 실제: {cnh_argtypes[3]!r}",
+        )
+        cnh_restype = mgr._user32.CallNextHookEx.restype
+        self.assert_true(
+            cnh_restype in expected_lparam_types,
+            f"[회귀] CallNextHookEx.restype (LRESULT) signed pointer-size 필수. "
+            f"실제: {cnh_restype!r}",
+        )
+
+        # SetWindowsHookExW — HHOOK 반환 64-bit 보장
+        shex_restype = mgr._user32.SetWindowsHookExW.restype
+        self.assert_true(
+            shex_restype is ctypes.c_void_p,
+            f"[회귀] SetWindowsHookExW.restype = c_void_p (HHOOK 64-bit). 실제: {shex_restype!r}",
+        )
+
+        # UnhookWindowsHookEx — HHOOK 인자
+        uhex_argtypes = mgr._user32.UnhookWindowsHookEx.argtypes
+        self.assert_true(
+            uhex_argtypes == [ctypes.c_void_p],
+            f"[회귀] UnhookWindowsHookEx.argtypes = [c_void_p]. 실제: {uhex_argtypes!r}",
+        )
+
+        self.step("(4) hook install/uninstall end-to-end 동작 (OverflowError 발생 X)")
+        # OverflowError 가 발생하면 ctypes 가 stderr 에 출력하지만 callback 자체는
+        # 0 반환 — install/uninstall 동작은 이상 없는 것처럼 보임. 검증의 핵심은
+        # argtypes 가 잡혀 있다는 것 (위 단계들). 여기서는 install/uninstall path 가
+        # 새 argtypes 로도 정상 동작 (regression 안 함) 확인.
+        cb_id = mgr.install_mouse_callback(lambda ev: False)
+        self.assert_true(mgr.is_mouse_hook_installed, "[회귀] install 후 hook installed True")
+        mgr.uninstall_mouse_callback(cb_id)
+        self.assert_true(
+            not mgr.is_mouse_hook_installed, "[회귀] uninstall 후 hook installed False"
+        )
+
+    def test_191_recording_step_element_meta_regenerate_path(self):
+        """[PR-19d 2026-05-24] 옵션 3 — 녹화 step 의 element_meta 보존 + AI 재생성
+        path 가 element_context 로 변환해 AI 에 전달.
+
+        목적: 녹화 step 도 사용자가 "👤 사용자 요청" 클릭 시 AI 재생성 가능.
+        deterministic 코드 (recorder_transform) 와 비교 평가 가능. 기존 path 는
+        ``self._pending_elements`` (F3 picker) 만 사용 — 녹화 step 의 element 정보
+        는 generated_code 안에 hardcode 만 되어 재생성 시 손실됨.
+
+        가드:
+        1. ``Step`` dataclass 에 ``element_meta: Optional[dict] = None`` 필드 존재
+        2. ``recorder_transform._batch_to_step`` 가 batch 첫 click 의 element_meta
+           를 Step.element_meta 에 보존 (click 없는 batch 는 None)
+        3. ui_v2 의 ``_lookup_step_element_meta`` / ``_recorder_meta_to_picker_dict``
+           helper 존재 + adapter 가 recorder 필드를 picker 형식으로 정규화
+        4. ``_on_regenerate`` source 에 element_meta lookup + adapter 호출 sentinel
+        5. adapter end-to-end: recorder dict → picker dict → win_inspector
+           ``get_element_info_text`` 가 정상 markdown 생성 (selector 정보 포함)
+        """
+        import inspect as _inspect
+        from dataclasses import fields
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import transform
+        from core.session_manager import Step
+        from core.win_inspector import WindowInspector
+        from ui_v2.main_window_v2 import (
+            MainWindowV2,
+            _lookup_step_element_meta,
+            _recorder_meta_to_picker_dict,
+        )
+
+        self.step("(1) Step dataclass 에 element_meta 필드 존재")
+        field_names = {f.name for f in fields(Step)}
+        self.assert_true(
+            "element_meta" in field_names,
+            f"[PR-19d] Step.element_meta 필드 필수. 실제 fields: {field_names}",
+        )
+        self.assert_true(
+            Step().element_meta is None,
+            f"[PR-19d] Step.element_meta default None. 실제: {Step().element_meta!r}",
+        )
+
+        self.step("(2) recorder_transform 이 batch 첫 click element_meta 보존")
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        meta = {
+            "control_type": "Button",
+            "name": "검색",
+            "automation_id": "SearchButton",
+            "window_title": "데스크톱 1",
+        }
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=100,
+                y=200,
+                button="left",
+                element_meta=meta,
+            )
+        )
+        steps = transform(sess)
+        self.assert_true(len(steps) == 1, f"[PR-19d] 1 click → 1 step. 실제: {len(steps)}")
+        self.assert_true(
+            steps[0].element_meta is not None
+            and steps[0].element_meta.get("automation_id") == "SearchButton",
+            f"[PR-19d] transform 이 element_meta 보존 필수. 실제: {steps[0].element_meta!r}",
+        )
+
+        self.step("(3) click 없는 batch (key 만) → element_meta None")
+        sess2 = RecordingSession(id="t2", started_at=datetime.now())
+        sess2.events.append(RawEvent(ts=datetime.now(), kind="key", vk_code=0x41))
+        steps2 = transform(sess2)
+        if steps2:
+            self.assert_true(
+                steps2[0].element_meta is None,
+                f"[PR-19d] click 없는 batch → element_meta None. 실제: {steps2[0].element_meta!r}",
+            )
+
+        self.step("(4) _lookup_step_element_meta helper — dataclass + dict 둘 다 처리")
+
+        class _FakeSession:
+            def __init__(self, steps_list):
+                self.steps = steps_list
+
+        step_dc = Step(step_id=5, element_meta={"control_type": "Edit", "name": "입력"})
+        sess_dc = _FakeSession([step_dc])
+        self.assert_true(
+            _lookup_step_element_meta(sess_dc, 5) == {"control_type": "Edit", "name": "입력"},
+            "[PR-19d] dataclass Step 에서 element_meta lookup 성공",
+        )
+        self.assert_true(
+            _lookup_step_element_meta(sess_dc, 999) is None,
+            "[PR-19d] 존재하지 않는 step_id 는 None",
+        )
+
+        sess_dict = _FakeSession([{"step_id": 7, "element_meta": {"name": "확인"}}])
+        self.assert_true(
+            _lookup_step_element_meta(sess_dict, 7) == {"name": "확인"},
+            "[PR-19d] dict Step 에서 element_meta lookup 성공",
+        )
+
+        self.step("(5) _recorder_meta_to_picker_dict adapter — 필드 변환 정규화")
+        recorder_meta = {
+            "control_type": "Button",
+            "name": "검색",
+            "automation_id": "SearchButton",
+            "class_name": "Button",
+            "window_title": "데스크톱 1",
+            "exe_name": "explorer.exe",
+            "rect": [100, 200, 180, 230],
+        }
+        picker = _recorder_meta_to_picker_dict(recorder_meta)
+        self.assert_true(
+            picker["parent_window_title"] == "데스크톱 1",
+            f"[PR-19d] window_title → parent_window_title 변환. 실제: {picker!r}",
+        )
+        self.assert_true(
+            picker["rect"] == {"left": 100, "top": 200, "width": 80, "height": 30},
+            f"[PR-19d] rect list → dict 변환 (right-left, bottom-top). 실제: {picker['rect']!r}",
+        )
+        self.assert_true(
+            picker["screen_x"] == 140 and picker["screen_y"] == 215,
+            f"[PR-19d] center 좌표 계산. 실제: ({picker['screen_x']}, {picker['screen_y']})",
+        )
+        self.assert_true(
+            picker["recommended_backend"] == "uia" and picker["detected_backend"] == "uia",
+            f"[PR-19d] backend default 'uia'. 실제: {picker!r}",
+        )
+        self.assert_true(
+            picker["is_browser"] is False,
+            f"[PR-19d] explorer.exe → is_browser False. 실제: {picker['is_browser']!r}",
+        )
+
+        self.step("(6) browser exe 추론")
+        for exe in ("chrome.exe", "msedge.exe", "firefox.exe"):
+            recorder_meta["exe_name"] = exe
+            p = _recorder_meta_to_picker_dict(recorder_meta)
+            self.assert_true(
+                p["is_browser"] is True,
+                f"[PR-19d] {exe} → is_browser True. 실제: {p['is_browser']!r}",
+            )
+
+        self.step("(7) _on_regenerate source 에 element_meta lookup + adapter sentinel")
+        regen_src = _inspect.getsource(MainWindowV2._on_regenerate)
+        self.assert_true(
+            "_lookup_step_element_meta(" in regen_src
+            and "_recorder_meta_to_picker_dict(" in regen_src,
+            f"[PR-19d] _on_regenerate 가 lookup + adapter helper 호출 필수.\n{regen_src}",
+        )
+
+        self.step("(8) end-to-end: recorder dict → picker → win_inspector markdown")
+        picker_full = _recorder_meta_to_picker_dict(
+            {
+                "control_type": "Button",
+                "name": "검색",
+                "automation_id": "SearchButton",
+                "class_name": "Button",
+                "window_title": "데스크톱 1",
+                "exe_name": "explorer.exe",
+                "rect": [100, 200, 180, 230],
+            }
+        )
+        inspector = WindowInspector()
+        text = inspector.get_element_info_text(picker_full)
+        for needle in ("SearchButton", "데스크톱", "Button", "Application"):
+            self.assert_true(
+                needle in text,
+                f"[PR-19d] win_inspector markdown 에 {needle!r} 포함 필수 (AI prompt 전달용)",
+            )
+
+    def test_192_pywinauto_codegen_safe_escape_and_process_first(self):
+        """[PR-19e 2026-05-24] 사용자 실측 (v2-새세션-000727) 발견 2 fix:
+
+        Critical fix — _safe_str_literal 로 모든 user-data string escape.
+        Win11 메모장 Document name = "1111\\r2222\\r3333\\r" 같이 CR 포함된 name 이
+        element_meta 에 들어가도 generated code 가 SyntaxError (unterminated string
+        literal) 안 남. 가드: ``compile()`` 가 SyntaxError 안 raise.
+
+        Important fix — process_id 우선 connect chain.
+        Win11 메모장의 탭 (XAML 중간 노드) 이름 ("데스크톱 1") 이 element_inspect
+        의 top-level 로 잡혀 진짜 메모장 window title 매칭 실패. process_id 우선
+        connect (timeout 2s) + title fallback (timeout 10s) chain emit.
+
+        가드:
+        1. CR 포함 name → ``compile()`` 통과 (SyntaxError 안 raise)
+        2. process_id 있으면 ``_connect_app()`` 함수 + ``process=...`` connect emit
+        3. process_id 없으면 기존 단일 connect line (회귀 안 함)
+        4. quote (\\") 포함 name 도 안전 escape
+        5. 모든 escape (CR/LF/quote/backslash) 가 적용된 코드도 compile 통과
+        """
+        from core.pywinauto_codegen import build_pywinauto_click_code
+
+        self.step("(1) CR 포함 name (실측 v2-새세션-000727 Step 1 재현) compile 통과")
+        meta_cr = {
+            "control_type": "Document",
+            "name": "1111\r2222\r3333\r",
+            "class_name": "RichEditD2DPT",
+            "window_title": "데스크톱 1",
+            "process_id": 16760,
+        }
+        code_cr = build_pywinauto_click_code(meta_cr)
+        try:
+            compile(code_cr, "<test_192>", "exec")
+            compile_ok = True
+            compile_err = ""
+        except SyntaxError as e:
+            compile_ok = False
+            compile_err = str(e)
+        self.assert_true(
+            compile_ok,
+            f"[PR-19e] CR 포함 name 에 SyntaxError 회귀 금지. "
+            f"실제 에러: {compile_err}\n코드 일부: {code_cr[:500]!r}",
+        )
+
+        self.step("(2) process_id 우선 connect chain emit (_connect_app + process=)")
+        self.assert_true(
+            "def _connect_app():" in code_cr and "process=16760" in code_cr,
+            f"[PR-19e] process_id 있으면 _connect_app + process=PID emit 필수. 실제: {code_cr!r}",
+        )
+        self.assert_true(
+            "timeout=2" in code_cr,
+            f"[PR-19e] process connect 짧은 timeout (2s) — title fallback 빠르게. "
+            f"실제: {code_cr!r}",
+        )
+
+        self.step("(3) process_id 없으면 기존 단일 connect path (회귀 안 함)")
+        meta_no_pid = {
+            "control_type": "Button",
+            "name": "확인",
+            "window_title": "Dialog",
+        }
+        code_no_pid = build_pywinauto_click_code(meta_no_pid)
+        self.assert_true(
+            "_connect_app()" not in code_no_pid,
+            f"[PR-19e] process_id 없으면 _connect_app() helper 안 emit. 실제: {code_no_pid!r}",
+        )
+        self.assert_true(
+            "app = Application(" in code_no_pid,
+            f"[PR-19e] process_id 없으면 기존 단일 app = Application(...) line 유지. "
+            f"실제: {code_no_pid!r}",
+        )
+
+        self.step("(4) quote 포함 name 도 안전 escape — compile 통과")
+        meta_quote = {
+            "control_type": "Edit",
+            "name": 'with "quote" and \\backslash',
+            "window_title": "Test",
+        }
+        code_quote = build_pywinauto_click_code(meta_quote)
+        try:
+            compile(code_quote, "<test_192>", "exec")
+            quote_ok = True
+        except SyntaxError as e:
+            quote_ok = False
+            print(f"quote compile err: {e}")
+        self.assert_true(
+            quote_ok,
+            f"[PR-19e] quote/backslash name escape 필수. 코드: {code_quote!r}",
+        )
+
+        self.step("(5) LF/tab 등 다른 control char 도 안전")
+        meta_misc = {
+            "control_type": "Text",
+            "name": "line1\nline2\ttab",
+            "class_name": 'cls"with quotes',
+            "window_title": "App",
+        }
+        code_misc = build_pywinauto_click_code(meta_misc)
+        try:
+            compile(code_misc, "<test_192>", "exec")
+            misc_ok = True
+        except SyntaxError as e:
+            misc_ok = False
+            print(f"misc compile err: {e}")
+        self.assert_true(
+            misc_ok,
+            f"[PR-19e] LF/tab/quote 안전 escape 필수. 코드: {code_misc!r}",
+        )
+
+        self.step("(6) process_id 없는 case 의 title fallback line 은 그대로 emit")
+        self.assert_true(
+            "win = app.window(" in code_no_pid or "win = app.top_window()" in code_no_pid,
+            f"[PR-19e] process_id 없을 때 win line emit. 실제: {code_no_pid!r}",
+        )
+
+    def test_193_recorder_modifier_hotkey_and_recording_meta(self):
+        """[PR-19f 2026-05-24] 사용자 실측 (v2-새세션-003052) 발견 2 fix:
+
+        Critical fix — modifier 키 (Ctrl/Shift/Alt/Win) 인식.
+        이전엔 Ctrl+A 입력 시 Ctrl keydown RawEvent (vk=0x11) 와 A keydown (vk=0x41)
+        가 따로 emit. _emit_key_group 의 _VK_CHAR_MAP 에 0x11 없으니 silent skip,
+        A 만 char 'a' 로 변환 → ``pyautogui.write('a')`` 만 emit (메모장에 글자 'a'
+        만 입력됨, 전체 선택 안 됨). Fix: recorder 가 GetAsyncKeyState 로 현재
+        modifier 상태 캡처해 RawEvent.modifiers 채움. transform 이 modifier 자체
+        키는 skip + non-modifier char/special 키에 modifier 있으면
+        ``pyautogui.hotkey('ctrl', 'a')`` 형식 변환.
+
+        Quality fix — Session.recording_meta list 필드 + commit_recording 가
+        녹화 lifecycle metadata (recording_session_id, started_at, stopped_at,
+        duration_sec, raw_event_count, transformed_step_count, dropped_event_count,
+        committed_at, committed_step_ids) 채움. 사용자 사후 분석 / 디버깅용.
+
+        가드:
+        1. ``_capture_modifier_state()`` 가 Ctrl/Shift/Alt/Win 인식
+        2. ``_MODIFIER_VK_CODES`` 가 Ctrl/Shift/Alt/Win + L/R variants 포함
+        3. ``_emit_key_group`` 이 Ctrl+A → ``pyautogui.hotkey('ctrl', 'a')`` 변환
+        4. ``_emit_key_group`` 이 Ctrl+Shift+Tab → ``hotkey('ctrl', 'shift', 'tab')``
+        5. modifier 자체 키 (Ctrl 눌림) 는 단독 emit 안 함
+        6. modifier 없는 일반 키는 기존 text/special 로직 보존 (회귀 가드)
+        7. ``Session.recording_meta`` field 존재 + 기본값 [] (빈 list)
+        8. ``commit_recording`` 가 metadata entry append (committed_step_ids 포함)
+        """
+        from dataclasses import fields
+        from datetime import datetime
+
+        from core.app_service import AppService
+        from core.input_hooks import MouseEvent
+        from core.recorder import _capture_modifier_state
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import _MODIFIER_VK_CODES, transform
+        from core.session_manager import Session
+        from core.storage.in_memory import InMemoryRepository
+
+        self.step("(1) _capture_modifier_state callable + list 반환")
+        mods = _capture_modifier_state()
+        self.assert_true(
+            isinstance(mods, list),
+            f"[PR-19f] _capture_modifier_state list 반환. 실제: {mods!r}",
+        )
+
+        self.step("(2) _MODIFIER_VK_CODES 가 Ctrl/Shift/Alt/Win + L/R variants 포함")
+        for vk, name in [
+            (0x10, "VK_SHIFT"),
+            (0x11, "VK_CONTROL"),
+            (0x12, "VK_MENU(Alt)"),
+            (0x5B, "VK_LWIN"),
+            (0x5C, "VK_RWIN"),
+            (0xA0, "VK_LSHIFT"),
+            (0xA2, "VK_LCONTROL"),
+            (0xA4, "VK_LMENU"),
+        ]:
+            self.assert_true(
+                vk in _MODIFIER_VK_CODES,
+                f"[PR-19f] _MODIFIER_VK_CODES 에 {name} (0x{vk:02X}) 포함 필수",
+            )
+
+        self.step("(3) Ctrl+A → pyautogui.hotkey('ctrl', 'a') 변환")
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                button="left",
+                element_meta={"control_type": "Document", "name": "Editor", "window_title": "App"},
+            )
+        )
+        sess.events.append(
+            RawEvent(ts=datetime.now(), kind="key", vk_code=0x11, modifiers=["ctrl"])
+        )
+        sess.events.append(
+            RawEvent(ts=datetime.now(), kind="key", vk_code=0x41, modifiers=["ctrl"])
+        )
+        steps = transform(sess)
+        self.assert_true(len(steps) == 1, f"[PR-19f] 1 click+1 hotkey → 1 step. 실제: {len(steps)}")
+        code = steps[0].generated_code
+        self.assert_true(
+            "pyautogui.hotkey('ctrl', 'a')" in code,
+            f"[PR-19f] Ctrl+A → hotkey 변환. 실제 code:\n{code}",
+        )
+        self.assert_true(
+            "pyautogui.write('a')" not in code,
+            f"[PR-19f] Ctrl+A 시 pyautogui.write('a') emit 회귀 금지. 실제:\n{code}",
+        )
+
+        self.step("(4) Ctrl+Shift+Tab → pyautogui.hotkey('ctrl', 'shift', 'tab')")
+        sess2 = RecordingSession(id="t2", started_at=datetime.now())
+        sess2.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                button="left",
+                element_meta={"control_type": "Edit", "name": "I", "window_title": "App"},
+            )
+        )
+        sess2.events.append(
+            RawEvent(ts=datetime.now(), kind="key", vk_code=0x11, modifiers=["ctrl"])
+        )
+        sess2.events.append(
+            RawEvent(ts=datetime.now(), kind="key", vk_code=0x10, modifiers=["ctrl", "shift"])
+        )
+        sess2.events.append(
+            RawEvent(ts=datetime.now(), kind="key", vk_code=0x09, modifiers=["ctrl", "shift"])
+        )
+        steps2 = transform(sess2)
+        code2 = steps2[0].generated_code
+        self.assert_true(
+            "pyautogui.hotkey('ctrl', 'shift', 'tab')" in code2,
+            f"[PR-19f] Ctrl+Shift+Tab hotkey 변환. 실제:\n{code2}",
+        )
+
+        self.step("(5) modifier 자체 키 (Ctrl 단독 keydown) 는 emit 안 함")
+        sess3 = RecordingSession(id="t3", started_at=datetime.now())
+        sess3.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                button="left",
+                element_meta={"control_type": "Edit", "name": "I", "window_title": "App"},
+            )
+        )
+        sess3.events.append(
+            RawEvent(ts=datetime.now(), kind="key", vk_code=0x11, modifiers=["ctrl"])
+        )
+        steps3 = transform(sess3)
+        code3 = steps3[0].generated_code
+        self.assert_true(
+            "hotkey" not in code3 and "press" not in code3 and ".write(" not in code3,
+            f"[PR-19f] modifier 단독 keydown 은 key emit 0. 실제:\n{code3}",
+        )
+
+        self.step("(6) modifier 없는 일반 키 기존 로직 보존 (회귀)")
+        sess4 = RecordingSession(id="t4", started_at=datetime.now())
+        sess4.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                button="left",
+                element_meta={"control_type": "Edit", "name": "I", "window_title": "App"},
+            )
+        )
+        for vk in (0x48, 0x49):
+            sess4.events.append(RawEvent(ts=datetime.now(), kind="key", vk_code=vk))
+        sess4.events.append(RawEvent(ts=datetime.now(), kind="key", vk_code=0x0D))
+        steps4 = transform(sess4)
+        code4 = steps4[0].generated_code
+        self.assert_true(
+            "pyautogui.write('hi')" in code4 and "pyautogui.press('enter')" in code4,
+            f"[PR-19f] 일반 키 회귀 가드. 실제:\n{code4}",
+        )
+
+        self.step("(7) Session.recording_meta field 존재 + default []")
+        field_names = {f.name for f in fields(Session)}
+        self.assert_true(
+            "recording_meta" in field_names,
+            f"[PR-19f] Session.recording_meta field 필수. 실제: {field_names}",
+        )
+        self.assert_true(
+            Session().recording_meta == [],
+            f"[PR-19f] Session.recording_meta default []. 실제: {Session().recording_meta!r}",
+        )
+
+        self.step("(8) commit_recording 가 metadata entry append")
+        repo = InMemoryRepository()
+        svc = AppService(session_repo=repo)
+        svc.start_recording()
+        svc._recorder._element_capture_fn = lambda x, y: {
+            "control_type": "Button",
+            "name": "OK",
+            "window_title": "App",
+        }
+        svc._recorder._on_mouse_event(MouseEvent(type="lbutton_down", x=10, y=20))
+        svc._recorder.wait_for_event_count(1, timeout=1.0)
+        committed_steps = svc.stop_recording()
+        session = svc.commit_recording(committed_steps)
+        self.assert_true(
+            isinstance(session.recording_meta, list) and len(session.recording_meta) == 1,
+            f"[PR-19f] 1 commit → 1 metadata entry. 실제: {session.recording_meta!r}",
+        )
+        meta_entry = session.recording_meta[0]
+        for key in (
+            "recording_session_id",
+            "started_at",
+            "stopped_at",
+            "raw_event_count",
+            "transformed_step_count",
+            "committed_at",
+            "committed_step_ids",
+        ):
+            self.assert_true(
+                key in meta_entry,
+                f"[PR-19f] metadata 에 {key!r} 필드 필수. 실제 keys: {list(meta_entry.keys())}",
+            )
+        self.assert_true(
+            meta_entry["raw_event_count"] == 1
+            and meta_entry["transformed_step_count"] == len(committed_steps)
+            and meta_entry["committed_step_ids"] == [1],
+            f"[PR-19f] metadata 값 정확. 실제: {meta_entry!r}",
+        )
+
+    def test_194_uwp_popup_dismiss_overlay_filter(self):
+        """[PR-19g 2026-05-24] 사용자 실측 v2-새세션-005917 발견: UWP popup overlay
+        invisible click receptor (automation_id="Light Dismiss" + class_name="PopupRoot")
+        가 EFP 로 잡혀 step 생성 → 재생성 시 fallback chain 의 title="닫기" 매칭이
+        메모장의 진짜 X 버튼 클릭 → 메모장 종료 → 후속 step 모두 connect 실패.
+
+        Fix: ``_filter_noise`` 가 이 시그니처 click event 자동 drop.
+
+        가드:
+        1. ``_is_uwp_popup_dismiss_overlay`` helper 가 시그니처 감지
+        2. transform 이 PopupRoot/Light Dismiss click drop
+        3. 일반 "닫기" Button (다른 class_name) 은 보존 (회귀 안전망)
+        4. element_meta None / 빈 dict 도 helper 안전 처리
+        5. 시그니처 mixed case / 공백 매칭 (auto_id="LIGHT DISMISS" 같이)
+        """
+        from datetime import datetime
+
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import _is_uwp_popup_dismiss_overlay, transform
+
+        self.step("(1) _is_uwp_popup_dismiss_overlay 가 시그니처 감지")
+        self.assert_true(
+            _is_uwp_popup_dismiss_overlay(
+                {"automation_id": "Light Dismiss", "class_name": "PopupRoot"}
+            ),
+            "[PR-19g] auto_id=Light Dismiss + class=PopupRoot → True",
+        )
+        self.assert_true(
+            _is_uwp_popup_dismiss_overlay({"automation_id": "Light Dismiss"}),
+            "[PR-19g] auto_id 만 매칭해도 True (UWP 시그니처 단독)",
+        )
+        self.assert_true(
+            _is_uwp_popup_dismiss_overlay({"class_name": "PopupRoot"}),
+            "[PR-19g] class_name 만 매칭해도 True",
+        )
+        self.assert_true(
+            _is_uwp_popup_dismiss_overlay(
+                {"automation_id": "LIGHT DISMISS", "class_name": "PopupRoot"}
+            ),
+            "[PR-19g] case insensitive 매칭",
+        )
+
+        self.step("(2) None / 빈 dict / 일반 element 는 False (회귀 가드)")
+        self.assert_true(
+            not _is_uwp_popup_dismiss_overlay(None),
+            "[PR-19g] None 안전 → False",
+        )
+        self.assert_true(
+            not _is_uwp_popup_dismiss_overlay({}),
+            "[PR-19g] 빈 dict → False",
+        )
+        self.assert_true(
+            not _is_uwp_popup_dismiss_overlay(
+                {
+                    "automation_id": "normalCloseBtn",
+                    "class_name": "WindowButton",
+                    "name": "닫기",
+                }
+            ),
+            "[PR-19g] 일반 닫기 Button (다른 class) → False (회귀 안전망)",
+        )
+
+        self.step("(3) transform 이 PopupRoot click drop + 정상 click 보존")
+        sess = RecordingSession(id="t", started_at=datetime.now())
+        # Step 1 — 정상 Document 클릭
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=100,
+                y=100,
+                button="left",
+                element_meta={
+                    "control_type": "Document",
+                    "name": "Editor",
+                    "class_name": "RichEditD2DPT",
+                    "window_title": "App",
+                },
+            )
+        )
+        # Step 2 (drop 대상) — UWP popup dismiss overlay
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=200,
+                y=200,
+                button="left",
+                element_meta={
+                    "control_type": "Button",
+                    "name": "닫기",
+                    "automation_id": "Light Dismiss",
+                    "class_name": "PopupRoot",
+                    "window_title": "App",
+                },
+            )
+        )
+        # Step 3 — 정상 다른 Document 클릭
+        sess.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=150,
+                y=150,
+                button="left",
+                element_meta={
+                    "control_type": "Document",
+                    "name": "Editor2",
+                    "class_name": "RichEditD2DPT",
+                    "window_title": "App",
+                },
+            )
+        )
+        steps = transform(sess)
+        self.assert_true(
+            len(steps) == 2,
+            f"[PR-19g] 3 클릭 (1 overlay drop) → 2 step. 실제: {len(steps)}",
+        )
+        for st in steps:
+            self.assert_true(
+                "Light Dismiss" not in st.user_request
+                and (
+                    st.element_meta is None
+                    or st.element_meta.get("automation_id") != "Light Dismiss"
+                ),
+                f"[PR-19g] step 의 user_request / element_meta 에 Light Dismiss 없음. "
+                f"실제: {st.user_request!r}",
+            )
+
+        self.step("(4) 일반 '닫기' Button (다른 class) 는 step 으로 보존")
+        sess2 = RecordingSession(id="t2", started_at=datetime.now())
+        sess2.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=100,
+                y=100,
+                button="left",
+                element_meta={
+                    "control_type": "Button",
+                    "name": "닫기",
+                    "automation_id": "normalCloseBtn",
+                    "class_name": "WindowButton",
+                    "window_title": "App",
+                },
+            )
+        )
+        steps2 = transform(sess2)
+        self.assert_true(
+            len(steps2) == 1 and "닫기" in steps2[0].user_request,
+            f"[PR-19g] 일반 닫기 버튼 step 보존. 실제: {steps2!r}",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 

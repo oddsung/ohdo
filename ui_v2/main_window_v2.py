@@ -164,6 +164,82 @@ GLOBAL_QSS = f"""
 """
 
 
+# ── PR-19d helper (2026-05-24) — 녹화 step 의 element_meta 활용 재생성 ───
+
+
+_BROWSER_EXE_NAMES = frozenset(
+    {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "iexplore.exe"}
+)
+
+
+def _lookup_step_element_meta(session, step_id: int) -> Optional[dict]:
+    """``session.steps`` 에서 ``step_id`` 의 ``element_meta`` 찾기.
+
+    PR-19d (2026-05-24): 녹화 step 재생성 시 selector / window 정보를 AI 에
+    전달하기 위해 호출. ``Session.steps`` 는 직렬화 path 에 따라 ``dict`` 또는
+    ``Step`` dataclass 일 수 있어 양쪽 모두 안전 처리.
+    """
+    for sd in getattr(session, "steps", []) or []:
+        if isinstance(sd, dict):
+            if sd.get("step_id") == step_id:
+                return sd.get("element_meta")
+        else:
+            if getattr(sd, "step_id", None) == step_id:
+                return getattr(sd, "element_meta", None)
+    return None
+
+
+def _recorder_meta_to_picker_dict(meta: dict) -> dict:
+    """recorder ``element_inspect`` dict → ``win_inspector`` picker dict 변환.
+
+    PR-19d (2026-05-24): recorder 가 채우는 필드는 picker 형식과 약간 다름:
+    - recorder: ``window_title`` (top-level), ``rect`` list [l, t, r, b]
+    - picker: ``parent_window_title``, ``rect`` dict {left, top, width, height},
+      ``recommended_backend``, ``is_browser``, ``screen_x/y``
+
+    재생성 path 가 ``win_inspector.get_element_info_text(e)`` 호출하므로 picker
+    형식으로 정규화 필요. exe_name 으로 brower 추론.
+    """
+    rect = meta.get("rect")
+    if isinstance(rect, (list, tuple)) and len(rect) == 4:
+        left, top, right, bottom = (int(v) for v in rect)
+        rect_dict = {
+            "left": left,
+            "top": top,
+            "width": right - left,
+            "height": bottom - top,
+        }
+        screen_x = (left + right) // 2
+        screen_y = (top + bottom) // 2
+    elif isinstance(rect, dict):
+        rect_dict = dict(rect)
+        screen_x = int(rect.get("left", 0)) + int(rect.get("width", 0)) // 2
+        screen_y = int(rect.get("top", 0)) + int(rect.get("height", 0)) // 2
+    else:
+        rect_dict = {}
+        screen_x = 0
+        screen_y = 0
+
+    exe = (meta.get("exe_name") or "").lower()
+    is_browser = exe in _BROWSER_EXE_NAMES
+
+    return {
+        "control_type": meta.get("control_type") or "",
+        "name": meta.get("name") or "",
+        "automation_id": meta.get("automation_id") or "",
+        "class_name": meta.get("class_name") or "",
+        "rect": rect_dict,
+        "parent_window_title": meta.get("window_title") or "",
+        "parent_window_class": "",
+        "parent_window_control_type": "",
+        "screen_x": screen_x,
+        "screen_y": screen_y,
+        "is_browser": is_browser,
+        "detected_backend": "uia",
+        "recommended_backend": "uia",
+    }
+
+
 # ── 시그널 허브 (스레드 → main thread) ──────────────────────────────
 
 
@@ -3195,14 +3271,22 @@ class MainWindowV2(QMainWindow):
         """D17: 사용자 요청 클릭 → 토스트 confirm → AppService.generate_step 재호출.
 
         주의: 5초 안에 사용자 응답 없으면 토스트 자동 사라짐 = cancel (D17 결정).
+
+        PR-19d (2026-05-24): pending elements 가 비어 있을 때 — target step 이
+        녹화로 생성된 거면 (Step.element_meta 채워져 있음) recorder element_meta 를
+        picker 형식으로 변환해 AI 에게 selector / window 정보 전달.
         """
         preview = user_request[:60] + ("..." if len(user_request) > 60 else "")
 
         def do_regenerate():
             self._log(tr("ui_v2.log.step_regenerate", step_id=step_id, preview=preview))
-            # 재생성 시점엔 pending elements 가 비어있을 가능성 — None 그대로.
-            # 사용자가 새 element 선택했으면 self._pending_elements 사용.
+            # 1순위: 사용자가 새로 picker 로 선택한 elements
             elems = list(self._pending_elements) if self._pending_elements else None
+            # 2순위 (PR-19d): 녹화 step 의 element_meta 활용
+            if not elems and self.current_session:
+                recorder_meta = _lookup_step_element_meta(self.current_session, step_id)
+                if recorder_meta:
+                    elems = [_recorder_meta_to_picker_dict(recorder_meta)]
             self._send_request(user_request, images=None, elements=elems)
 
         self._toast(

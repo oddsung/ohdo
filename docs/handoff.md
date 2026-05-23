@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-23 (5/4~5/23 작업 — 자세한 변경은 §5 변경 이력 + §11~§24 인계 노트 참조). baseline: **core 186/186 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준 — PR-11~18 = +37 + GUI 실측 1차 fix +5 (test_182~186) = 144→186). **2026-05-20~23 사용자 GUI 실측 1차 — 녹화 lifecycle 6 fix 완료** (test_182~186). 다음 세션 주제 (사용자 명시): **녹화 → Python 코드 생성 과정 개선** (recorder_transform 의 deterministic 코드 품질). 자세한 §24 "다음 세션 출발점" + §25 신규. **2026-05-19 사용자 결정 — TS UI 트랙 진행 순서**: ① GUI 실측 (진행 중) → ② AppService API 보강 → ③ 2~3주 뒤 PR-19 (FastAPI 라우터) + PR-20 (Vite + React + TS, web_ui/). **풀 TS 재작성 X — recorder/element_picker/win_inspector 는 Python 유지**, TS 는 UI 레이어만. **5/19 (오후): ADR 0004 Phase R2 PR-18 완료 — DPI/멀티모니터 안정화. `core/input_hooks.py` 에 `ensure_dpi_awareness()` (SetProcessDpiAwarenessContext PER_MONITOR_AWARE_V2 우선, SHCore SetProcessDpiAwareness fallback) + `get_dpi_for_point(x, y)` (MonitorFromPoint + GetDpiForMonitor) helper 추가. `get_hook_manager()` 가 idempotent 로 매 호출 ensure_dpi_awareness 트리거. drain thread 가 click event 의 `monitor_dpi` 캡처 (RawEvent 새 필드). `recorder_transform` 의 fallback `pyautogui.click(x, y)` 에 비표준 DPI 시 코멘트 첨부 (`# captured at DPI=144 (150%)`). **R2 완료 — PR-16w + PR-17 + PR-18 모두 완료.** 자세한 §24.** **5/19 (오전): PR-17 마이그레이션 모드 event queue + async EFP. LL hook callback 은 RawEvent 생성 + 큐 enqueue 만 (sub-ms, fast return). 별도 drain thread 가 큐를 빼며 element_capture_fn 호출 + session.events 적재. Windows ~300ms LL hook 타임아웃 안전 + 빠른 자동화 스크립트 (Power Automate / pywinauto / AutoHotkey) 입력 따라잡기 가능.** **5/18: ADR 0004 Phase R2 PR-16w 완료 — 창 포커스 자동 경계 (SetWinEventHook EVENT_SYSTEM_FOREGROUND + SKIPOWNPROCESS) + F8 키보드 hook 에서 marker 자동 변환. PR-13 의 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 가 비로소 end-to-end 작동 (이전엔 PR-13 에서 분리 로직만 구현되어 있었고 캡처 path 가 없어서 dead code 였음). 자세한 §24.** **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
+> 마지막 업데이트: 2026-05-24 (5/4~5/24 작업 — 자세한 변경은 §5 변경 이력 + §11~§27 인계 노트 참조). baseline: **core 194/194 + scenarios 73/73 그린** (PySide6 단독 `.venv` 기준 — PR-11~18 = +37 + GUI 실측 1차 fix +5 (test_182~186) + PR-19a-g +8 (test_187~194) = 144→194). **2026-05-23~24 PR-19a → PR-19g 7개 fix 모두 완료, 사용자 GUI 실측 검증 통과** — 녹화 + 입력 + 실행 흐름이 처음으로 사용자 의도대로 동작. (a) PR-19a `core/pywinauto_codegen.py` helper 추출 + recorder 통합. (b) PR-19d `Step.element_meta` 보존 + AI 재생성 path adapter (PR-19d 의 hybrid mode 는 미테스트 — 옵션 3 후속). (c) PR-19e `_safe_str_literal` (json.dumps escape) — Win11 메모장 Document name 의 `\r` SyntaxError 회귀 차단 + `_build_connect_block` 이 `process_id` 우선 connect chain (탭 이름만 잡힌 case 처리). (d) **PR-19f modifier 키 인식 — Ctrl+A 등 hotkey 변환** (recorder 가 `GetAsyncKeyState` 로 modifier 캡처 → RawEvent.modifiers 채움; transform 이 `pyautogui.hotkey('ctrl', 'a')` emit). Session.recording_meta list 필드 + commit_recording metadata 보존. (e) **PR-19g UWP `Light Dismiss` / `PopupRoot` noise filter** — 메모장 닫힘 회귀 차단 (실측 v2-새세션-005917). 자세한 §27 신규. **다음 (사용자 옵션)**: 옵션 3 실증 (AI 재생성 vs deterministic 비교) / PR-19h destructive action UX / PR-19b F-6 dedup / PR-19c idle wait. **2026-05-23 PR-19a 완료 — recorder_transform 코드 품질 1차**: 자세한 §26. **2026-05-20~23 사용자 GUI 실측 1차 — 녹화 lifecycle 6 fix 완료** (test_182~186). 자세한 §24 "다음 세션 출발점" + §25. **2026-05-19 사용자 결정 — TS UI 트랙 진행 순서**: ① GUI 실측 (진행 중) → ② AppService API 보강 → ③ 2~3주 뒤 PR-19 (FastAPI 라우터) + PR-20 (Vite + React + TS, web_ui/). **풀 TS 재작성 X — recorder/element_picker/win_inspector 는 Python 유지**, TS 는 UI 레이어만. **5/19 (오후): ADR 0004 Phase R2 PR-18 완료 — DPI/멀티모니터 안정화. `core/input_hooks.py` 에 `ensure_dpi_awareness()` (SetProcessDpiAwarenessContext PER_MONITOR_AWARE_V2 우선, SHCore SetProcessDpiAwareness fallback) + `get_dpi_for_point(x, y)` (MonitorFromPoint + GetDpiForMonitor) helper 추가. `get_hook_manager()` 가 idempotent 로 매 호출 ensure_dpi_awareness 트리거. drain thread 가 click event 의 `monitor_dpi` 캡처 (RawEvent 새 필드). `recorder_transform` 의 fallback `pyautogui.click(x, y)` 에 비표준 DPI 시 코멘트 첨부 (`# captured at DPI=144 (150%)`). **R2 완료 — PR-16w + PR-17 + PR-18 모두 완료.** 자세한 §24.** **5/19 (오전): PR-17 마이그레이션 모드 event queue + async EFP. LL hook callback 은 RawEvent 생성 + 큐 enqueue 만 (sub-ms, fast return). 별도 drain thread 가 큐를 빼며 element_capture_fn 호출 + session.events 적재. Windows ~300ms LL hook 타임아웃 안전 + 빠른 자동화 스크립트 (Power Automate / pywinauto / AutoHotkey) 입력 따라잡기 가능.** **5/18: ADR 0004 Phase R2 PR-16w 완료 — 창 포커스 자동 경계 (SetWinEventHook EVENT_SYSTEM_FOREGROUND + SKIPOWNPROCESS) + F8 키보드 hook 에서 marker 자동 변환. PR-13 의 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 가 비로소 end-to-end 작동 (이전엔 PR-13 에서 분리 로직만 구현되어 있었고 캡처 path 가 없어서 dead code 였음). 자세한 §24.** **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -1841,3 +1841,183 @@ def commit_recording(edited_steps, target_session_id=None, new_session_title=Non
 7. **review dialog 의 코드 편집 보강** — 사용자가 review 단계에서 직접 코드 수정/구조 변경하기 쉽게 UX 개선
 
 권장 시작 영역: **F-6 동일 코드 step dedup** + **3 win_inspector 통합** — 가장 작은 변경으로 가장 큰 효과 (확실한 회귀 가드 작성 가능). 그 다음 정성적 개선들.
+
+→ **2026-05-23 진행 결정 (사용자 align)**: 위 7개 영역을 PR 단위로 끊어 진행 — PR-19a (win_inspector 통합) → PR-19b (F-6 dedup) → PR-19c (idle gap → wait_after_ms). 각 PR 마다 사용자 GUI 실측 검증 후 다음으로. PR-19a 완료 — 자세한 §26.
+
+## 26. 2026-05-23 PR-19a — recorder_transform 코드 품질 1차 (pywinauto_codegen 추출)
+
+**컨텍스트**: §25 의 다음 세션 주제 "녹화 → Python 코드 생성 과정 개선" 1차 진입. 7개 후보 중 사용자 align (2026-05-23) 으로 **win_inspector 통합 → F-6 dedup → idle wait** 순서, 각 PR 마다 GUI 실측 검증. PR-19a 는 가장 큰 회귀 차단 효과 + 후속 PR 의 베이스 (`pywinauto_codegen.py` helper 모듈) 갖춤.
+
+### 문제 — recorder_transform 의 6줄 minimal 코드 회귀
+
+- 이전 `core/recorder_transform.py::_pywinauto_click_code` 가 단 3줄 emit:
+  ```python
+  app = Application(backend="uia").connect(title_re='.*<full_window_title>.*')
+  win = app.top_window()
+  win.child_window(...).click_input()
+  ```
+- **문제 1 (메모장 등 동적 title)**: `window_title` 전체를 `title_re=".*{title}.*"` 에 hardcode → "*hello world - 메모장" 같은 title 이면 재실행 시 "*다른 메모 - 메모장" 매칭 실패.
+- **문제 2 (DPI 미설정)**: pywinauto ↔ pyautogui 좌표 불일치. picker (uia) 로 잡은 좌표 = logical, pyautogui = physical (DPI 인식 안 되어 있으면).
+- **문제 3 (selector 단일 시도)**: control_type 잘못 분류된 경우 (Text 라벨 vs Button) 전체 fail.
+- **문제 4 (창 활성화 누락)**: minimized 창에 직접 click_input 시 hit-test 실패.
+- **문제 5 (leaf 캡처)**: picker 가 Text/Image 같은 leaf 잡은 경우 click 무반응 (UWP/XAML 메뉴 등 사용자 보고 5/5).
+- **win_inspector 에는 이미 다 해결되어 있음** — `_get_desktop_element_info_text` 가 program_name `.*메모장` 매칭 + DPI Awareness + selector fallback chain + 창 활성화 + walk_up to clickable parent + pyautogui PRIMARY click 까지 robust 코드 emit. 하지만 markdown (AI 프롬프트 컨텍스트) 안에 갇혀 있어 recorder 가 재사용 못 함.
+
+### 해결 — pure helper 추출 + 단일 source of truth
+
+**신규 모듈 `core/pywinauto_codegen.py`** (336줄, pure helper). 단일 entry point:
+
+```python
+def build_pywinauto_click_code(meta: dict, button: str = "left") -> str:
+    """element 메타 → 실행 가능한 pywinauto + pyautogui click 코드 (str)."""
+```
+
+emit 되는 코드 구조 (~70줄/click):
+
+1. **DPI Awareness** — `SetProcessDpiAwarenessContext` PER_MONITOR_AWARE_V2 우선, shcore.SetProcessDpiAwareness fallback. `pyautogui.FAILSAFE = False`.
+2. **Application.connect** — 비브라우저는 `window_title.split(" - ")[-1]` (program_name) 만 `re.escape` → `title_re=".*<프로그램명>"` (메모장처럼 동적 title 안전). 브라우저 (`is_browser_process=True`) 는 full title hardcode + `found_index=0`.
+3. **Element selector** — 우선순위: (1) name+auto_id(non-dynamic)+ctrl_type 결합, (2) name+ctrl_type, (3) auto_id+ctrl_type, (4) class_name+ctrl_type, ..., (8) ctrl_type only.
+4. **Selector fallback chain** (`_resolve_element()`) — primary fail 시 (a) title only, (b) title_re 정규식, (c) ctrl_type only 순으로 시도.
+5. **창 활성화** — `IsIconic` → SW_RESTORE (minimized 일 때만, maximized 보존) / SW_SHOW, `BringWindowToTop`, `SetForegroundWindow`, `time.sleep(0.5)`.
+6. **walk_up to clickable parent** — `_clickable_types = {'Button', 'MenuItem', ...}` set, 6단계 limit, 부모가 win.handle 이면 stop.
+7. **Dynamic rect → center 좌표** — 창 활성화 후 최신 좌표 사용.
+8. **pyautogui PRIMARY + element fallback** — `pyautogui.click(center_x, center_y[, button='right'])` 우선 (UWP/XAML/Win32 좌표 hit-test 가 가장 안정), 실패 시 `click_target.click_input()` / `right_click_input()` 폴백.
+
+### 코드 변경
+
+- **`core/pywinauto_codegen.py`** (신규, 336줄) — helper + 내부 sub-builders (`_build_element_selector`, `_build_connect_lines`, `_build_fallback_lambdas`).
+- **`core/recorder_transform.py::_pywinauto_click_code`** — 22줄 → 11줄. helper 호출 위임 + docstring 에 PR-19a 변경 설명.
+- **`core/win_inspector.py`** — **변경 없음** (의도적 분리, PR-19a' 로). 단순 helper 호출로 교체 시 inline AI-targeted commentary (DPI 설명, ★ 강조, 사용자 보고 5/5 회고, WindowFromPoint 디버그 체크, print() 출력) 손실 → AI 코드 생성 품질 회귀 risk. sentinel test_189 로 일관성만 보장.
+
+### 회귀 가드 (test_187/188/189, 3 신규)
+
+- **test_187 `pywinauto_codegen_helper_core_patterns`** (11 step) — helper 자체 검증:
+  1. 메모장 케이스 `title_re='.*메모장'` (full title hardcode X)
+  2. 브라우저 케이스 full title + `found_index=0`
+  3. DPI Awareness 코드 포함
+  4. `Application(...)` unqualified (`pywinauto.Application` 금지, test_182 회귀 가드 통합)
+  5. `_resolve_element` fallback chain
+  6. 창 활성화 3 신호 (`BringWindowToTop`, `SetForegroundWindow`, `IsIconic`)
+  7. walk_up (`_clickable_types`, `_cur.parent()`)
+  8. pyautogui PRIMARY + click_input fallback (try/except 이중)
+  9. right button → `right_click_input` + `button='right'` 인자
+  10. name+auto_id(non-dynamic) 결합 selector (recorder baseline)
+  11. 동적 (숫자만) auto_id 는 primary selector 에서 제외
+- **test_188 `recorder_transform_delegates_to_pywinauto_codegen`** — recorder 가 helper 위임:
+  1. `from core.pywinauto_codegen import build_pywinauto_click_code` import 명시
+  2. `_pywinauto_click_code` source 가 `build_pywinauto_click_code(` 호출
+  3. end-to-end `transform()` 결과에 helper 핵심 패턴 7개 (DPI / title_re / `_resolve_element` / BringWindowToTop / `_clickable_types` / pyautogui PRIMARY / click_input fallback) + "untitled" 같은 동적 부분 hardcode 회귀 가드
+- **test_189 `win_inspector_pywinauto_codegen_sentinel_consistency`** — divergence 방지 sentinel:
+  - `win_inspector._get_desktop_element_info_text` source + helper output 양쪽 모두에 7개 공통 패턴 (DPI 2개, `_resolve_element`, `_clickable_types`, `BringWindowToTop`, `SetForegroundWindow`, pyautogui PRIMARY) 존재 검증
+  - 양쪽 모두 fully qualified `pywinauto.Application` emit 안 함 (anti-pattern)
+  - win_inspector 가 PR-19a' 에서 helper 호출로 교체되면 이 sentinel 은 자동 만족
+
+### 검증 결과
+
+- **core 189/189** (186 + 3 PR-19a) + scenarios 73/73 그린
+- ruff check + format All passed (56 files)
+- 기존 test_153/158/182 (recorder_transform 기존 contract) + test_15 (win_inspector 데스크톱 코드 생성) 모두 그린 유지
+
+### 사용자 GUI 실측 검증 가이드
+
+`.venv\Scripts\python.exe main.py --ui v2` 띄워 다음 시나리오 녹화 + step 실행:
+
+1. **메모장 동적 title 케이스** — 메모장에 "테스트 1" 입력 후 녹화 시작 → 메뉴 "파일" 클릭 → 녹화 stop → review 통해 commit → 같은 메모장 (또는 새 메모장 "다른 내용") 에서 step 실행 → "파일" 메뉴 열림 확인 (이전엔 full title hardcode 로 실패했어야 함).
+2. **계산기 / 시작메뉴** — UWP 앱 단순 시나리오. walk_up + pyautogui PRIMARY 가 정상 동작 확인.
+3. **권한 차이 앱 (관리자 권한 cmd)** — pyautogui PRIMARY 가 UIPI 우회. click_input fallback 도 동작 확인 (옵션).
+4. **브라우저 (Chrome)** — `is_browser_process` 가 채워지지 않으므로 (element_inspect 가 캡처 안 함) 비브라우저 path 로 떨어짐. full Chrome title 이 program_name `Chrome` 으로 줄어들어 매칭됨. (R3 / 후속 PR 에서 element_inspect 보강 필요)
+
+### 다음 세션 (사용자 검증 후)
+
+**PR-19b — F-6 동일 element 두 번 클릭 dedup**: `_split_into_batches` 가 이미 동일 element 인접 click 을 같은 batch 로 유지. `_emit_click` 이 batch 안 n번 동일 element click 감지 시 `click_input(double=True)` 또는 `pyautogui.doubleClick` 생성. RawEvent 의 `click_count` 필드 활용 (이미 정의됨, LL hook 캡처 검증 필요).
+
+**PR-19c — idle gap → step.wait_after_ms 충전** (옵션): `_split_into_batches` 가 `idle_boundary_ms` 로 batch 분리 시, previous step 의 `wait_after_ms` 에 gap 충전 → 사용자 의도 (step 간 호흡) 보존.
+
+## 27. 2026-05-23~24 PR-19d → PR-19g — 사용자 GUI 실측 반복으로 녹화 코드 품질 종합 fix (test_190~194)
+
+**컨텍스트**: §26 PR-19a 완료 후 사용자가 실측 (메모장 등에서 click/key 녹화 + 실행) 반복하며 발견한 5 가지 별개 문제 + 1 quality 기능. 매 fix 마다 사용자가 GUI 에서 재현 → 다음 PR. 최종적으로 v2-새세션-005917 의 다음 녹화에서 **"텍스트 입력 + 단축키 + 마우스 클릭 모두 정상 동작"** 사용자 확인.
+
+### PR-19d (option 3 옵션) — Step.element_meta 보존 + AI 재생성 path adapter
+
+**컨텍스트**: PR-19a 완료 후 사용자가 "녹화로 deterministic 코드 생성 vs AI 통해 step 별 코드 생성, 어느 게 더 robust 한가" 가설 제기. 옵션 3 (하이브리드) 실증 위해 녹화 step 의 element 정보를 AI 재생성 path 에 전달할 수 있어야 함.
+
+**문제**: 녹화 step 의 element 정보는 generated_code 안에 hardcode 만 됨 — 구조화된 형태로 Step 객체에 안 남음. ohdo 기존 step regenerate path (`_on_regenerate` → `_send_request(..., elements=None)`) 는 `self._pending_elements` (F3 picker 결과) 만 사용. 녹화 step 에서는 비어 있음 → AI 는 `user_request` 텍스트만 받음 → selector / window 정보 0.
+
+**Fix**:
+- `Step.element_meta: Optional[dict] = None` 필드 추가 (`core/session_manager.py`). 백워드 호환 — 녹화 안 거친 step 은 None.
+- `recorder_transform._batch_to_step` 가 batch 의 첫 click element_meta 를 Step.element_meta 에 보존.
+- ui_v2 module helper 2개 추가 (`main_window_v2.py` 모듈 상단):
+  - `_lookup_step_element_meta(session, step_id) -> Optional[dict]` — dict / dataclass Step 양쪽 처리.
+  - `_recorder_meta_to_picker_dict(meta) -> dict` — recorder element_inspect 필드 (`window_title`, rect list, exe_name) → win_inspector picker 형식 (`parent_window_title`, rect dict, `is_browser` exe 추론, default backend) 변환.
+- `_on_regenerate` 가 pending elements 비었을 때 step.element_meta lookup → adapter 통과 → `_send_request(elements=[picker_dict])` 전달. AI 가 element_context 받음.
+
+**검증**: 코드 path + adapter end-to-end 동작 확인 (recorder dict → picker → win_inspector markdown 에 selector 정보 포함). **단, 실제 AI 호출 통한 옵션 3 비교 실증은 사용자 미테스트 — 후속 (B 단계)**.
+
+### PR-19e — `_safe_str_literal` escape + process_id 우선 connect chain (test_192)
+
+**컨텍스트**: 사용자 실측 v2-새세션-000727 → 6/6 모두 fail. 두 가지 별개 버그.
+
+**문제 1 — SyntaxError**: Win11 메모장 Document 본문이 element name 으로 잡힘 (`"1111\r2222\r3333\r"`). `_build_element_selector` 가 raw f-string interpolation 으로 박음 → `compile()` 단계에서 `SyntaxError: unterminated string literal`.
+
+**문제 2 — ElementNotFoundError**: `Application.connect(title_re='.*데스크톱 1', ...)` 가 매칭 실패. "데스크톱 1" 은 Win11 메모장의 **탭 이름** (XAML 중간 노드) 이지 진짜 top-level window title 이 아님. element_inspect 의 `_resolve_top_window_title` 이 탭 노드에서 멈춤.
+
+**Fix**:
+- `_safe_str_literal(s)` helper (`json.dumps(s, ensure_ascii=False)`) — double quote 형식 + 모든 control char (CR/LF/tab/backslash/quote) 안전 escape + unicode literal 유지. 기존 test sentinel `title="검색"` 호환.
+- `_build_element_selector` / `_build_fallback_lambdas` / `_build_title_connect_pair` 의 모든 user-data string 이 이 helper 통과.
+- `_build_connect_block(process_id=...)` 새 함수 (이전 `_build_connect_lines` tuple 반환을 `list[str]` 반환으로 교체). process_id 있으면 `_connect_app()` 함수 emit — process 우선 (timeout=2s, 짧게 시도 → fail fast) + title fallback (timeout=10s) chain. process_id 없으면 기존 단일 connect line 유지 (회귀 안 함).
+
+### PR-19f — modifier 키 인식 (Ctrl+A 등 hotkey) + Session.recording_meta (test_193)
+
+**컨텍스트**: 사용자 실측 v2-새세션-003052 — "메모장에 단축키 (Ctrl+A) 도 입력하고 일반 텍스트도 입력하고 마우스도 클릭했는데 단축키와 마우스 클릭은 실행되지 않고 문자 입력만 실행". 또한 사용자 요청 — 녹화 metadata 를 세션에 보존해 사후 분석 가능하게.
+
+**문제 — Critical**: `_build_keyboard_raw` 가 keydown 마다 `RawEvent(vk_code=...)` 만 생성. modifier 자체 키 (Ctrl, vk=0x11) 는 `_VK_CHAR_MAP` 에 없어 silent skip + 후속 A 키 (vk=0x41) 가 char 'a' 로 변환 → `pyautogui.write('a')` emit (Ctrl 정보 손실). 결과: Ctrl+A 가 글자 'a' 입력으로 변질.
+
+**Fix — Critical**:
+- `core/recorder.py` 에 `VK_MENU`/`VK_LWIN`/`VK_RWIN` 상수 + `_MODIFIER_CHECKS` 리스트 + `_capture_modifier_state()` helper (`GetAsyncKeyState` 로 Ctrl/Shift/Alt/Win 현재 상태 list 반환).
+- `_build_keyboard_raw` 가 매 keydown 시 호출해 `RawEvent.modifiers` 채움.
+- `core/recorder_transform.py` 에 `_MODIFIER_VK_CODES` frozenset (11 vk, L/R variants 포함) + `_VK_SPECIAL_KEYS` 확장 (방향키 / del / home / end / pgup / pgdn).
+- `_emit_key_group` 가 (a) modifier 자체 키 skip, (b) modifier 있는 char/special → `pyautogui.hotkey('ctrl', 'a')` / `hotkey('ctrl', 'shift', 'tab')` 변환, (c) modifier 없는 키는 기존 text/special 로직 보존.
+
+**Fix — Quality (recording_meta)**:
+- `Session.recording_meta: list = field(default_factory=list)` 필드 추가.
+- `app_service.commit_recording` 이 commit 시점 (Recorder cleanup 전) 에 metadata entry 만들어 append:
+  - `recording_session_id`, `started_at`, `stopped_at`, `duration_sec`, `raw_event_count`, `transformed_step_count`, `dropped_event_count`, `committed_at`, `committed_step_ids`
+- 같은 세션에 여러 번 commit 시 list 에 append (각 commit 별 entry).
+
+### PR-19g — UWP `Light Dismiss` / `PopupRoot` noise filter (test_194)
+
+**컨텍스트**: 사용자 실측 v2-새세션-005917 — "단축키와 텍스트는 잘 되었는데 마우스 컨트롤 단계에서 메모장이 닫혔다". Step 2 실행 후 메모장 종료 → Step 3~7 모두 `Application.connect` 실패 (process 없음).
+
+**문제**: Step 2 element_meta = `{name="닫기", automation_id="Light Dismiss", class_name="PopupRoot"}` — UWP/WinUI 의 **invisible popup overlay click-receptor**. Win11 메모장 등 UWP 앱은 popup (메뉴/dialog/toast) 떠 있을 때 popup 영역 밖에 전체화면 invisible click receptor 를 깔아둠 — 사용자가 popup 외부 클릭 시 popup 닫기 ("light dismiss") 용도. EFP (element_inspect.capture_element_at) 가 이 invisible element 를 잡으면 `name="닫기"` 라벨이 부여됨. 재실행 시 selector fallback chain 의 `title="닫기"` 매칭이 메모장의 진짜 X 닫기 버튼 / 메뉴를 찾아 클릭 → 메모장 종료 → 후속 step connect 실패.
+
+**Fix**:
+- `core/recorder_transform.py` 에 `_is_uwp_popup_dismiss_overlay(meta)` helper — `automation_id == "light dismiss"` 또는 `class_name == "popuproot"` (case insensitive) 감지.
+- `_filter_noise` 가 click event 의 element_meta 가 이 시그니처면 silent drop + info log (몇 개 drop 됐는지).
+- **안전**: 시그니처 정확 매칭만 — 일반 "닫기" Button (다른 class_name) 은 그대로 통과. 회귀 안전망 test_194 (4) 가 보장.
+
+### 검증 결과
+
+- **core 194/194** (189 + PR-19d~g +5: test_190 input_hooks argtypes / test_191 element_meta regenerate / test_192 escape+process / test_193 modifier+recording_meta / test_194 popup filter) + scenarios 73/73 그린
+- ruff check + format All passed (43 files)
+- 사용자 GUI 실측 통과 (다음 녹화 후 텍스트/단축키/클릭 모두 정상 동작)
+
+### 추가 발견 — input_hooks ctypes argtypes 버그 (test_190, PR-19a 진단 중 발견)
+
+PR-19a~g 의 modifier/popup fix 진행 중 사용자가 보고: "녹화 중 click/key 가 씹힘". 진단 과정에 옵션 A (WinEvent disable) + 옵션 B (drain EFP disable) 모두 무효 → stderr 에서 발견:
+
+```
+ctypes.ArgumentError: argument 4: OverflowError: int too long to convert
+File "input_hooks.py", line 381, in _mouse_hook_dispatch
+    return self._user32.CallNextHookEx(None, nCode, wParam, lParam)
+```
+
+**원인**: `CallNextHookEx` 의 `argtypes` 미설정 → ctypes 가 default `c_int` (32-bit) 로 lParam 마샬링 시도. x64 LL hook 의 lParam = MSLLHOOKSTRUCT 포인터 = 64-bit 주소 (예: `0x0000024BB9D1D300`) → 32-bit 초과 OverflowError → 매 mouse/keyboard event 마다 예외 + stderr write 비용 누적 → 사용자 체감 input 씹힘 + 더블 클릭 필요.
+
+**Fix** (PR-19f 이전 별도 commit):
+- `InputHookManager._configure_user32_signatures()` 새 메서드 — __init__ 에서 호출.
+- `CallNextHookEx` / `SetWindowsHookExW` / `UnhookWindowsHookEx` / `SetWinEventHook` / `UnhookWinEvent` / `GetWindowTextW` 의 argtypes/restype 명시 (Windows 타입: WPARAM=size_t, LPARAM=ssize_t, LRESULT=ssize_t, HHOOK=void_p).
+- test_190 sentinel 가드.
+
+### 다음 (사용자 선택)
+
+옵션 3 실증 (PR-19d 의 AI 재생성 path 실측 — 같은 녹화 step 의 "👤 사용자 요청" 클릭 → AI 호출 → 결과 코드 vs deterministic 비교) / **PR-19h** destructive action UX (⚠️ badge + review dialog 보강) / **PR-19b** F-6 dedup / **PR-19c** idle gap → wait_after_ms 충전.
