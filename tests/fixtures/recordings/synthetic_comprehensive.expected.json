@@ -1,0 +1,9 @@
+{
+  "description": "종합 synthetic — Edit click + 한글 IME 입력 + 6s idle gap + '닫기' Button destructive. PR-19c/h/k 동시 검증.",
+  "min_steps": 2,
+  "max_steps": 3,
+  "must_contain_in_any_code": ["pyperclip.copy", "pyautogui.hotkey('ctrl', 'v')"],
+  "must_have_destructive": true,
+  "must_have_ime": true,
+  "must_have_idle_gap": true
+}

@@ -1,0 +1,5 @@
+{"ts": "2026-05-24T14:00:00", "kind": "click", "x": 100, "y": 200, "button": "left", "click_count": 1, "modifiers": [], "element_meta": {"control_type": "Edit", "name": "Document", "automation_id": "editor", "window_title": "Untitled - Notepad"}, "is_password_field": false, "wheel_delta": 0, "ime_open": false}
+{"ts": "2026-05-24T14:00:00.200000", "kind": "key", "click_count": 1, "modifiers": [], "vk_code": 68, "is_password_field": false, "wheel_delta": 0, "ime_open": true}
+{"ts": "2026-05-24T14:00:00.300000", "kind": "key", "click_count": 1, "modifiers": [], "vk_code": 75, "is_password_field": false, "wheel_delta": 0, "ime_open": true}
+{"ts": "2026-05-24T14:00:00.400000", "kind": "key", "click_count": 1, "modifiers": [], "vk_code": 83, "is_password_field": false, "wheel_delta": 0, "ime_open": true}
+{"ts": "2026-05-24T14:00:06.400000", "kind": "click", "x": 1280, "y": 5, "button": "left", "click_count": 1, "modifiers": [], "element_meta": {"control_type": "Button", "name": "닫기", "automation_id": "CloseBtn", "window_title": "Untitled - Notepad"}, "is_password_field": false, "wheel_delta": 0, "ime_open": false}

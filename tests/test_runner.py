@@ -526,6 +526,7 @@ def main():
             "prompt_quality",
             "ai_integration",
             "macos",
+            "recording_fixtures",
             "all",
         ],
         default="all",
@@ -577,6 +578,14 @@ def main():
             suites_to_run.append(("scenarios", [ScenariosTest]))
         except ImportError as e:
             print(f"⚠ test_scenarios 로드 실패: {e}")
+
+    if args.suite in ("recording_fixtures", "all"):
+        try:
+            from tests.test_recording_fixtures import RecordingFixturesTest
+
+            suites_to_run.append(("recording_fixtures", [RecordingFixturesTest]))
+        except ImportError as e:
+            print(f"⚠ test_recording_fixtures 로드 실패: {e}")
 
     if args.suite in ("prompt_quality", "all"):
         try:

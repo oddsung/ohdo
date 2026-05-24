@@ -1,0 +1,9 @@
+{
+  "description": "최소 smoke fixture — Edit 클릭 + 'hi' 입력. transform pipeline 동작 확인용.",
+  "min_steps": 1,
+  "max_steps": 2,
+  "must_contain_in_any_code": ["pyautogui.write('hi')"],
+  "must_have_destructive": false,
+  "must_have_ime": false,
+  "must_have_idle_gap": false
+}
