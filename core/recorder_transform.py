@@ -23,6 +23,7 @@ helper 와 통합 검토.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -630,25 +631,29 @@ _DESTRUCTIVE_NAME_EXACT: tuple[str, ...] = ("x", "×", "✕")
 _DESTRUCTIVE_CONTROL_TYPES: frozenset[str] = frozenset({"button", "menuitem", "hyperlink"})
 
 
-def is_destructive_step(step: Step) -> Optional[str]:
-    """[PR-19h 2026-05-24] step 의 element_meta 가 destructive (창 닫기/삭제) 의심
-    이면 사유 문자열 반환, 아니면 None.
+# PR-19l (2026-05-24): generated_code destructive 패턴. handoff §32 P8 — element_meta
+# 없는 destructive 코드 (수동 편집 / AI hallucination / 좌표 fallback click) 대응.
+# 한 줄당 (regex, 사용자 사유) — re.IGNORECASE. 코멘트 줄 (#) 은
+# pre-filter 로 제외 (false positive 차단).
+_DESTRUCTIVE_CODE_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
+    (re.compile(r"\bos\.remove\s*\("), "os.remove() — 파일 삭제"),
+    (re.compile(r"\bos\.unlink\s*\("), "os.unlink() — 파일 삭제"),
+    (re.compile(r"\bos\.rmdir\s*\("), "os.rmdir() — 빈 폴더 삭제"),
+    (re.compile(r"\bshutil\.rmtree\s*\("), "shutil.rmtree() — 폴더 재귀 삭제"),
+    (re.compile(r"\.unlink\s*\(\s*\)"), "Path.unlink() — 파일 삭제"),
+    (re.compile(r"\.rmdir\s*\(\s*\)"), "Path.rmdir() — 폴더 삭제"),
+    (re.compile(r"\brequests\.delete\s*\("), "requests.delete() — HTTP DELETE"),
+    (re.compile(r"\.kill\s*\(\s*\)"), ".kill() — 프로세스/창 종료"),
+    (re.compile(r"\.terminate\s*\(\s*\)"), ".terminate() — 프로세스/창 종료"),
+    (re.compile(r"\btaskkill\b", re.IGNORECASE), "taskkill — 프로세스 강제 종료"),
+    (re.compile(r"['\"]\s*rm\s+-rf?\s+"), "shell rm -rf — 재귀 삭제"),
+    (re.compile(r"['\"]\s*rd\s+/s\b", re.IGNORECASE), "shell rd /s — Windows 재귀 삭제"),
+    (re.compile(r"['\"]\s*del\s+/[a-z]", re.IGNORECASE), "shell del /switch — 파일 삭제"),
+)
 
-    review dialog 의 ⚠️ badge + commit confirm 용 휴리스틱. 차단 X — UI 권고만.
-    handoff §28 P2 — PR-19g 의 Light Dismiss filter 외 다른 의도 안 한 close/
-    cancel/delete click 잡힐 케이스 대비.
 
-    매칭 조건:
-    1. ``step.element_meta`` 존재
-    2. ``control_type`` ∈ {Button, MenuItem, HyperLink}
-    3. ``name`` 이 ``_DESTRUCTIVE_NAME_SUBSTRINGS`` 중 하나 포함 (case-insensitive),
-       또는 정확히 "x" / "×" / "✕" 일치 (case-insensitive)
-
-    Returns:
-        매칭 시 사용자 표시용 사유 (예: ``"'닫기' 포함 — 창 닫기 가능성"``),
-        아니면 None.
-    """
-    meta = step.element_meta
+def _check_destructive_element(meta: Optional[dict]) -> Optional[str]:
+    """element_meta 의 control_type + name 휴리스틱 매칭 — PR-19h 본문."""
     if not meta:
         return None
     ctrl_lower = (meta.get("control_type") or "").strip().lower()
@@ -667,6 +672,58 @@ def is_destructive_step(step: Step) -> Optional[str]:
             return f"'{name}' 에 '{pat}' 포함 — 창 닫기/삭제 가능성"
 
     return None
+
+
+def _check_destructive_code(code: str) -> Optional[str]:
+    """[PR-19l 2026-05-24] generated_code 의 destructive 패턴 매칭.
+
+    handoff §32 P8: element_meta 가 없거나 element 가 안전해 보여도 코드가
+    파일/폴더/프로세스 삭제하는 경우 — 수동 편집 / AI hallucination / 좌표
+    fallback click 으로 들어간 위험 코드 검출.
+
+    pre-filter: 한 줄이 ``#`` 로 시작하면 (lstrip 후) skip — 코멘트 false-positive
+    차단. 첫 매칭 패턴의 사유 반환.
+    """
+    if not code:
+        return None
+    for line in code.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        for pat, reason in _DESTRUCTIVE_CODE_PATTERNS:
+            if pat.search(line):
+                return reason
+    return None
+
+
+def is_destructive_step(step: Step) -> Optional[str]:
+    """[PR-19h 2026-05-24 / PR-19l 2026-05-24 확장] step 의 element_meta 또는
+    generated_code 가 destructive (창 닫기 / 파일 삭제 / 프로세스 종료) 의심이면
+    사유 문자열 반환, 아니면 None.
+
+    review dialog 의 ⚠️ badge + commit confirm 용 휴리스틱. 차단 X — UI 권고만.
+    handoff §28 P2 + §32 P8.
+
+    검사 순서:
+    1. ``element_meta`` — control_type + name 휴리스틱 (Button/MenuItem/HyperLink
+       의 '닫기'/'종료'/'취소'/'삭제'/Close/Exit/Cancel/Delete 부분 일치 또는
+       'x'/'×'/'✕' 정확 일치)
+    2. ``generated_code`` — os.remove / shutil.rmtree / requests.delete /
+       .kill() / .terminate() / taskkill / shell rm -rf / rd /s / del /sw 등
+       (코멘트 줄 ``#`` 으로 시작하면 skip)
+
+    둘 다 매칭 시 ``"<element 사유>; <code 사유>"`` 결합 반환.
+
+    Returns:
+        매칭 시 사용자 표시용 사유, 아니면 None.
+    """
+    element_reason = _check_destructive_element(step.element_meta)
+    code = step.generated_code or step.step_code or ""
+    code_reason = _check_destructive_code(code)
+
+    if element_reason and code_reason:
+        return f"{element_reason}; {code_reason}"
+    return element_reason or code_reason
 
 
 def _desktop_desc(meta: dict, verb: str) -> str:

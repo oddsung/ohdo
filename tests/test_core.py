@@ -11122,6 +11122,154 @@ if __name__ == "__main__":
             f"[PR-19k] password 필드 + IME 둘 다 마킹 시 secret path 우선.\n{code4}",
         )
 
+    def test_201_destructive_code_pattern_matching(self):
+        """[PR-19l 2026-05-24] is_destructive_step 가 generated_code 의 파일/폴더/
+        프로세스 삭제 패턴도 검출 — element_meta 없는 destructive 코드 (수동
+        편집 / AI hallucination / 좌표 fallback) 대응.
+
+        handoff §32 P8 — PR-19h 본문의 element_meta 검사 외에 generated_code
+        패턴 매칭 추가. 코멘트 줄 (# 으로 시작) 은 skip (false-positive 차단).
+        element + code 둘 다 매칭 시 사유 결합.
+
+        가드:
+        1. `_DESTRUCTIVE_CODE_PATTERNS` 핵심 패턴 (os.remove, shutil.rmtree,
+           requests.delete, .kill(), taskkill, shell rm/rd/del) 모두 등록
+        2. os.remove('a.txt') → 사유 반환
+        3. shutil.rmtree(...) → 사유 반환
+        4. requests.delete(url) → 사유 반환
+        5. .kill() / .terminate() → 사유 반환
+        6. taskkill (case 무관) → 사유 반환
+        7. shell 'rm -rf ' / 'rd /s' / 'del /q' → 사유 반환
+        8. Path.unlink() / Path.rmdir() → 사유 반환
+        9. 안전 코드 (pyautogui.click, pyperclip.copy, normal text) → None
+        10. 코멘트 줄 안의 위험 패턴 → None (# 으로 시작 skip)
+        11. element=Cancel + code=os.remove → 사유 결합 반환 (둘 다)
+        12. element 안전 + code 안전 → None (회귀 가드 PR-19h)
+        """
+        from core.recorder_transform import _DESTRUCTIVE_CODE_PATTERNS, is_destructive_step
+        from core.session_manager import Step
+
+        self.step("(1) _DESTRUCTIVE_CODE_PATTERNS 핵심 패턴 등록")
+        all_reasons = " ".join(reason for _, reason in _DESTRUCTIVE_CODE_PATTERNS)
+        for needle in (
+            "os.remove",
+            "shutil.rmtree",
+            "requests.delete",
+            ".kill()",
+            "taskkill",
+            "rm -rf",
+            "rd /s",
+        ):
+            self.assert_true(
+                needle in all_reasons,
+                f"[PR-19l] _DESTRUCTIVE_CODE_PATTERNS 사유 모음에 {needle!r} 필수. "
+                f"실제: {all_reasons}",
+            )
+
+        def _code_step(code: str, meta=None) -> Step:
+            return Step(step_id=1, generated_code=code, element_meta=meta)
+
+        self.step("(2) os.remove('a.txt') → 사유 반환")
+        r = is_destructive_step(_code_step("os.remove('a.txt')"))
+        self.assert_true(
+            r is not None and "os.remove" in r,
+            f"[PR-19l] os.remove 매칭. 실제: {r!r}",
+        )
+
+        self.step("(3) shutil.rmtree(...) → 사유 반환")
+        r = is_destructive_step(_code_step("shutil.rmtree('/tmp/foo')"))
+        self.assert_true(
+            r is not None and "shutil.rmtree" in r,
+            f"[PR-19l] shutil.rmtree 매칭. 실제: {r!r}",
+        )
+
+        self.step("(4) requests.delete(url) → 사유 반환")
+        r = is_destructive_step(_code_step("requests.delete(api_url, headers=h)"))
+        self.assert_true(
+            r is not None and "requests.delete" in r,
+            f"[PR-19l] requests.delete 매칭. 실제: {r!r}",
+        )
+
+        self.step("(5) .kill() / .terminate() → 사유 반환")
+        r = is_destructive_step(_code_step("app.kill()"))
+        self.assert_true(r is not None and ".kill()" in r, f"[PR-19l] .kill() 매칭. 실제: {r!r}")
+        r2 = is_destructive_step(_code_step("proc.terminate()"))
+        self.assert_true(
+            r2 is not None and ".terminate()" in r2,
+            f"[PR-19l] .terminate() 매칭. 실제: {r2!r}",
+        )
+
+        self.step("(6) taskkill (case 무관) → 사유 반환")
+        r = is_destructive_step(_code_step("os.system('TaskKill /F /IM notepad.exe')"))
+        self.assert_true(
+            r is not None and "taskkill" in r,
+            f"[PR-19l] TaskKill (mixed case) 매칭. 실제: {r!r}",
+        )
+
+        self.step("(7) shell rm -rf / rd /s / del /switch → 사유 반환")
+        for code_snippet, expected_label in (
+            ("subprocess.run('rm -rf /tmp/cache', shell=True)", "rm -rf"),
+            ("os.system('rd /s /q C:\\\\old')", "rd /s"),
+            ("os.system('del /q file.txt')", "del"),
+        ):
+            r = is_destructive_step(_code_step(code_snippet))
+            self.assert_true(
+                r is not None and expected_label in r,
+                f"[PR-19l] {expected_label!r} shell 매칭. code={code_snippet!r}, 실제: {r!r}",
+            )
+
+        self.step("(8) Path.unlink() / Path.rmdir() → 사유 반환")
+        r = is_destructive_step(_code_step("Path('a.txt').unlink()"))
+        self.assert_true(
+            r is not None and "Path.unlink" in r,
+            f"[PR-19l] Path.unlink() 매칭. 실제: {r!r}",
+        )
+
+        self.step("(9) 안전 코드 → None")
+        for safe_code in (
+            "pyautogui.click(100, 200)",
+            "pyperclip.copy('hello')",
+            "pyautogui.write('안녕하세요')",
+            "x = 1 + 2\nprint(x)",
+        ):
+            r = is_destructive_step(_code_step(safe_code))
+            self.assert_true(
+                r is None,
+                f"[PR-19l] 안전 코드 → None. code={safe_code!r}, 실제: {r!r}",
+            )
+
+        self.step("(10) 코멘트 줄 안 위험 패턴 → None (# skip)")
+        commented = "# os.remove(...) 는 위험합니다\nprint('hi')"
+        r = is_destructive_step(_code_step(commented))
+        self.assert_true(
+            r is None,
+            f"[PR-19l] 코멘트 줄 안 패턴 false-positive 차단. 실제: {r!r}",
+        )
+
+        self.step("(11) element=Cancel + code=os.remove → 사유 결합")
+        r = is_destructive_step(
+            _code_step(
+                "os.remove('important.dat')",
+                meta={"control_type": "Button", "name": "Cancel"},
+            )
+        )
+        self.assert_true(
+            r is not None and "Cancel" in r and "os.remove" in r and ";" in r,
+            f"[PR-19l] element + code 둘 다 매칭 → 사유 결합. 실제: {r!r}",
+        )
+
+        self.step("(12) element 안전 + code 안전 → None (PR-19h 회귀 가드)")
+        r = is_destructive_step(
+            _code_step(
+                "pyautogui.click(100, 200)",
+                meta={"control_type": "Button", "name": "확인"},
+            )
+        )
+        self.assert_true(
+            r is None,
+            f"[PR-19l] 둘 다 안전 → None (회귀 가드). 실제: {r!r}",
+        )
+
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
         ``replaces_step_id`` 인자 누락 fix.
