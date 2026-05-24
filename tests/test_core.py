@@ -8176,7 +8176,9 @@ if __name__ == "__main__":
         for needle, desc in (
             ("InternalMove", "drag&drop reorder mode"),
             ("ExtendedSelection", "multi-select bulk action"),
-            ("from core.recorder_transform import transform", "import path"),
+            # PR-19h (2026-05-24): import 라인이 is_destructive_step + transform 멀티
+            # 심볼 형태로 변경됨. 두 심볼 분리 검증.
+            ("from core.recorder_transform import", "recorder_transform import path"),
             ("transform(", "재변환 호출"),
             ("TransformOptions(", "옵션 재구성"),
             ("blockSignals", "rowsMoved 재진입 가드"),
@@ -10687,6 +10689,156 @@ if __name__ == "__main__":
             f"[PR-19c] 단일 batch 의 wait_after_ms = None. 실제: "
             f"len={len(steps5)}, wait={steps5[0].wait_after_ms if steps5 else None}",
         )
+
+    def test_198_destructive_step_heuristic_and_review_confirm(self):
+        """[PR-19h 2026-05-24] destructive action 의심 step 휴리스틱 + review dialog
+        ⚠️ badge + commit 전 confirm.
+
+        handoff §28 P2: PR-19g 의 Light Dismiss filter 외 다른 의도 안 한
+        close/cancel/delete click 잡힐 케이스 대비. ``is_destructive_step`` 가 사유
+        반환 시 ``_StepCardItemWidget`` 에 ⚠️ badge + tooltip,
+        ``RecordingReviewDialog._on_accept`` 가 사유 목록 합쳐 QMessageBox.warning
+        Yes/No confirm — Yes 시만 accept. 차단 X — 사용자 의도면 진행.
+
+        가드:
+        1. ``_DESTRUCTIVE_NAME_SUBSTRINGS`` 핵심 한/영 키워드 포함
+        2. ``_DESTRUCTIVE_CONTROL_TYPES`` = {button, menuitem, hyperlink}
+        3. Button name="닫기" → 사유 반환
+        4. Button name="Cancel" (case 무관) → 사유 반환
+        5. Button name="확인" → None (false-positive 차단)
+        6. MenuItem name="종료" → 사유 반환
+        7. Edit/TextBox name="Close" → None (control_type 화이트리스트)
+        8. Button name="X" (정확 일치) → 사유 반환 (X 단독 라벨)
+        9. Button name="Xerox" → None (X 정확일치 X — 부분 매칭 false-positive 차단)
+        10. element_meta=None → None
+        11. ``RecordingReviewDialog`` source 가 ``is_destructive_step`` import + 사용
+        12. ``_on_accept`` source 가 destructive confirm 메시지 흐름 포함
+        13. i18n 키 ko/en 양쪽 모두 존재 (badge_tooltip + confirm_title + confirm_body)
+        """
+        import inspect as _inspect
+        import json
+        from pathlib import Path
+
+        from core.recorder_transform import (
+            _DESTRUCTIVE_CONTROL_TYPES,
+            _DESTRUCTIVE_NAME_EXACT,
+            _DESTRUCTIVE_NAME_SUBSTRINGS,
+            is_destructive_step,
+        )
+        from core.session_manager import Step
+
+        self.step("(1) _DESTRUCTIVE_NAME_SUBSTRINGS 핵심 키워드 포함")
+        required = ("닫기", "종료", "취소", "삭제", "close", "exit", "cancel", "delete")
+        for w in required:
+            self.assert_true(
+                w in _DESTRUCTIVE_NAME_SUBSTRINGS,
+                f"[PR-19h] _DESTRUCTIVE_NAME_SUBSTRINGS 에 {w!r} 포함 필수.",
+            )
+
+        self.step("(2) _DESTRUCTIVE_CONTROL_TYPES = {button, menuitem, hyperlink}")
+        self.assert_true(
+            _DESTRUCTIVE_CONTROL_TYPES == frozenset({"button", "menuitem", "hyperlink"}),
+            f"[PR-19h] control_type 화이트리스트 = button/menuitem/hyperlink. "
+            f"실제: {_DESTRUCTIVE_CONTROL_TYPES!r}",
+        )
+        self.assert_true(
+            _DESTRUCTIVE_NAME_EXACT == ("x", "×", "✕"),
+            f"[PR-19h] _DESTRUCTIVE_NAME_EXACT = ('x','×','✕'). 실제: {_DESTRUCTIVE_NAME_EXACT!r}",
+        )
+
+        def _step(meta):
+            return Step(step_id=1, element_meta=meta)
+
+        self.step("(3) Button name='닫기' → 사유 반환")
+        r = is_destructive_step(_step({"control_type": "Button", "name": "닫기"}))
+        self.assert_true(
+            r is not None and "닫기" in r,
+            f"[PR-19h] '닫기' Button destructive. 실제: {r!r}",
+        )
+
+        self.step("(4) Button name='Cancel' (case 무관) → 사유 반환")
+        r = is_destructive_step(_step({"control_type": "Button", "name": "Cancel"}))
+        self.assert_true(
+            r is not None and "cancel" in r.lower(),
+            f"[PR-19h] 'Cancel' Button destructive. 실제: {r!r}",
+        )
+        r2 = is_destructive_step(_step({"control_type": "Button", "name": "CANCEL"}))
+        self.assert_true(
+            r2 is not None, f"[PR-19h] 'CANCEL' (대문자) Button destructive. 실제: {r2!r}"
+        )
+
+        self.step("(5) Button name='확인' → None (false-positive 차단)")
+        r = is_destructive_step(_step({"control_type": "Button", "name": "확인"}))
+        self.assert_true(r is None, f"[PR-19h] '확인' Button → None. 실제: {r!r}")
+
+        self.step("(6) MenuItem name='종료' → 사유 반환")
+        r = is_destructive_step(_step({"control_type": "MenuItem", "name": "파일 종료"}))
+        self.assert_true(
+            r is not None and "종료" in r,
+            f"[PR-19h] '파일 종료' MenuItem destructive. 실제: {r!r}",
+        )
+
+        self.step("(7) Edit name='Close' → None (control_type 화이트리스트)")
+        r = is_destructive_step(_step({"control_type": "Edit", "name": "Close"}))
+        self.assert_true(
+            r is None, f"[PR-19h] Edit (control_type 비-화이트리스트) → None. 실제: {r!r}"
+        )
+
+        self.step("(8) Button name='X' (정확 일치) → 사유 반환")
+        r = is_destructive_step(_step({"control_type": "Button", "name": "X"}))
+        self.assert_true(
+            r is not None and "단독 라벨" in r,
+            f"[PR-19h] 'X' Button 단독 라벨 destructive. 실제: {r!r}",
+        )
+        r2 = is_destructive_step(_step({"control_type": "Button", "name": "×"}))
+        self.assert_true(r2 is not None, f"[PR-19h] '×' Button destructive. 실제: {r2!r}")
+
+        self.step("(9) Button name='Xerox' → None (X 부분 매칭 false-positive 차단)")
+        r = is_destructive_step(_step({"control_type": "Button", "name": "Xerox"}))
+        self.assert_true(
+            r is None, f"[PR-19h] 'Xerox' 같은 X-시작 name false-positive 차단. 실제: {r!r}"
+        )
+
+        self.step("(10) element_meta=None → None")
+        r = is_destructive_step(Step(step_id=1, element_meta=None))
+        self.assert_true(r is None, f"[PR-19h] element_meta=None → None. 실제: {r!r}")
+        r = is_destructive_step(_step({"control_type": "Button", "name": ""}))
+        self.assert_true(r is None, f"[PR-19h] 빈 name → None. 실제: {r!r}")
+
+        self.step("(11) RecordingReviewDialog source 가 is_destructive_step import + 사용")
+        from ui_v2.recording_review_dialog import RecordingReviewDialog, _StepCardItemWidget
+
+        card_src = _inspect.getsource(_StepCardItemWidget.__init__)
+        self.assert_true(
+            "is_destructive_step" in card_src and "destructive_badge_tooltip" in card_src,
+            f"[PR-19h] _StepCardItemWidget.__init__ 가 is_destructive_step 호출 + "
+            f"destructive_badge_tooltip tr key 사용 필수.\n{card_src}",
+        )
+
+        self.step("(12) _on_accept source 가 destructive confirm 흐름 포함")
+        accept_src = _inspect.getsource(RecordingReviewDialog._on_accept)
+        for needle in (
+            "is_destructive_step",
+            "destructive_confirm_title",
+            "destructive_confirm_body",
+            "StandardButton.Yes",
+        ):
+            self.assert_true(
+                needle in accept_src,
+                f"[PR-19h] _on_accept 가 {needle!r} 포함 필수.\n{accept_src}",
+            )
+
+        self.step("(13) i18n 키 ko/en 양쪽 모두 존재")
+        repo_root = Path(__file__).resolve().parent.parent
+        ko = json.loads((repo_root / "core" / "locale" / "ko.json").read_text(encoding="utf-8"))
+        en = json.loads((repo_root / "core" / "locale" / "en.json").read_text(encoding="utf-8"))
+        for key in (
+            "ui_v2.recording.review.destructive_badge_tooltip",
+            "ui_v2.recording.review.destructive_confirm_title",
+            "ui_v2.recording.review.destructive_confirm_body",
+        ):
+            self.assert_true(key in ko, f"[PR-19h] ko.json 에 {key!r} 필수")
+            self.assert_true(key in en, f"[PR-19h] en.json 에 {key!r} 필수")
 
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의

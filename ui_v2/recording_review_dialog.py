@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (
 from core.app_service import Step
 from core.i18n import tr
 from core.recorder_models import RecordingSession, TransformOptions
-from core.recorder_transform import transform
+from core.recorder_transform import is_destructive_step, transform
 
 __all__ = ["RecordingReviewDialog"]
 
@@ -93,6 +93,20 @@ class _StepCardItemWidget(QWidget):
         self._title_label.setWordWrap(True)
         self._title_label.setToolTip(tr("ui_v2.recording.review.steps_header"))
         top.addWidget(self._title_label, stretch=1)
+
+        # PR-19h (2026-05-24): destructive action 의심 ⚠️ badge.
+        # is_destructive_step heuristic 가 사유 반환 시 badge label 추가 + tooltip.
+        # commit 전 _on_accept 가 confirm dialog 도 같은 사유 목록으로 띄움.
+        destructive_reason = is_destructive_step(step)
+        if destructive_reason:
+            badge = QLabel("⚠️")
+            badge.setStyleSheet(
+                f"color: {_ERROR}; font-size: 14px; padding: 0 4px; background: transparent;"
+            )
+            badge.setToolTip(
+                tr("ui_v2.recording.review.destructive_badge_tooltip", reason=destructive_reason)
+            )
+            top.addWidget(badge)
 
         wait_label = QLabel(tr("ui_v2.recording.review.wait_label"))
         wait_label.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 11px;")
@@ -630,6 +644,27 @@ class RecordingReviewDialog(QDialog):
     def _on_accept(self) -> None:
         # step_id 재할당은 caller (AppService.commit_recording → repo.add_step)
         # 가 책임. 여기서는 list 순서 유지.
+
+        # PR-19h (2026-05-24): destructive step 들 모아 commit 전 사용자 confirm.
+        # 차단 X — 사용자가 의도적이면 Yes 로 진행. 사유 목록은 step 번호 + heuristic
+        # 메시지 짧게.
+        destructive_lines: list[str] = []
+        for i, step in enumerate(self._steps, start=1):
+            reason = is_destructive_step(step)
+            if reason:
+                destructive_lines.append(f"  Step {i}: {reason}")
+        if destructive_lines:
+            details = "\n".join(destructive_lines)
+            confirm = QMessageBox.warning(
+                self,
+                tr("ui_v2.recording.review.destructive_confirm_title"),
+                tr("ui_v2.recording.review.destructive_confirm_body", details=details),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+
         self.edited_steps = list(self._steps)
         self.accept()
 

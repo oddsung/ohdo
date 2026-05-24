@@ -564,6 +564,77 @@ def _browser_desc(meta: dict, verb: str) -> str:
     return f"<{tag}> {verb}"
 
 
+# PR-19h (2026-05-24): destructive action 의심 element name 패턴.
+# review dialog 의 step 카드 ⚠️ badge + commit 전 confirm 용 휴리스틱.
+# 차단 X — 사용자에게 검토 권유. PR-19g 의 Light Dismiss filter 가 잡지 못하는,
+# 의도하지 않은 close/cancel/delete click 잡힐 케이스 대비.
+#
+# 매칭 정책:
+# - "x" / "×" / "✕" 는 name 전체 일치 시만 (예: "Xerox" name false-positive 방지).
+# - 나머지 (닫기/종료/취소/삭제/Close/Exit/Cancel/Delete 등) 는 부분 일치 (case-insensitive).
+# - control_type 화이트리스트: Button / MenuItem / HyperLink (TextBox/Edit 등 데이터 입력
+#   element 의 같은 라벨 false-positive 방지).
+_DESTRUCTIVE_NAME_SUBSTRINGS: tuple[str, ...] = (
+    # 한국어
+    "닫기",
+    "종료",
+    "취소",
+    "삭제",
+    "지우기",
+    "제거",
+    "끝내기",
+    "나가기",
+    # 영어 (lowercase 비교)
+    "close",
+    "exit",
+    "quit",
+    "cancel",
+    "delete",
+    "remove",
+)
+_DESTRUCTIVE_NAME_EXACT: tuple[str, ...] = ("x", "×", "✕")
+_DESTRUCTIVE_CONTROL_TYPES: frozenset[str] = frozenset({"button", "menuitem", "hyperlink"})
+
+
+def is_destructive_step(step: Step) -> Optional[str]:
+    """[PR-19h 2026-05-24] step 의 element_meta 가 destructive (창 닫기/삭제) 의심
+    이면 사유 문자열 반환, 아니면 None.
+
+    review dialog 의 ⚠️ badge + commit confirm 용 휴리스틱. 차단 X — UI 권고만.
+    handoff §28 P2 — PR-19g 의 Light Dismiss filter 외 다른 의도 안 한 close/
+    cancel/delete click 잡힐 케이스 대비.
+
+    매칭 조건:
+    1. ``step.element_meta`` 존재
+    2. ``control_type`` ∈ {Button, MenuItem, HyperLink}
+    3. ``name`` 이 ``_DESTRUCTIVE_NAME_SUBSTRINGS`` 중 하나 포함 (case-insensitive),
+       또는 정확히 "x" / "×" / "✕" 일치 (case-insensitive)
+
+    Returns:
+        매칭 시 사용자 표시용 사유 (예: ``"'닫기' 포함 — 창 닫기 가능성"``),
+        아니면 None.
+    """
+    meta = step.element_meta
+    if not meta:
+        return None
+    ctrl_lower = (meta.get("control_type") or "").strip().lower()
+    if ctrl_lower not in _DESTRUCTIVE_CONTROL_TYPES:
+        return None
+    name = (meta.get("name") or "").strip()
+    if not name:
+        return None
+    name_lower = name.lower()
+
+    if name_lower in _DESTRUCTIVE_NAME_EXACT:
+        return f"'{name}' 단독 라벨 — 창 닫기 버튼 가능성"
+
+    for pat in _DESTRUCTIVE_NAME_SUBSTRINGS:
+        if pat in name_lower:
+            return f"'{name}' 에 '{pat}' 포함 — 창 닫기/삭제 가능성"
+
+    return None
+
+
 def _desktop_desc(meta: dict, verb: str) -> str:
     ctrl_type = meta.get("control_type") or "?"
     name = meta.get("name") or meta.get("automation_id") or ""
