@@ -80,7 +80,7 @@ _CLICKABLE_PARENT_TYPES = (
 )
 
 
-def build_pywinauto_click_code(meta: dict, button: str = "left") -> str:
+def build_pywinauto_click_code(meta: dict, button: str = "left", double: bool = False) -> str:
     """element 메타 → 실행 가능한 pywinauto + pyautogui click 코드.
 
     Args:
@@ -94,6 +94,9 @@ def build_pywinauto_click_code(meta: dict, button: str = "left") -> str:
               (페이지별 식별 중요). ``is_browser`` 도 동일 의미로 fallback.
             - ``recommended_backend`` (``'uia'`` | ``'win32'``, 기본 ``'uia'``)
         button: ``'left'`` / ``'right'`` / ``'middle'`` (기본 ``'left'``).
+        double: ``True`` 면 ``pyautogui.doubleClick`` + ``click_input(double=True)``
+            fallback emit (PR-19b — 빠른 double-click 시나리오: 파일/폴더 열기 등).
+            right button 은 double 지원 X (일반적 사용 X) — silent ignore.
 
     Returns:
         Python 코드 (multi-line, 끝 newline 없음). imports 미포함 — 호출자가
@@ -133,11 +136,15 @@ def build_pywinauto_click_code(meta: dict, button: str = "left") -> str:
     if btn not in ("left", "right", "middle"):
         btn = "left"
     pyautogui_btn_arg = "" if btn == "left" else f", button={btn!r}"
+    # PR-19b: double-click 은 left/middle 만 지원 (right double-click 은 일반적 사용 X)
+    is_double = bool(double) and btn != "right"
+    pyautogui_click_fn = "doubleClick" if is_double else "click"
     element_click_method = {
         "left": "click_input",
         "right": "right_click_input",
         "middle": "click_input",
     }[btn]
+    element_click_args = "double=True" if is_double else ""
 
     clickable_types_repr = "{" + ", ".join(f"'{t}'" for t in _CLICKABLE_PARENT_TYPES) + "}"
 
@@ -217,14 +224,15 @@ def build_pywinauto_click_code(meta: dict, button: str = "left") -> str:
     lines.append("")
 
     # 7. Click — pyautogui PRIMARY + element fallback
+    click_kind_desc = "더블 클릭" if is_double else "클릭"
     lines.append(
-        f"# {btn} 클릭 - pyautogui PRIMARY (UWP/XAML/Win32 좌표 hit-test 안정) + element fallback"
+        f"# {btn} {click_kind_desc} - pyautogui PRIMARY (UWP/XAML/Win32 좌표 hit-test 안정) + element fallback"
     )
     lines.append("try:")
-    lines.append(f"    pyautogui.click(center_x, center_y{pyautogui_btn_arg})")
+    lines.append(f"    pyautogui.{pyautogui_click_fn}(center_x, center_y{pyautogui_btn_arg})")
     lines.append("except Exception:")
     lines.append("    try:")
-    lines.append(f"        click_target.{element_click_method}()")
+    lines.append(f"        click_target.{element_click_method}({element_click_args})")
     lines.append("    except Exception:")
     lines.append("        raise")
 

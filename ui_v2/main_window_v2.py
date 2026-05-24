@@ -3275,6 +3275,10 @@ class MainWindowV2(QMainWindow):
         PR-19d (2026-05-24): pending elements 가 비어 있을 때 — target step 이
         녹화로 생성된 거면 (Step.element_meta 채워져 있음) recorder element_meta 를
         picker 형식으로 변환해 AI 에게 selector / window 정보 전달.
+
+        PR-19j (2026-05-24): ``replaces_step_id=step_id`` 누락 fix — 재생성 결과가
+        새 step 으로 추가되던 회귀 (handoff §22 #4 의 in-place 정책 위반).
+        ``_on_regenerate_with_warnings`` (G7-D path) 와 일관성.
         """
         preview = user_request[:60] + ("..." if len(user_request) > 60 else "")
 
@@ -3287,7 +3291,12 @@ class MainWindowV2(QMainWindow):
                 recorder_meta = _lookup_step_element_meta(self.current_session, step_id)
                 if recorder_meta:
                     elems = [_recorder_meta_to_picker_dict(recorder_meta)]
-            self._send_request(user_request, images=None, elements=elems)
+            self._send_request(
+                user_request,
+                images=None,
+                elements=elems,
+                replaces_step_id=step_id,
+            )
 
         self._toast(
             tr("ui_v2.toast.regenerate_confirm", preview=preview),

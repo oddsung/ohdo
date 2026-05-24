@@ -59,6 +59,13 @@ _VK_SPECIAL_KEYS: dict[int, str] = {
     0x21: "pageup", 0x22: "pagedown",
 }  # fmt: skip
 
+# PR-19b (2026-05-24): 빠른 double-click 감지 threshold. Windows GetDoubleClickTime
+# default (500ms) 와 동일. 같은 element + 같은 button + ts delta < 이 값 → 두 click
+# 을 단일 RawEvent (click_count=2) 로 merge → _emit_click 이 pyautogui.doubleClick
+# 변환. 천천히 두 번 click (이 값 초과) 은 별개 click 유지.
+_DOUBLE_CLICK_THRESHOLD_MS = 500
+
+
 # PR-19f (2026-05-24): modifier 자체 키 VK codes. _emit_key_group 가 이 키들을
 # 단독 emit 안 함 — 다음 char/special 키의 RawEvent.modifiers 정보로 활용됨.
 # 양쪽 modifier (LCtrl/RCtrl 등) + 일반 modifier 모두 포함.
@@ -205,8 +212,11 @@ def _split_into_batches(events: list[RawEvent], opts: TransformOptions) -> list[
             new_batch = True
 
         if not new_batch and prev.kind == "click" and ev.kind == "click":
-            same_element = _same_element(prev.element_meta, ev.element_meta)
-            if not same_element:
+            # 같은 element (또는 둘 다 element_meta=None 이고 좌표 ± 5px) 면 같은
+            # batch — PR-19b 의 _merge_consecutive_clicks 가 batch 안 빠른 double-click
+            # merge 처리. 다른 element / 다른 좌표면 새 batch.
+            same_target = _same_click_target(prev, ev)
+            if not same_target:
                 new_batch = True
 
         if new_batch:
@@ -234,9 +244,60 @@ def _same_element(a: Optional[dict], b: Optional[dict]) -> bool:
     return True
 
 
+def _same_click_target(a: RawEvent, b: RawEvent) -> bool:
+    """[PR-19b 2026-05-24] 두 click event 가 같은 target 인가 — element_meta 우선,
+    둘 다 None 이면 좌표 (± 5px) 비교. ``_split_into_batches`` 의 click→click
+    경계 판단 + ``_merge_consecutive_clicks`` 의 double-click merge 판단 공통.
+    """
+    if a.element_meta is not None and b.element_meta is not None:
+        return _same_element(a.element_meta, b.element_meta)
+    if a.element_meta is None and b.element_meta is None:
+        return (
+            a.x is not None
+            and b.x is not None
+            and abs(a.x - b.x) <= 5
+            and a.y is not None
+            and b.y is not None
+            and abs(a.y - b.y) <= 5
+        )
+    return False
+
+
+def _merge_consecutive_clicks(batch: list[RawEvent]) -> list[RawEvent]:
+    """[PR-19b 2026-05-24] 빠른 double-click 감지 — 같은 element + 같은 button +
+    ts delta < ``_DOUBLE_CLICK_THRESHOLD_MS`` 면 두 click 을 단일 RawEvent
+    (``click_count`` 누적) 로 merge.
+
+    천천히 두 번 click (threshold 초과) 은 별개 click 유지 — 사용자 의도가
+    double-click 아닌 두 개의 별개 single-click 일 가능성. handoff §25 F-6 의
+    "별개 batch 분리" 시나리오는 이 함수 영향 X (이미 다른 batch). 이 함수는
+    같은 batch 안 인접 click 만 처리.
+
+    pydantic ``RawEvent`` 는 immutable — ``model_copy(update=...)`` 로 새 인스턴스
+    반환.
+    """
+    out: list[RawEvent] = []
+    for ev in batch:
+        if ev.kind == "click" and out:
+            prev = out[-1]
+            if prev.kind == "click" and prev.button == ev.button and _same_click_target(prev, ev):
+                delta_ms = (ev.ts - prev.ts).total_seconds() * 1000
+                if delta_ms < _DOUBLE_CLICK_THRESHOLD_MS:
+                    merged = prev.model_copy(
+                        update={"click_count": (prev.click_count or 1) + 1, "ts": ev.ts}
+                    )
+                    out[-1] = merged
+                    continue
+        out.append(ev)
+    return out
+
+
 def _batch_to_step(batch: list[RawEvent], opts: TransformOptions) -> Optional[Step]:
     if not batch:
         return None
+
+    # PR-19b: batch 안 빠른 double-click merge (click_count 누적).
+    batch = _merge_consecutive_clicks(batch)
 
     code_lines: list[str] = []
     desc_parts: list[str] = []
@@ -301,6 +362,9 @@ def _batch_to_step(batch: list[RawEvent], opts: TransformOptions) -> Optional[St
 def _emit_click(ev: RawEvent, code_lines: list[str], desc_parts: list[str]) -> None:
     meta = ev.element_meta
     btn = ev.button or "left"
+    # PR-19b: click_count >= 2 면 double-click. right 는 double 미지원 (helper 가 ignore).
+    is_double = (ev.click_count or 1) >= 2 and btn != "right"
+    click_desc = "더블 클릭" if is_double else "클릭"
 
     if meta is None:
         # R2 PR-18 — 좌표 fallback 시 모니터 DPI 코멘트 첨부 (재생 환경 진단용)
@@ -308,17 +372,18 @@ def _emit_click(ev: RawEvent, code_lines: list[str], desc_parts: list[str]) -> N
         if ev.monitor_dpi is not None and ev.monitor_dpi != 96:
             scale_pct = round(ev.monitor_dpi / 96 * 100)
             dpi_comment = f"  # captured at DPI={ev.monitor_dpi} ({scale_pct}%)"
-        code_lines.append(f"pyautogui.click({ev.x}, {ev.y}, button='{btn}'){dpi_comment}")
-        desc_parts.append(f"({ev.x}, {ev.y}) {btn} 클릭")
+        click_fn = "doubleClick" if is_double else "click"
+        code_lines.append(f"pyautogui.{click_fn}({ev.x}, {ev.y}, button='{btn}'){dpi_comment}")
+        desc_parts.append(f"({ev.x}, {ev.y}) {btn} {click_desc}")
         return
 
     if _is_browser_element(meta):
-        code_lines.append(_browser_click_code(meta))
-        desc_parts.append(_browser_desc(meta, "클릭"))
+        code_lines.append(_browser_click_code(meta, double=is_double))
+        desc_parts.append(_browser_desc(meta, click_desc))
         return
 
-    code_lines.append(_pywinauto_click_code(meta, btn))
-    desc_parts.append(_desktop_desc(meta, f"{btn} 클릭"))
+    code_lines.append(_pywinauto_click_code(meta, btn, double=is_double))
+    desc_parts.append(_desktop_desc(meta, f"{btn} {click_desc}"))
 
 
 def _emit_key_group(
@@ -416,9 +481,22 @@ def _is_browser_element(meta: dict) -> bool:
     return any(k in meta for k in ("css_selector", "xpath", "browser_role", "tag_name"))
 
 
-def _browser_click_code(meta: dict) -> str:
+def _browser_click_code(meta: dict, double: bool = False) -> str:
     css = meta.get("css_selector") or ""
     xpath = meta.get("xpath") or ""
+    # PR-19b: Selenium 은 단일 element 에 대해 ActionChains.double_click 사용.
+    if double:
+        if css:
+            return (
+                f"_el = driver.find_element(By.CSS_SELECTOR, {css!r}); "
+                "ActionChains(driver).double_click(_el).perform()"
+            )
+        if xpath:
+            return (
+                f"_el = driver.find_element(By.XPATH, {xpath!r}); "
+                "ActionChains(driver).double_click(_el).perform()"
+            )
+        return 'driver.execute_script("/* selector 없음 (double-click) */")'
     if css:
         return f"driver.find_element(By.CSS_SELECTOR, {css!r}).click()"
     if xpath:
@@ -426,7 +504,7 @@ def _browser_click_code(meta: dict) -> str:
     return 'driver.execute_script("/* selector 없음 */")'
 
 
-def _pywinauto_click_code(meta: dict, btn: str) -> str:
+def _pywinauto_click_code(meta: dict, btn: str, double: bool = False) -> str:
     """pywinauto click 코드 생성.
 
     [PR-19a — 2026-05-23] ``core.pywinauto_codegen.build_pywinauto_click_code``
@@ -438,8 +516,12 @@ def _pywinauto_click_code(meta: dict, btn: str) -> str:
 
     `Application(...)` (unqualified) — essential imports
     ``from pywinauto import Application`` 매치 (test_182 회귀 가드).
+
+    [PR-19b — 2026-05-24] ``double=True`` 면 ``pyautogui.doubleClick`` +
+    ``click_input(double=True)`` fallback emit (transform 의
+    ``_merge_consecutive_clicks`` 가 빠른 double-click 감지).
     """
-    return build_pywinauto_click_code(meta, button=btn)
+    return build_pywinauto_click_code(meta, button=btn, double=double)
 
 
 def _browser_desc(meta: dict, verb: str) -> str:

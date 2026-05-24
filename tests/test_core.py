@@ -10379,6 +10379,207 @@ if __name__ == "__main__":
             f"[PR-19g] 일반 닫기 버튼 step 보존. 실제: {steps2!r}",
         )
 
+    def test_196_double_click_merge_and_emit(self):
+        """[PR-19b 2026-05-24] 빠른 double-click 감지 + ``pyautogui.doubleClick`` emit.
+
+        handoff §27 P3: ``click_count`` 필드 활용 (recorder_models 에 이미 정의).
+        Transform layer 가 같은 element + 같은 button + ts delta <
+        ``_DOUBLE_CLICK_THRESHOLD_MS`` (500ms) 인 인접 click 두 개를 단일 RawEvent
+        (``click_count=2``) 로 merge → ``_emit_click`` 가 ``pyautogui.doubleClick``
+        + ``click_input(double=True)`` fallback emit.
+
+        천천히 두 번 click (threshold 초과) 은 별개 click 유지 — 사용자 의도가
+        double-click 아닌 두 개의 별개 single-click 일 가능성 보존.
+        right-click 은 double 미지원 (일반적 사용 X).
+
+        가드:
+        1. ``_merge_consecutive_clicks`` 가 < 500ms 인접 click merge → click_count=2
+        2. ``_merge_consecutive_clicks`` 가 > 500ms gap 은 별개 click 유지
+        3. ``_merge_consecutive_clicks`` 가 다른 element 는 별개 유지
+        4. ``_merge_consecutive_clicks`` 가 다른 button 은 별개 유지
+        5. ``build_pywinauto_click_code(double=True)`` → ``pyautogui.doubleClick`` +
+           ``click_input(double=True)`` fallback + "더블 클릭" 주석
+        6. ``build_pywinauto_click_code(button='right', double=True)`` → right double
+           무시 (single right-click 으로 emit, ``right_click_input`` fallback)
+        7. transform end-to-end: 빠른 두 번 click → 1 step + doubleClick 코드
+        8. transform end-to-end: 좌표 fallback (element_meta=None) double →
+           ``pyautogui.doubleClick(x, y, ...)``
+        9. user_request 가 "더블 클릭" 표기 포함
+        """
+        from datetime import datetime, timedelta
+
+        from core.pywinauto_codegen import build_pywinauto_click_code
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import (
+            _DOUBLE_CLICK_THRESHOLD_MS,
+            _merge_consecutive_clicks,
+            transform,
+        )
+
+        self.assert_true(
+            _DOUBLE_CLICK_THRESHOLD_MS == 500,
+            f"[PR-19b] threshold = 500ms (Windows GetDoubleClickTime default). "
+            f"실제: {_DOUBLE_CLICK_THRESHOLD_MS}",
+        )
+
+        base_meta = {
+            "control_type": "Button",
+            "name": "확인",
+            "automation_id": "OkBtn",
+            "class_name": "Button",
+            "window_title": "Dialog",
+        }
+        t0 = datetime.now()
+
+        def _click(ts, button="left", meta=None, x=100, y=100):
+            return RawEvent(
+                ts=ts,
+                kind="click",
+                x=x,
+                y=y,
+                button=button,
+                element_meta=meta if meta is not None else dict(base_meta),
+            )
+
+        self.step("(1) 빠른 두 번 click (< 500ms) → merge → click_count=2")
+        ev1 = _click(t0)
+        ev2 = _click(t0 + timedelta(milliseconds=200))
+        merged = _merge_consecutive_clicks([ev1, ev2])
+        self.assert_true(
+            len(merged) == 1 and merged[0].click_count == 2,
+            f"[PR-19b] 2 click (200ms) merge 실패. 결과: len={len(merged)}, "
+            f"click_count={[e.click_count for e in merged]}",
+        )
+
+        self.step("(2) 천천히 두 번 click (> 500ms) → 별개 유지")
+        ev3 = _click(t0 + timedelta(milliseconds=800))
+        merged2 = _merge_consecutive_clicks([ev1, ev3])
+        self.assert_true(
+            len(merged2) == 2 and all(e.click_count == 1 for e in merged2),
+            f"[PR-19b] 800ms gap 인접 click 별개 유지 실패. 결과: len={len(merged2)}, "
+            f"counts={[e.click_count for e in merged2]}",
+        )
+
+        self.step("(3) 다른 element 는 별개 (회귀 가드)")
+        other_meta = dict(base_meta, automation_id="CancelBtn", name="취소")
+        ev_other = _click(t0 + timedelta(milliseconds=100), meta=other_meta)
+        merged3 = _merge_consecutive_clicks([ev1, ev_other])
+        self.assert_true(
+            len(merged3) == 2,
+            f"[PR-19b] 다른 element 인접 click 별개 유지. 결과: {merged3!r}",
+        )
+
+        self.step("(4) 다른 button 은 별개 (left + right 빠르게)")
+        ev_right = _click(t0 + timedelta(milliseconds=100), button="right")
+        merged4 = _merge_consecutive_clicks([ev1, ev_right])
+        self.assert_true(
+            len(merged4) == 2,
+            f"[PR-19b] 다른 button 인접 click 별개 유지. 결과: {merged4!r}",
+        )
+
+        self.step("(5) build_pywinauto_click_code(double=True) → doubleClick emit")
+        code_dbl = build_pywinauto_click_code(base_meta, button="left", double=True)
+        for needle in (
+            "pyautogui.doubleClick(center_x, center_y)",
+            "click_input(double=True)",
+            "더블 클릭",
+        ):
+            self.assert_true(
+                needle in code_dbl,
+                f"[PR-19b] helper double=True 결과에 {needle!r} 필수.\n{code_dbl}",
+            )
+        self.assert_true(
+            "pyautogui.click(center_x" not in code_dbl,
+            f"[PR-19b] double=True 면 단일 click 코드 안 emit.\n{code_dbl}",
+        )
+
+        self.step("(6) right button + double → right double 무시 (single right-click)")
+        code_right_dbl = build_pywinauto_click_code(base_meta, button="right", double=True)
+        self.assert_true(
+            "pyautogui.click(center_x, center_y, button='right')" in code_right_dbl
+            and "right_click_input()" in code_right_dbl
+            and "doubleClick" not in code_right_dbl,
+            f"[PR-19b] right button 은 double 무시 (single right-click emit).\n{code_right_dbl}",
+        )
+
+        self.step("(7) transform end-to-end: 빠른 두 번 click → 1 step + doubleClick")
+        sess = RecordingSession(id="t", started_at=t0)
+        sess.events.append(_click(t0))
+        sess.events.append(_click(t0 + timedelta(milliseconds=200)))
+        steps = transform(sess)
+        self.assert_true(
+            len(steps) == 1,
+            f"[PR-19b] 빠른 두 번 click → 1 step (merge). 실제: {len(steps)}",
+        )
+        self.assert_true(
+            "pyautogui.doubleClick" in steps[0].generated_code,
+            f"[PR-19b] step 의 generated_code 에 doubleClick 필수.\n{steps[0].generated_code}",
+        )
+
+        self.step("(9) user_request 에 '더블 클릭' 표기")
+        self.assert_true(
+            "더블 클릭" in steps[0].user_request,
+            f"[PR-19b] user_request 에 '더블 클릭' 표기 필수. 실제: {steps[0].user_request!r}",
+        )
+
+        self.step("(8) 좌표 fallback (element_meta=None) double → pyautogui.doubleClick")
+        sess2 = RecordingSession(id="t2", started_at=t0)
+        sess2.events.append(_click(t0, meta={}, x=50, y=60))  # 빈 dict ≠ None
+        # element_meta=None 경로 직접 테스트 — RawEvent 만들 때 meta=None 명시
+        sess2 = RecordingSession(id="t3", started_at=t0)
+        ev_coord1 = RawEvent(ts=t0, kind="click", x=50, y=60, button="left", element_meta=None)
+        ev_coord2 = RawEvent(
+            ts=t0 + timedelta(milliseconds=100),
+            kind="click",
+            x=50,
+            y=60,
+            button="left",
+            element_meta=None,
+        )
+        sess2.events.extend([ev_coord1, ev_coord2])
+        steps2 = transform(sess2)
+        self.assert_true(
+            len(steps2) == 1
+            and "pyautogui.doubleClick(50, 60, button='left')" in steps2[0].generated_code,
+            f"[PR-19b] 좌표 fallback double-click. 결과: len={len(steps2)}, "
+            f"code={steps2[0].generated_code if steps2 else None!r}",
+        )
+
+    def test_195_regenerate_inplace_replaces_step_id(self):
+        """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
+        ``replaces_step_id`` 인자 누락 fix.
+
+        Bug 발견 — P1 옵션 3 실증 분석 (handoff §27 다음 세션 출발점):
+        세션 111e5306-... 의 step 7 가 ``replaces_step_id=None`` + ``element_meta=None``
+        으로 새 step 추가됨. ``_on_regenerate`` 가 ``_send_request`` 호출 시
+        ``replaces_step_id=step_id`` 전달 안 함 → handoff §22 #4 의 in-place 정책 위반.
+        ``_on_regenerate_with_warnings`` (G7-D path, test #113) 는 정상 전달 — 두 path
+        일관성 회복.
+
+        가드:
+        1. ``_on_regenerate`` source 가 ``replaces_step_id=step_id`` 전달
+        2. ``_on_regenerate_with_warnings`` 와 동일 패턴 유지 (test #113 와 보완)
+        """
+        import inspect as _inspect
+
+        from ui_v2.main_window_v2 import MainWindowV2
+
+        self.step("(1) _on_regenerate source 가 replaces_step_id=step_id 전달")
+        regen_src = _inspect.getsource(MainWindowV2._on_regenerate)
+        self.assert_true(
+            "replaces_step_id=step_id" in regen_src,
+            f"[PR-19j] _on_regenerate 가 _send_request 호출 시 "
+            f"replaces_step_id=step_id 전달 필수 (in-place 대체, handoff §22 #4).\n"
+            f"{regen_src}",
+        )
+
+        self.step("(2) _on_regenerate_with_warnings 와 동일 패턴 일관성")
+        warn_src = _inspect.getsource(MainWindowV2._on_regenerate_with_warnings)
+        self.assert_true(
+            "replaces_step_id=step_id" in warn_src,
+            "[PR-19j] _on_regenerate_with_warnings 도 동일 패턴 유지 (회귀 가드)",
+        )
+
     def test_72_codeviewer_clear_resets_block_view(self):
         """[회귀] CodeViewer.clear() 가 step 카드 + block 뷰 양쪽 모두 비움.
 
