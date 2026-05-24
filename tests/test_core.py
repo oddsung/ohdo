@@ -11270,6 +11270,161 @@ if __name__ == "__main__":
             f"[PR-19l] 둘 다 안전 → None (회귀 가드). 실제: {r!r}",
         )
 
+    def test_202_recording_replay_load_and_cli(self):
+        """[PR-19m 2026-05-24] core.recording_replay — JSONL 사후 재변환 helper +
+        CLI entry point.
+
+        handoff §33 P9: PR-19i 가 commit_recording 시점에 보존한
+        ``data/sessions/<id>/raw_events_<rec_id>.jsonl`` 을 다시 transform 으로
+        흘림 → 옵션 비교 / 디버깅 / replay UI 백엔드.
+
+        가드:
+        1. ``load_raw_events_from_jsonl`` 라운드트립 — 한글 element_meta + ts +
+           ime_open + modifiers 모두 보존
+        2. ``replay_jsonl`` end-to-end — JSONL → Step 리스트
+        3. ``replay_jsonl(opts=...)`` 옵션 토글로 결과 차이 (idle_boundary_ms 영향)
+        4. ``main()`` CLI — 파일 없음 → exit 1
+        5. ``main()`` CLI — --out 지정 → JSON 파일 생성 + step count
+        6. ``main()`` CLI — --out 미지정 → stdout 요약 + exit 0
+        7. 빈 JSONL → 빈 리스트 (graceful)
+        """
+        import io
+        import json
+        from contextlib import redirect_stderr, redirect_stdout
+        from datetime import datetime, timedelta
+        from pathlib import Path
+
+        from core.recorder_models import RawEvent, TransformOptions
+        from core.recording_replay import load_raw_events_from_jsonl, main, replay_jsonl
+
+        t0 = datetime(2026, 5, 24, 14, 0, 0)
+
+        def _make_jsonl(tmpdir: Path, events: list[RawEvent]) -> Path:
+            target = tmpdir / "raw_events_test123.jsonl"
+            target.write_text(
+                "".join(
+                    json.dumps(e.model_dump(mode="json", exclude_none=True), ensure_ascii=False)
+                    + "\n"
+                    for e in events
+                ),
+                encoding="utf-8",
+            )
+            return target
+
+        self.step("(1) load_raw_events_from_jsonl 라운드트립 — 한글 + ts + ime_open")
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            evs = [
+                RawEvent(
+                    ts=t0,
+                    kind="click",
+                    x=10,
+                    y=20,
+                    button="left",
+                    element_meta={
+                        "control_type": "Button",
+                        "name": "확인",
+                        "automation_id": "ok",
+                    },
+                ),
+                RawEvent(
+                    ts=t0 + timedelta(milliseconds=200),
+                    kind="key",
+                    vk_code=0x41,
+                    ime_open=True,
+                    modifiers=["ctrl"],
+                ),
+            ]
+            path = _make_jsonl(tmp, evs)
+            loaded = load_raw_events_from_jsonl(path)
+            self.assert_true(
+                len(loaded) == 2,
+                f"[PR-19m] 2 RawEvent 라운드트립. 실제: {len(loaded)}",
+            )
+            self.assert_true(
+                loaded[0].element_meta.get("name") == "확인"
+                and loaded[1].ime_open is True
+                and loaded[1].vk_code == 0x41
+                and loaded[1].modifiers == ["ctrl"],
+                f"[PR-19m] 한글 element_meta + ime_open + modifiers 보존. 실제: "
+                f"meta={loaded[0].element_meta}, ime={loaded[1].ime_open}, "
+                f"vk={loaded[1].vk_code}, mods={loaded[1].modifiers}",
+            )
+
+            self.step("(2) replay_jsonl end-to-end — JSONL → Step 리스트")
+            steps = replay_jsonl(path)
+            self.assert_true(
+                len(steps) >= 1,
+                f"[PR-19m] replay_jsonl 결과 step 존재. 실제: {len(steps)}",
+            )
+
+            self.step("(3) opts 토글로 결과 차이 — idle_boundary_ms 영향")
+            # 같은 element 두 번 click — click→다른 element 분리 사유 회피.
+            # 5초 gap → idle=3000 에선 별개 batch, idle=10000 에선 같은 batch.
+            # 같은 element 더 긴 gap (>500ms) 이면 _merge_consecutive_clicks 안 묶임.
+            same_meta = {"control_type": "Button", "name": "A", "automation_id": "ok"}
+            evs_gap = [
+                RawEvent(ts=t0, kind="click", x=1, y=1, button="left", element_meta=same_meta),
+                RawEvent(
+                    ts=t0 + timedelta(milliseconds=5300),
+                    kind="click",
+                    x=1,
+                    y=1,
+                    button="left",
+                    element_meta=same_meta,
+                ),
+            ]
+            gap_dir = tmp / "gap_dir"
+            gap_dir.mkdir()
+            path_gap = _make_jsonl(gap_dir, evs_gap)
+            steps_default = replay_jsonl(path_gap)
+            steps_long_idle = replay_jsonl(path_gap, opts=TransformOptions(idle_boundary_ms=10000))
+            self.assert_true(
+                len(steps_default) == 2 and len(steps_long_idle) == 1,
+                f"[PR-19m] idle_boundary_ms 토글로 step 분리 다름. "
+                f"default(3000ms)={len(steps_default)}, long(10000ms)={len(steps_long_idle)}",
+            )
+
+            self.step("(4) main() CLI — 파일 없음 → exit 1")
+            err_buf = io.StringIO()
+            with redirect_stderr(err_buf):
+                rc = main([str(tmp / "no_such.jsonl")])
+            self.assert_true(
+                rc == 1 and "파일 없음" in err_buf.getvalue(),
+                f"[PR-19m] 파일 없음 → exit 1 + stderr 에러. rc={rc}, err={err_buf.getvalue()!r}",
+            )
+
+            self.step("(5) main() CLI — --out 지정 → JSON 파일 + step count")
+            out_path = tmp / "replay_out.json"
+            out_buf = io.StringIO()
+            with redirect_stdout(out_buf):
+                rc = main([str(path), "--out", str(out_path)])
+            self.assert_true(
+                rc == 0 and out_path.exists(),
+                f"[PR-19m] --out 결과 파일 생성. rc={rc}, exists={out_path.exists()}",
+            )
+            out_data = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assert_true(
+                isinstance(out_data, list) and len(out_data) >= 1,
+                f"[PR-19m] --out JSON 이 step list. 실제: {out_data!r}",
+            )
+
+            self.step("(6) main() CLI — --out 미지정 → stdout 요약")
+            out_buf = io.StringIO()
+            with redirect_stdout(out_buf):
+                rc = main([str(path)])
+            stdout_text = out_buf.getvalue()
+            self.assert_true(
+                rc == 0 and "step" in stdout_text and "[01]" in stdout_text,
+                f"[PR-19m] stdout 요약 (step + [01] 번호). rc={rc}, stdout={stdout_text!r}",
+            )
+
+            self.step("(7) 빈 JSONL → 빈 리스트 graceful")
+            empty_path = tmp / "empty.jsonl"
+            empty_path.write_text("", encoding="utf-8")
+            empty_steps = replay_jsonl(empty_path)
+            self.assert_true(empty_steps == [], f"[PR-19m] 빈 JSONL → []. 실제: {empty_steps!r}")
+
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
         ``replaces_step_id`` 인자 누락 fix.
