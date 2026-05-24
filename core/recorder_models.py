@@ -68,6 +68,19 @@ class RawEvent(BaseModel):
     (다른 DPI 환경 재생 시 좌표 차이 진단). non-Windows / 캡처 실패 시 None.
     """
 
+    ime_open: bool = False
+    """PR-19k (2026-05-24) — key event 발생 시점의 활성 창 IME open 상태.
+
+    Windows: ``ImmGetContext`` + ``ImmGetOpenStatus``. 한글/CJK IME mode 가
+    켜진 상태에서 사용자가 'd', 'k', 's', ... 같은 영문 layout 키를 치면 OS
+    가 "ㅏ" 같은 자모 → "안녕" 같은 음절로 조합하지만, LL keyboard hook 은
+    raw VK code 만 보므로 압축된 텍스트를 알 수 없음. 이 필드가 True 인 키
+    들을 transform 이 모아서 ``pyautogui.write('dkssudgktpdy')`` 대신
+    ``pyperclip.copy('<수동 교체>') + Ctrl+V`` placeholder 로 변환 → 사용자가
+    review dialog 에서 실제 텍스트로 교체. non-Windows / IMM 미설치 / 활성
+    창 없음 / IMM 캡처 실패 시 False (현재 동작 유지 = 안전 default).
+    """
+
     model_config = {"extra": "allow"}
 
 

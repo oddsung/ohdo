@@ -438,12 +438,22 @@ def _emit_key_group(
         label = last_click.element_meta.get("_ohdo_label")
 
     text_chars: list[str] = []
+    text_any_ime: bool = False  # PR-19k: text 그룹에 IME open 상태 키가 하나라도 있으면 True
 
     def _flush_text() -> None:
-        nonlocal text_chars
+        nonlocal text_chars, text_any_ime
         if text_chars:
-            _emit_text(text_chars, is_password, label, opts, code_lines, desc_parts)
+            _emit_text(
+                text_chars,
+                is_password,
+                label,
+                opts,
+                code_lines,
+                desc_parts,
+                any_ime=text_any_ime,
+            )
             text_chars = []
+            text_any_ime = False
 
     for ev in key_events:
         vk = ev.vk_code or 0
@@ -475,6 +485,9 @@ def _emit_key_group(
         char = _VK_CHAR_MAP.get(vk)
         if char is not None:
             text_chars.append(char)
+            # PR-19k: 이 키가 IME open 상태였다면 text 그룹 전체에 마킹
+            if ev.ime_open:
+                text_any_ime = True
             continue
 
         special = _VK_SPECIAL_KEYS.get(vk)
@@ -493,15 +506,36 @@ def _emit_text(
     opts: TransformOptions,
     code_lines: list[str],
     desc_parts: list[str],
+    any_ime: bool = False,
 ) -> None:
     text = "".join(chars)
     if is_password and opts.integrate_secrets:
+        # 시크릿이 IME 보다 우선 — password 필드는 보통 IME 비활성. 둘 다 마킹된
+        # 케이스도 secret label path 가 의도일 가능성 (혹시 IME 실수 입력은
+        # 사용자가 review dialog 에서 secret 라벨 직접 확인).
         used_label = label or "password"
         code_lines.append(f"pyautogui.write(get_secret('{used_label}'))")
         desc_parts.append(f"비밀번호 입력 (get_secret('{used_label}'))")
-    else:
-        code_lines.append(f"pyautogui.write({text!r})")
-        desc_parts.append(f"텍스트 입력 {text!r}")
+        return
+
+    if any_ime:
+        # PR-19k (2026-05-24): 한글/CJK IME 입력 감지 — pyperclip + Ctrl+V
+        # placeholder 로 변환. LL hook 은 raw VK code 만 보므로 사용자가 친 영문
+        # layout 키 ('dkssudgktpdy') 가 OS IME 로 어떤 한글 ("안녕하세요") 으로
+        # 조합됐는지 모름. raw english 를 코멘트로 남겨 사용자가 review dialog
+        # 에서 실제 텍스트로 교체 (pyperclip 은 workflow_engine 의
+        # _ESSENTIAL_LIBRARY_IMPORTS 에 이미 포함 — import 자동).
+        code_lines.append(
+            f"# ⚠️ 한글/CJK IME 입력 감지 — 영문 layout 키: {text!r}. "
+            f"실제 입력 텍스트로 교체 후 실행하세요."
+        )
+        code_lines.append("pyperclip.copy('<여기에 실제 텍스트 입력>')")
+        code_lines.append("pyautogui.hotkey('ctrl', 'v')")
+        desc_parts.append(f"한글 IME 입력 (영문 키 {text!r} → 수동 교체 필요)")
+        return
+
+    code_lines.append(f"pyautogui.write({text!r})")
+    desc_parts.append(f"텍스트 입력 {text!r}")
 
 
 def _emit_scroll(ev: RawEvent, code_lines: list[str], desc_parts: list[str]) -> None:

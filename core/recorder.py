@@ -131,6 +131,40 @@ def _is_modifier_pressed(vk_code: int) -> bool:
         return False
 
 
+def _capture_ime_open() -> bool:
+    """PR-19k (2026-05-24) — 활성 창의 IME open 상태 캡처.
+
+    Windows: ``ImmGetContext(GetForegroundWindow()) → ImmGetOpenStatus``.
+    True 면 한글/CJK IME mode 가 켜진 상태에서 사용자가 keydown 함을 의미.
+    transform 단계에서 이 키들을 모아 ``pyperclip.copy(...) + Ctrl+V`` placeholder
+    로 변환 → 사용자가 review dialog 에서 실제 텍스트로 교체.
+
+    실패 (non-Windows / IMM 미설치 / hwnd=0 / ImmGetContext NULL / 예외) 시
+    False 반환 — 현재 동작 그대로 유지 (False 가 안전 default).
+    """
+    import sys
+
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        imm32 = ctypes.windll.imm32  # type: ignore[attr-defined]
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return False
+        himc = imm32.ImmGetContext(hwnd)
+        if not himc:
+            return False
+        try:
+            return bool(imm32.ImmGetOpenStatus(himc))
+        finally:
+            imm32.ImmReleaseContext(hwnd, himc)
+    except Exception:
+        return False
+
+
 DEFAULT_QUEUE_MAXSIZE = 10000
 """R2 PR-17 마이그레이션 모드 — drain queue 기본 상한.
 
@@ -427,12 +461,16 @@ class Recorder:
             # R2 PR-16w: F8 → marker. transform 이 marker 자체 drop.
             return RawEvent(ts=datetime.now(), kind="marker")
         # PR-19f (2026-05-24): modifier 상태 캡처 → transform 이 hotkey 변환에 사용.
+        # PR-19k (2026-05-24): IME open 상태 캡처 → transform 이 한글 IME 입력 시
+        # pyperclip + Ctrl+V placeholder 로 변환.
         modifiers = _capture_modifier_state()
+        ime_open = _capture_ime_open()
         return RawEvent(
             ts=datetime.now(),
             kind="key",
             vk_code=event.vk_code,
             modifiers=modifiers,
+            ime_open=ime_open,
         )
 
     def _build_winevent_raw(self, event: WinEventEvent) -> Optional[RawEvent]:

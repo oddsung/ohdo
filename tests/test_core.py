@@ -10974,6 +10974,154 @@ if __name__ == "__main__":
                 f"[PR-19i] 세션 dir 없으면 None graceful. 실제: {result!r}",
             )
 
+    def test_200_ime_open_emits_pyperclip_fallback(self):
+        """[PR-19k 2026-05-24] 한글/CJK IME 입력 감지 → pyperclip + Ctrl+V
+        placeholder fallback.
+
+        handoff §31 P6: LL keyboard hook 은 raw VK code 만 보므로 IME mode 가
+        켜진 상태에서 사용자가 'dkssudgktpdy' 같은 영문 layout 키를 치면 OS 가
+        "안녕하세요" 로 조합하지만 캡처는 raw english. ``RawEvent.ime_open=True``
+        키들을 모아 transform 이 pyperclip 코드 + 영문 키 코멘트 emit → 사용자가
+        review dialog 에서 실제 텍스트로 교체.
+
+        가드:
+        1. ``RawEvent.ime_open`` field default False
+        2. ``_capture_ime_open()`` 정의 + non-Windows 에서 False 반환 (안전 default)
+        3. ``_build_keyboard_raw`` 가 ``ime_open=_capture_ime_open()`` 전달
+        4. transform end-to-end: 모든 text 키가 ime_open=True → pyperclip.copy +
+           pyautogui.hotkey('ctrl', 'v') + 영문 키 코멘트 emit
+        5. transform end-to-end: 모든 키가 ime_open=False → 기존
+           pyautogui.write(...) 유지 (회귀 가드)
+        6. transform end-to-end: text 그룹 안 일부 키만 ime_open=True →
+           any_ime=True 로 pyperclip path (보수적 — IME 한 번이라도 켜졌으면
+           조합 가능)
+        7. password 필드 + ime_open=True → secret path 가 우선 (test_122 회귀)
+        """
+        import inspect as _inspect
+        import sys
+        from datetime import datetime
+
+        from core.recorder import _capture_ime_open
+        from core.recorder_models import RawEvent, RecordingSession
+        from core.recorder_transform import transform
+
+        self.step("(1) RawEvent.ime_open field default False")
+        ev_default = RawEvent(ts=datetime.now(), kind="key", vk_code=0x41)
+        self.assert_true(
+            ev_default.ime_open is False,
+            f"[PR-19k] RawEvent.ime_open default False. 실제: {ev_default.ime_open!r}",
+        )
+
+        self.step("(2) _capture_ime_open() 정의 + non-Windows → False")
+        # 함수 자체 존재 확인 (Windows 에서는 실제 OS 상태 반환 — 테스트 환경 일관성
+        # 없으므로 non-Windows 환경 분기만 검증). Windows 환경에선 부작용 없는 호출
+        # (예외 안 던지면 통과).
+        result = _capture_ime_open()
+        if sys.platform != "win32":
+            self.assert_true(
+                result is False,
+                f"[PR-19k] non-Windows 에서 _capture_ime_open False. 실제: {result!r}",
+            )
+        else:
+            self.assert_true(
+                isinstance(result, bool),
+                f"[PR-19k] Windows 에서 bool 반환. 실제 type: {type(result).__name__}",
+            )
+
+        self.step("(3) _build_keyboard_raw source 가 ime_open=_capture_ime_open() 전달")
+        from core.recorder import Recorder
+
+        build_src = _inspect.getsource(Recorder._build_keyboard_raw)
+        self.assert_true(
+            "ime_open=_capture_ime_open()" in build_src
+            or "_capture_ime_open()" in build_src
+            and "ime_open" in build_src,
+            f"[PR-19k] _build_keyboard_raw 가 ime_open=_capture_ime_open() 전달 필수.\n{build_src}",
+        )
+
+        t0 = datetime.now()
+
+        def _ime_key(vk: int, ime_open: bool = True):
+            return RawEvent(ts=t0, kind="key", vk_code=vk, ime_open=ime_open)
+
+        self.step("(4) 모든 text 키 ime_open=True → pyperclip + Ctrl+V + 영문 코멘트")
+        sess = RecordingSession(id="ime", started_at=t0)
+        # 'dkssud' (안녕 in 영문 layout) — 6 char 키
+        for vk in (0x44, 0x4B, 0x53, 0x53, 0x55, 0x44):
+            sess.events.append(_ime_key(vk, ime_open=True))
+        steps = transform(sess)
+        self.assert_true(
+            len(steps) == 1,
+            f"[PR-19k] 1 step (text 그룹). 실제: {len(steps)}",
+        )
+        code = steps[0].generated_code
+        for needle in (
+            "# ⚠️ 한글/CJK IME 입력 감지",
+            "'dkssud'",
+            "pyperclip.copy(",
+            "pyautogui.hotkey('ctrl', 'v')",
+        ):
+            self.assert_true(
+                needle in code,
+                f"[PR-19k] IME path 가 {needle!r} 포함 필수.\n{code}",
+            )
+        self.assert_true(
+            "pyautogui.write(" not in code,
+            f"[PR-19k] IME path 에서 pyautogui.write 호출 X (사용자 의도 손상).\n{code}",
+        )
+
+        self.step("(5) 모든 키 ime_open=False → 기존 pyautogui.write 유지 (회귀 가드)")
+        sess2 = RecordingSession(id="noime", started_at=t0)
+        for vk in (0x48, 0x49):  # 'hi'
+            sess2.events.append(_ime_key(vk, ime_open=False))
+        steps2 = transform(sess2)
+        code2 = steps2[0].generated_code
+        self.assert_true(
+            "pyautogui.write('hi')" in code2 and "pyperclip" not in code2,
+            f"[PR-19k] 비-IME path 는 pyautogui.write 유지.\n{code2}",
+        )
+
+        self.step("(6) 일부 키만 ime_open=True → any_ime=True (보수적 IME path)")
+        sess3 = RecordingSession(id="partial", started_at=t0)
+        sess3.events.append(_ime_key(0x48, ime_open=False))  # 'h'
+        sess3.events.append(_ime_key(0x49, ime_open=True))  # 'i' (IME 켜짐)
+        steps3 = transform(sess3)
+        code3 = steps3[0].generated_code
+        self.assert_true(
+            "pyperclip.copy(" in code3 and "pyautogui.write(" not in code3,
+            f"[PR-19k] text 그룹 안 한 키라도 ime_open=True 면 IME path.\n{code3}",
+        )
+
+        self.step("(7) password 필드 + ime_open=True → secret path 우선")
+        from core.recorder_models import TransformOptions
+
+        sess4 = RecordingSession(id="pwd", started_at=t0)
+        sess4.events.append(
+            RawEvent(
+                ts=t0,
+                kind="click",
+                x=1,
+                y=1,
+                button="left",
+                element_meta={
+                    "control_type": "Edit",
+                    "name": "Password",
+                    "automation_id": "password_box",
+                    "is_password_field": True,
+                    "_ohdo_label": "my_pw",
+                    "window_title": "Login",
+                },
+            )
+        )
+        sess4.events.append(_ime_key(0x41, ime_open=True))  # 'a' with IME on
+        sess4.events.append(_ime_key(0x42, ime_open=True))  # 'b' with IME on
+        steps4 = transform(sess4, opts=TransformOptions(integrate_secrets=True))
+        code4 = steps4[0].generated_code
+        self.assert_true(
+            "get_secret(" in code4 and "pyperclip" not in code4,
+            f"[PR-19k] password 필드 + IME 둘 다 마킹 시 secret path 우선.\n{code4}",
+        )
+
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
         ``replaces_step_id`` 인자 누락 fix.
