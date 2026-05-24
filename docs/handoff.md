@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-24 (여덟 번째 작업 — 자세한 변경은 §5 변경 이력 + §11~§34 인계 노트 참조). baseline: **core 202/202 + scenarios 73/73 그린** (§34 PR-19m +1 = test_202 raw events 사후 재변환 helper + CLI; §33 PR-19l +1 = test_201 generated_code destructive 패턴; §32 PR-19k +1 = test_200 한글 IME pyperclip placeholder; §31 PR-19i +1 = test_199 raw events JSONL 저장; §30 PR-19h +1 = test_198 destructive ⚠️ badge + commit confirm; §29 PR-19c +1 = test_197 idle gap → wait_after_ms 충전; §28 PR-19j +1 = test_195 regenerate in-place fix, PR-19b +1 = test_196 빠른 double-click 감지) (PySide6 단독 `.venv` 기준 — PR-11~18 = +37 + GUI 실측 1차 fix +5 (test_182~186) + PR-19a-g +8 (test_187~194) = 144→194). **2026-05-23~24 PR-19a → PR-19g 7개 fix 모두 완료, 사용자 GUI 실측 검증 통과** — 녹화 + 입력 + 실행 흐름이 처음으로 사용자 의도대로 동작. (a) PR-19a `core/pywinauto_codegen.py` helper 추출 + recorder 통합. (b) PR-19d `Step.element_meta` 보존 + AI 재생성 path adapter (PR-19d 의 hybrid mode 는 미테스트 — 옵션 3 후속). (c) PR-19e `_safe_str_literal` (json.dumps escape) — Win11 메모장 Document name 의 `\r` SyntaxError 회귀 차단 + `_build_connect_block` 이 `process_id` 우선 connect chain (탭 이름만 잡힌 case 처리). (d) **PR-19f modifier 키 인식 — Ctrl+A 등 hotkey 변환** (recorder 가 `GetAsyncKeyState` 로 modifier 캡처 → RawEvent.modifiers 채움; transform 이 `pyautogui.hotkey('ctrl', 'a')` emit). Session.recording_meta list 필드 + commit_recording metadata 보존. (e) **PR-19g UWP `Light Dismiss` / `PopupRoot` noise filter** — 메모장 닫힘 회귀 차단 (실측 v2-새세션-005917). 자세한 §27 신규. **다음 세션 출발점 — P1 옵션 3 실증 결과 분석 (진행 중)** → P2 PR-19h destructive UX / P3 PR-19b F-6 dedup / P4 PR-19c idle wait / P5 PR-19i raw events JSONL / P6 CJK IME. 자세한 §27 끝 "다음 세션 출발점". **2026-05-23 PR-19a 완료 — recorder_transform 코드 품질 1차**: 자세한 §26. **2026-05-20~23 사용자 GUI 실측 1차 — 녹화 lifecycle 6 fix 완료** (test_182~186). 자세한 §24 "다음 세션 출발점" + §25. **2026-05-19 사용자 결정 — TS UI 트랙 진행 순서**: ① GUI 실측 (진행 중) → ② AppService API 보강 → ③ 2~3주 뒤 PR-19 (FastAPI 라우터) + PR-20 (Vite + React + TS, web_ui/). **풀 TS 재작성 X — recorder/element_picker/win_inspector 는 Python 유지**, TS 는 UI 레이어만. **5/19 (오후): ADR 0004 Phase R2 PR-18 완료 — DPI/멀티모니터 안정화. `core/input_hooks.py` 에 `ensure_dpi_awareness()` (SetProcessDpiAwarenessContext PER_MONITOR_AWARE_V2 우선, SHCore SetProcessDpiAwareness fallback) + `get_dpi_for_point(x, y)` (MonitorFromPoint + GetDpiForMonitor) helper 추가. `get_hook_manager()` 가 idempotent 로 매 호출 ensure_dpi_awareness 트리거. drain thread 가 click event 의 `monitor_dpi` 캡처 (RawEvent 새 필드). `recorder_transform` 의 fallback `pyautogui.click(x, y)` 에 비표준 DPI 시 코멘트 첨부 (`# captured at DPI=144 (150%)`). **R2 완료 — PR-16w + PR-17 + PR-18 모두 완료.** 자세한 §24.** **5/19 (오전): PR-17 마이그레이션 모드 event queue + async EFP. LL hook callback 은 RawEvent 생성 + 큐 enqueue 만 (sub-ms, fast return). 별도 drain thread 가 큐를 빼며 element_capture_fn 호출 + session.events 적재. Windows ~300ms LL hook 타임아웃 안전 + 빠른 자동화 스크립트 (Power Automate / pywinauto / AutoHotkey) 입력 따라잡기 가능.** **5/18: ADR 0004 Phase R2 PR-16w 완료 — 창 포커스 자동 경계 (SetWinEventHook EVENT_SYSTEM_FOREGROUND + SKIPOWNPROCESS) + F8 키보드 hook 에서 marker 자동 변환. PR-13 의 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 가 비로소 end-to-end 작동 (이전엔 PR-13 에서 분리 로직만 구현되어 있었고 캡처 path 가 없어서 dead code 였음). 자세한 §24.** **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
+> 마지막 업데이트: 2026-05-24 (아홉 번째 작업 — 자세한 변경은 §5 변경 이력 + §11~§35 인계 노트 참조). baseline: **core 203/203 + scenarios 73/73 + recording_fixtures 2/2 그린** (§35 GUI 실측 자동화 1순위 — JSONL 픽스처 회귀 스위트 신규 + synthetic 2개) (§34 PR-19m +1 = test_202 raw events 사후 재변환 helper + CLI; §33 PR-19l +1 = test_201 generated_code destructive 패턴; §32 PR-19k +1 = test_200 한글 IME pyperclip placeholder; §31 PR-19i +1 = test_199 raw events JSONL 저장; §30 PR-19h +1 = test_198 destructive ⚠️ badge + commit confirm; §29 PR-19c +1 = test_197 idle gap → wait_after_ms 충전; §28 PR-19j +1 = test_195 regenerate in-place fix, PR-19b +1 = test_196 빠른 double-click 감지) (PySide6 단독 `.venv` 기준 — PR-11~18 = +37 + GUI 실측 1차 fix +5 (test_182~186) + PR-19a-g +8 (test_187~194) = 144→194). **2026-05-23~24 PR-19a → PR-19g 7개 fix 모두 완료, 사용자 GUI 실측 검증 통과** — 녹화 + 입력 + 실행 흐름이 처음으로 사용자 의도대로 동작. (a) PR-19a `core/pywinauto_codegen.py` helper 추출 + recorder 통합. (b) PR-19d `Step.element_meta` 보존 + AI 재생성 path adapter (PR-19d 의 hybrid mode 는 미테스트 — 옵션 3 후속). (c) PR-19e `_safe_str_literal` (json.dumps escape) — Win11 메모장 Document name 의 `\r` SyntaxError 회귀 차단 + `_build_connect_block` 이 `process_id` 우선 connect chain (탭 이름만 잡힌 case 처리). (d) **PR-19f modifier 키 인식 — Ctrl+A 등 hotkey 변환** (recorder 가 `GetAsyncKeyState` 로 modifier 캡처 → RawEvent.modifiers 채움; transform 이 `pyautogui.hotkey('ctrl', 'a')` emit). Session.recording_meta list 필드 + commit_recording metadata 보존. (e) **PR-19g UWP `Light Dismiss` / `PopupRoot` noise filter** — 메모장 닫힘 회귀 차단 (실측 v2-새세션-005917). 자세한 §27 신규. **다음 세션 출발점 — P1 옵션 3 실증 결과 분석 (진행 중)** → P2 PR-19h destructive UX / P3 PR-19b F-6 dedup / P4 PR-19c idle wait / P5 PR-19i raw events JSONL / P6 CJK IME. 자세한 §27 끝 "다음 세션 출발점". **2026-05-23 PR-19a 완료 — recorder_transform 코드 품질 1차**: 자세한 §26. **2026-05-20~23 사용자 GUI 실측 1차 — 녹화 lifecycle 6 fix 완료** (test_182~186). 자세한 §24 "다음 세션 출발점" + §25. **2026-05-19 사용자 결정 — TS UI 트랙 진행 순서**: ① GUI 실측 (진행 중) → ② AppService API 보강 → ③ 2~3주 뒤 PR-19 (FastAPI 라우터) + PR-20 (Vite + React + TS, web_ui/). **풀 TS 재작성 X — recorder/element_picker/win_inspector 는 Python 유지**, TS 는 UI 레이어만. **5/19 (오후): ADR 0004 Phase R2 PR-18 완료 — DPI/멀티모니터 안정화. `core/input_hooks.py` 에 `ensure_dpi_awareness()` (SetProcessDpiAwarenessContext PER_MONITOR_AWARE_V2 우선, SHCore SetProcessDpiAwareness fallback) + `get_dpi_for_point(x, y)` (MonitorFromPoint + GetDpiForMonitor) helper 추가. `get_hook_manager()` 가 idempotent 로 매 호출 ensure_dpi_awareness 트리거. drain thread 가 click event 의 `monitor_dpi` 캡처 (RawEvent 새 필드). `recorder_transform` 의 fallback `pyautogui.click(x, y)` 에 비표준 DPI 시 코멘트 첨부 (`# captured at DPI=144 (150%)`). **R2 완료 — PR-16w + PR-17 + PR-18 모두 완료.** 자세한 §24.** **5/19 (오전): PR-17 마이그레이션 모드 event queue + async EFP. LL hook callback 은 RawEvent 생성 + 큐 enqueue 만 (sub-ms, fast return). 별도 drain thread 가 큐를 빼며 element_capture_fn 호출 + session.events 적재. Windows ~300ms LL hook 타임아웃 안전 + 빠른 자동화 스크립트 (Power Automate / pywinauto / AutoHotkey) 입력 따라잡기 가능.** **5/18: ADR 0004 Phase R2 PR-16w 완료 — 창 포커스 자동 경계 (SetWinEventHook EVENT_SYSTEM_FOREGROUND + SKIPOWNPROCESS) + F8 키보드 hook 에서 marker 자동 변환. PR-13 의 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 가 비로소 end-to-end 작동 (이전엔 PR-13 에서 분리 로직만 구현되어 있었고 캡처 path 가 없어서 dead code 였음). 자세한 §24.** **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -2450,3 +2450,72 @@ python -m core.recording_replay <path> --idle-boundary-ms 5000 --drop-empty --ou
 2. **사용자 GUI 실측 진행 권장** — 누적된 PR-19a~m (13 PR) + 6 신규 테스트 (test_197~202) 효과를 사용자가 직접 검증해야 P10/P11 우선순위 평가 가능
 3. P11 (UI "Load from JSONL") 는 디자인은 단순하지만 사용자 가치 검증이 필요 — 실측 보류 중에는 우선순위 낮음
 4. P10 (IME 실제 텍스트 자동 캡처) 는 placeholder 한계 사용자 체감 후 디자인 결정 권장
+
+## 35. 2026-05-24 GUI 실측 자동화 인프라 1순위 — JSONL 픽스처 회귀 스위트
+
+**컨텍스트**: 사용자 시간 제약 (직접 GUI 실측 어려움) 해결. PR-19i + PR-19m 활용 — **사용자 1회 실측 = 영구 회귀 테스트로 재활용**. 신규 transform 변경 시마다 자동으로 사용자 시나리오 검증.
+
+### 핵심 인프라
+
+**[tests/fixtures/recordings/](../tests/fixtures/recordings/)** — 픽스처 저장소:
+- `<name>.jsonl` — raw events (PR-19i 가 commit 시 생성한 파일 그대로 복사)
+- `<name>.expected.json` — sidecar assertions (loose, transform 변경 robust):
+  ```json
+  {
+    "description": "...",
+    "min_steps": 1, "max_steps": 10,
+    "must_contain_in_any_code": ["pyautogui.write", ...],
+    "must_have_destructive": true|false,
+    "must_have_ime": true|false,
+    "must_have_idle_gap": true|false
+  }
+  ```
+
+**Synthetic 픽스처 2개 (사용자 입력 없이 통과 보장)**:
+- `synthetic_smoke.jsonl` — 최소 (Edit click + 'hi' 입력) — pipeline 동작 확인
+- `synthetic_comprehensive.jsonl` — Edit click + 한글 IME 'dks' + 6s idle gap + '닫기' Button destructive — PR-19c/h/k 동시 검증
+
+**[tests/test_recording_fixtures.py](../tests/test_recording_fixtures.py)** — 신규 suite (`suite="recording_fixtures"`):
+- `test_01_fixtures_smoke` — 모든 `.jsonl` glob → `replay_jsonl` 성공 + ≥1 step + 각 step `generated_code` non-empty
+- `test_02_fixtures_assertions` — 각 sidecar 의 assertions 검증 (min/max_steps, must_contain, must_have_destructive/ime/idle_gap)
+
+**[tests/test_runner.py](../tests/test_runner.py)** — `recording_fixtures` suite 등록 (argparse choices + suites_to_run 분기).
+
+### 사용자 픽스처 추가 흐름 (시간 1분)
+
+1. ohdo 에서 시나리오 녹화 → commit_recording → `data/sessions/<session_id>/raw_events_<rec_id>.jsonl` 자동 생성됨
+2. 파일을 `tests/fixtures/recordings/<scenario_name>.jsonl` 로 복사
+3. 같은 폴더에 `<scenario_name>.expected.json` sidecar 작성 (위 schema)
+4. `python -m tests.test_runner --suite recording_fixtures` 실행 → 통과 확인
+
+이후 transform / recorder 변경할 때마다 자동 회귀. **사용자 추가 시간 0**.
+
+### 권장 첫 픽스처 시나리오 (사용자 1회 실측, 각 30초~1분)
+
+- **메모장 기본 입력 + Ctrl+S** — `pyautogui.write` + `hotkey('ctrl', 's')` 검증
+- **메모장 X 버튼** — `must_have_destructive: true` (PR-19h)
+- **한글 IME 입력** — `must_have_ime: true` (PR-19k)
+- **파일 더블 클릭** — `must_contain_in_any_code: ["pyautogui.doubleClick"]` (PR-19b)
+- **5초+ 휴지 시나리오** — `must_have_idle_gap: true` (PR-19c)
+
+### 검증 결과
+
+- **recording_fixtures 2/2** + core 203/203 + scenarios 73/73 그린
+- ruff All passed (I001 import order auto-fix 1건)
+
+### 다음 세션 출발점 (2026-05-24 아홉 번째 작업 종료)
+
+| 우선순위 | 항목 | 상태 |
+|---|---|---|
+| **P1** | **옵션 3 실증 재시도** | 사용자 실측 시 raw_events JSONL 자동 보존 → **fixture 로 복사하면 영구 회귀** (시간 0) |
+| **P7** | F-6 잔여 — dedup vs 의도 보존 정책 | 사용자 결정 필요 |
+| ~~P9~~ | ~~replay helper + CLI~~ | 완료 (PR-19m, test_202) |
+| **P10** | IME 실제 텍스트 자동 캡처 | placeholder UX 검증 후 결정 |
+| **P11** | review dialog "📂 JSONL 불러오기" UI | replay CLI 가치 확인 후 |
+| **NEW** | **사용자 픽스처 5개 수집** | 위 권장 시나리오 5개 — 사용자 5분 투자, 영구 회귀 확보 |
+
+**새 세션 진입 시**:
+1. §35 + §34 + §33 읽기
+2. 사용자에게 권장 시나리오 5개 녹화 요청 → `data/sessions/.../raw_events_*.jsonl` 파일 5개 받기
+3. fixture 복사 + sidecar 작성 (Claude 가 자동 — 사용자 손 X) → 즉시 회귀 자산화
+4. 이후 transform 변경 시마다 `recording_fixtures` suite 통과 = 사용자 의도 보존 검증
