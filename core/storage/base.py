@@ -123,6 +123,33 @@ class SessionRepository(ABC):
     ) -> "Session":
         """외부 export 폴더로부터 세션을 임포트한다 (새 UUID 발급)."""
 
+    # ── Recording artifact (PR-19i — 2026-05-24) ──────────────────
+    #
+    # 작업 녹화 (ADR 0004) raw events 를 세션 부속 artifact 로 저장 — 사후
+    # 재변환 / 디버깅 / 옵션 비교 분석에 활용. 데스크톱은 ``data/sessions/<id>/
+    # raw_events_<rec_id>.jsonl`` (한 줄당 한 RawEvent JSON dump), backend
+    # 미지원 시 None 반환 → caller (``AppService.commit_recording``) 는 graceful
+    # skip (commit 자체는 성공).
+
+    @abstractmethod
+    def save_recording_raw_events(
+        self,
+        session_id: str,
+        recording_session_id: str,
+        events: list[dict],
+    ) -> Optional[str]:
+        """녹화 raw events 를 세션 부속 artifact 로 저장한다.
+
+        Args:
+            session_id: 녹화 commit 대상 ohdo Session id (저장 위치 기준).
+            recording_session_id: ``RecordingSession.id`` — 파일명 충돌 회피.
+            events: 직렬화된 raw events (Pydantic ``model_dump(mode="json")`` 결과).
+
+        Returns:
+            ``recording_meta.raw_events_path`` 에 보존될 식별자 (예: relative
+            path). ``None`` 이면 저장 미지원 — caller 는 metadata 에 path 미기록.
+        """
+
 
 class CaptureStore(ABC):
     """캡처 이미지 저장소 인터페이스 (ROADMAP §3 Phase 1 (1)).

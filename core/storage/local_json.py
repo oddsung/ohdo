@@ -121,3 +121,27 @@ class LocalJsonRepository(SessionRepository):
             source_dir=source_dir,
             new_title=new_title,
         )
+
+    # ── Recording artifact (PR-19i — 2026-05-24) ──────────────────
+
+    def save_recording_raw_events(
+        self,
+        session_id: str,
+        recording_session_id: str,
+        events: list[dict],
+    ) -> Optional[str]:
+        """``data/sessions/<id>/raw_events_<rec_id>.jsonl`` 에 한 줄당 한 RawEvent
+        JSON 으로 저장. 세션 dir 없으면 (commit 직전 create 실패 등) None 반환.
+        """
+        import json
+
+        session_dir = self._manager.sessions_dir / session_id
+        if not session_dir.exists():
+            return None
+        filename = f"raw_events_{recording_session_id}.jsonl"
+        target = session_dir / filename
+        target.write_text(
+            "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events),
+            encoding="utf-8",
+        )
+        return filename

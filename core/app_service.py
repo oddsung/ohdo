@@ -485,6 +485,31 @@ class AppService:
                 for s in session.steps[-len(edited_steps) :]
             ]
             rec_meta["committed_step_ids"] = [sid for sid in committed_step_ids if sid]
+
+            # PR-19i (2026-05-24): raw events JSONL 저장 — 사후 재변환 / 디버깅 /
+            # 옵션 비교 분석용. 저장 실패해도 commit 자체는 성공 (graceful).
+            # InMemoryRepository / 백엔드 미지원 시 None 반환 → metadata 미기록.
+            if self._recorder is not None and self._recorder.current_session is not None:
+                rs = self._recorder.current_session
+                try:
+                    events_json = [
+                        ev.model_dump(mode="json", exclude_none=True) for ev in rs.events
+                    ]
+                    raw_path = self._repo.save_recording_raw_events(
+                        session_id=target_session_id,
+                        recording_session_id=rs.id,
+                        events=events_json,
+                    )
+                    if raw_path:
+                        rec_meta["raw_events_path"] = raw_path
+                except Exception:
+                    import logging as _logging
+
+                    _logging.getLogger(__name__).exception(
+                        "PR-19i: raw events JSONL 저장 실패 (commit 자체는 성공): rec=%s",
+                        rs.id,
+                    )
+
             if not hasattr(session, "recording_meta") or session.recording_meta is None:
                 session.recording_meta = []
             session.recording_meta.append(rec_meta)

@@ -239,3 +239,19 @@ class InMemoryRepository(SessionRepository):
             "InMemoryRepository 는 file IO 가 본 의도가 아님 — "
             "import 는 LocalJsonRepository 또는 향후 backend 구현체 사용"
         )
+
+    # ── Recording artifact (PR-19i — 2026-05-24) ──────────────────
+
+    def save_recording_raw_events(
+        self,
+        session_id: str,
+        recording_session_id: str,
+        events: list[dict],
+    ) -> Optional[str]:
+        """In-memory backend 는 raw events 영속화 미지원 — None 반환.
+
+        ``AppService.commit_recording`` 은 path 미기록으로 graceful skip.
+        파일 저장 검증이 필요한 테스트는 ``LocalJsonRepository`` + ``tempfile.
+        TemporaryDirectory`` 사용.
+        """
+        return None

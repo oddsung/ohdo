@@ -10840,6 +10840,140 @@ if __name__ == "__main__":
             self.assert_true(key in ko, f"[PR-19h] ko.json 에 {key!r} 필수")
             self.assert_true(key in en, f"[PR-19h] en.json 에 {key!r} 필수")
 
+    def test_199_raw_events_jsonl_persisted_on_commit(self):
+        """[PR-19i 2026-05-24] commit_recording 가 raw events JSONL 저장 + path
+        recording_meta 에 보존.
+
+        handoff §30 P5: 사후 재변환 / 디버깅 / 옵션 비교 분석용. 데스크톱은
+        ``data/sessions/<id>/raw_events_<rec_id>.jsonl`` (한 줄당 한 RawEvent
+        JSON dump), InMemoryRepository 는 None 반환 (no-op, path 미기록).
+
+        가드:
+        1. ``SessionRepository`` abstract 메서드 ``save_recording_raw_events``
+           존재
+        2. ``LocalJsonRepository`` 구현 — JSONL 파일 작성 + filename 반환
+        3. ``InMemoryRepository`` 구현 — None 반환 (no-op)
+        4. LocalJsonRepository + tempdir end-to-end: commit_recording 후
+           파일 존재 + 한 줄당 한 RawEvent JSON + recording_meta[-1]
+           ["raw_events_path"] 일치
+        5. InMemoryRepository end-to-end: commit_recording 동작 정상 +
+           recording_meta[-1] 에 raw_events_path 키 없음 (None 반환)
+        6. 세션 dir 없으면 LocalJsonRepository 가 None 반환 (graceful)
+        """
+        import json
+        from datetime import datetime
+        from pathlib import Path
+
+        from core.app_service import AppService
+        from core.recorder_models import RawEvent
+        from core.storage import InMemoryRepository, LocalJsonRepository, SessionRepository
+
+        self.step("(1) SessionRepository abstract 메서드 save_recording_raw_events 존재")
+        self.assert_true(
+            hasattr(SessionRepository, "save_recording_raw_events"),
+            "[PR-19i] SessionRepository.save_recording_raw_events abstract 메서드 필수",
+        )
+        self.assert_true(
+            getattr(SessionRepository.save_recording_raw_events, "__isabstractmethod__", False),
+            "[PR-19i] save_recording_raw_events 가 @abstractmethod 필수",
+        )
+
+        self.step("(2) LocalJsonRepository + tempdir end-to-end")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = LocalJsonRepository(data_dir=Path(tmpdir))
+            svc = AppService(session_repo=repo)
+            svc.start_recording()
+            # 직접 raw event 주입 (drain thread 우회) — element_meta 한글 포함
+            ev1 = RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=10,
+                y=20,
+                button="left",
+                element_meta={"control_type": "Button", "name": "확인", "automation_id": "ok"},
+            )
+            ev2 = RawEvent(ts=datetime.now(), kind="key", vk_code=0x41)
+            svc._recorder._session.events.extend([ev1, ev2])
+            steps = svc.stop_recording()
+            self.assert_true(len(steps) >= 1, f"[PR-19i] stop_recording 변환 결과. {steps!r}")
+            session = svc.commit_recording(steps)
+
+            # recording_meta 끝에 raw_events_path 키 + filename 형식
+            self.assert_true(
+                bool(getattr(session, "recording_meta", None))
+                and "raw_events_path" in session.recording_meta[-1],
+                f"[PR-19i] recording_meta[-1] 에 raw_events_path 필수. 실제: "
+                f"{getattr(session, 'recording_meta', None)!r}",
+            )
+            raw_path_rel = session.recording_meta[-1]["raw_events_path"]
+            self.assert_true(
+                raw_path_rel.startswith("raw_events_") and raw_path_rel.endswith(".jsonl"),
+                f"[PR-19i] filename 형식 raw_events_<rec_id>.jsonl. 실제: {raw_path_rel!r}",
+            )
+
+            # 실제 파일 존재 + 줄별 RawEvent JSON
+            session_dir = Path(tmpdir) / "sessions" / session.session_id
+            target = session_dir / raw_path_rel
+            self.assert_true(target.exists(), f"[PR-19i] JSONL 파일 존재 필수: {target}")
+            lines = target.read_text(encoding="utf-8").splitlines()
+            self.assert_true(
+                len(lines) == 2,
+                f"[PR-19i] 2 RawEvent → 2 줄. 실제 {len(lines)} 줄",
+            )
+            parsed = [json.loads(line) for line in lines]
+            self.assert_true(
+                parsed[0]["kind"] == "click"
+                and parsed[0]["element_meta"]["name"] == "확인"
+                and parsed[1]["kind"] == "key"
+                and parsed[1]["vk_code"] == 0x41,
+                f"[PR-19i] JSONL 내용 정확 (한글 + raw fields 보존). 실제: {parsed!r}",
+            )
+
+        self.step("(3) InMemoryRepository — None 반환 (no-op, path 미기록)")
+        in_repo = InMemoryRepository()
+        # In-memory backend 직접 호출 — None 확인
+        result = in_repo.save_recording_raw_events(
+            session_id="any", recording_session_id="rec", events=[{"kind": "click"}]
+        )
+        self.assert_true(
+            result is None,
+            f"[PR-19i] InMemoryRepository.save_recording_raw_events → None. {result!r}",
+        )
+
+        # commit_recording end-to-end — recording_meta 에 raw_events_path 키 없음
+        svc2 = AppService(session_repo=in_repo)
+        svc2.start_recording()
+        svc2._recorder._session.events.append(
+            RawEvent(
+                ts=datetime.now(),
+                kind="click",
+                x=1,
+                y=1,
+                element_meta={"control_type": "Button", "name": "OK"},
+            )
+        )
+        steps2 = svc2.stop_recording()
+        session2 = svc2.commit_recording(steps2)
+        self.assert_true(
+            bool(getattr(session2, "recording_meta", None))
+            and "raw_events_path" not in session2.recording_meta[-1],
+            f"[PR-19i] InMemory 의 recording_meta 에 raw_events_path 키 없어야 함. 실제: "
+            f"{getattr(session2, 'recording_meta', None)!r}",
+        )
+
+        self.step("(4) LocalJsonRepository — 세션 dir 없으면 None (graceful)")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = LocalJsonRepository(data_dir=Path(tmpdir))
+            result = repo.save_recording_raw_events(
+                session_id="nonexistent-uuid",
+                recording_session_id="rec",
+                events=[{"kind": "click"}],
+            )
+            self.assert_true(
+                result is None,
+                f"[PR-19i] 세션 dir 없으면 None graceful. 실제: {result!r}",
+            )
+
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
         ``replaces_step_id`` 인자 누락 fix.
