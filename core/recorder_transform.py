@@ -103,14 +103,25 @@ def transform(
     self_titles = self_window_titles or []
 
     filtered = _filter_noise(session.events, opts, self_titles)
-    batches = _split_into_batches(filtered, opts)
+    batches, idle_gaps_ms = _split_into_batches(filtered, opts)
 
-    steps: list[Step] = []
+    # batch i ↔ step (또는 None — _batch_to_step 이 modifier-only 같은 경우 None 반환)
+    step_per_batch: list[Optional[Step]] = []
     for batch in batches:
-        step = _batch_to_step(batch, opts)
-        if step is not None:
-            steps.append(step)
+        step_per_batch.append(_batch_to_step(batch, opts))
 
+    # PR-19c (2026-05-24): idle_boundary_ms 휴지로 분리된 batch 의 gap 을 직전 batch
+    # 의 step.wait_after_ms 로 충전 → 사용자 의도한 step 간 호흡 보존. non-idle 분리
+    # (window_focus / F8 marker / key→click / click→다른 element) 는 gap=0 → 충전 X.
+    # 직전 step 이 None (modifier-only 같은 빈 batch) 이면 손실 — 코너 케이스 무시.
+    for i in range(1, len(batches)):
+        gap = idle_gaps_ms[i]
+        if gap > 0:
+            prev_step = step_per_batch[i - 1]
+            if prev_step is not None:
+                prev_step.wait_after_ms = gap
+
+    steps: list[Step] = [s for s in step_per_batch if s is not None]
     for i, step in enumerate(steps, start=1):
         step.step_id = i
 
@@ -169,7 +180,9 @@ def _filter_noise(
     return out
 
 
-def _split_into_batches(events: list[RawEvent], opts: TransformOptions) -> list[list[RawEvent]]:
+def _split_into_batches(
+    events: list[RawEvent], opts: TransformOptions
+) -> tuple[list[list[RawEvent]], list[int]]:
     """자동 경계 4 신호로 events 를 batch (=Step) 단위로 분할.
 
     경계 신호:
@@ -179,21 +192,37 @@ def _split_into_batches(events: list[RawEvent], opts: TransformOptions) -> list[
     - 이전 event 가 key 이고 현재가 click → 새 batch (key group 종료)
     - 이전 event 가 click 이고 현재가 click 이면 같은 element 가 아니면 새 batch
       (같은 element 면 double click → 같은 batch)
+
+    Returns:
+        (batches, idle_gaps_ms). idle_gaps_ms[i] 는 batches[i] 가 idle_boundary_ms
+        휴지로 분리된 경우의 직전 batch 끝 ~ 이 batch 시작 사이 gap (ms). 첫 batch
+        + idle 외 사유 (marker/window_focus/key→click/click→다른 element) 로 분리된
+        batch 는 0. PR-19c (2026-05-24) — ``transform`` 이 직전 step 의
+        ``wait_after_ms`` 로 충전.
     """
     batches: list[list[RawEvent]] = []
+    idle_gaps_ms: list[int] = []
     current: list[RawEvent] = []
+    pending_idle_gap_ms: int = 0  # 다음 batch 시작 시 charge 할 idle gap
+
+    def _close_current(idle_gap_for_next: int = 0) -> None:
+        nonlocal current, pending_idle_gap_ms
+        if current:
+            batches.append(current)
+            # 이 batch 의 진입 gap = 이전 round 에 set 된 pending_idle_gap_ms
+            idle_gaps_ms.append(pending_idle_gap_ms)
+            current = []
+        pending_idle_gap_ms = idle_gap_for_next
 
     for ev in events:
         if ev.kind == "marker":
             if opts.enable_f8_marker and current:
-                batches.append(current)
-                current = []
+                _close_current(idle_gap_for_next=0)
             continue
 
         if ev.kind == "window_focus":
             if opts.auto_window_focus_boundary and current:
-                batches.append(current)
-                current = []
+                _close_current(idle_gap_for_next=0)
             continue
 
         if not current:
@@ -202,11 +231,13 @@ def _split_into_batches(events: list[RawEvent], opts: TransformOptions) -> list[
 
         prev = current[-1]
         new_batch = False
+        idle_gap_to_charge = 0
 
         if opts.idle_boundary_ms > 0:
             delta_ms = (ev.ts - prev.ts).total_seconds() * 1000
             if delta_ms > opts.idle_boundary_ms:
                 new_batch = True
+                idle_gap_to_charge = int(round(delta_ms))
 
         if not new_batch and prev.kind == "key" and ev.kind == "click":
             new_batch = True
@@ -220,15 +251,16 @@ def _split_into_batches(events: list[RawEvent], opts: TransformOptions) -> list[
                 new_batch = True
 
         if new_batch:
-            batches.append(current)
-            current = [ev]
+            _close_current(idle_gap_for_next=idle_gap_to_charge)
+            current.append(ev)
         else:
             current.append(ev)
 
     if current:
         batches.append(current)
+        idle_gaps_ms.append(pending_idle_gap_ms)
 
-    return batches
+    return batches, idle_gaps_ms
 
 
 def _same_element(a: Optional[dict], b: Optional[dict]) -> bool:

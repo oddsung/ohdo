@@ -10545,6 +10545,149 @@ if __name__ == "__main__":
             f"code={steps2[0].generated_code if steps2 else None!r}",
         )
 
+    def test_197_idle_gap_charges_wait_after_ms(self):
+        """[PR-19c 2026-05-24] idle_boundary_ms 휴지로 split 된 batch 의 gap 을
+        직전 step 의 ``wait_after_ms`` 로 충전 — 사용자 의도한 step 간 호흡 보존.
+
+        handoff §28 P4: ``_split_into_batches`` 가 idle_boundary_ms (기본 3000ms)
+        초과 휴지로 batch 분리할 때, gap 값을 직전 step.wait_after_ms 에 저장.
+        non-idle 분리 (window_focus / F8 marker / key→click / click→다른 element)
+        는 충전 X.
+
+        가드:
+        1. ``_split_into_batches`` signature: ``tuple[list[list[RawEvent]], list[int]]``
+        2. idle split 시 직전 step.wait_after_ms 에 gap (ms, int) 충전
+        3. 첫 batch 의 idle_gaps_ms[0] = 0
+        4. non-idle 분리 (key→click) → wait_after_ms = None (충전 안 됨)
+        5. non-idle 분리 (click→다른 element) → wait_after_ms = None
+        6. F8 marker 분리 → wait_after_ms = None
+        7. 단일 batch (분리 없음) → wait_after_ms = None
+        """
+        from datetime import datetime, timedelta
+
+        from core.recorder_models import RawEvent, RecordingSession, TransformOptions
+        from core.recorder_transform import _split_into_batches, transform
+
+        t0 = datetime.now()
+
+        def _click(ts, meta_id="OkBtn"):
+            return RawEvent(
+                ts=ts,
+                kind="click",
+                x=100,
+                y=100,
+                button="left",
+                element_meta={
+                    "control_type": "Button",
+                    "name": "확인",
+                    "automation_id": meta_id,
+                    "class_name": "Button",
+                    "window_title": "Dialog",
+                },
+            )
+
+        def _key(ts, vk=0x41):
+            return RawEvent(ts=ts, kind="key", vk_code=vk)
+
+        opts = TransformOptions()
+
+        self.step("(1) _split_into_batches signature: (batches, idle_gaps_ms)")
+        result = _split_into_batches([_click(t0)], opts)
+        self.assert_true(
+            isinstance(result, tuple) and len(result) == 2,
+            f"[PR-19c] _split_into_batches 가 (batches, idle_gaps_ms) tuple 반환 필수. "
+            f"실제 type: {type(result).__name__}",
+        )
+        batches, gaps = result
+        self.assert_true(
+            isinstance(batches, list) and isinstance(gaps, list) and len(batches) == len(gaps),
+            f"[PR-19c] batches + idle_gaps_ms 동일 길이 list. "
+            f"batches len={len(batches)}, gaps len={len(gaps)}",
+        )
+        self.assert_true(
+            len(gaps) == 1 and gaps[0] == 0,
+            f"[PR-19c] 첫 batch idle_gaps_ms[0]=0. 실제: {gaps!r}",
+        )
+
+        self.step("(2) idle split → 직전 step.wait_after_ms 에 gap (ms) 충전")
+        sess = RecordingSession(id="t1", started_at=t0)
+        # Click → 5초 휴지 (> 3000ms idle_boundary) → Click (다른 element)
+        sess.events.append(_click(t0, meta_id="A"))
+        sess.events.append(_click(t0 + timedelta(milliseconds=5300), meta_id="B"))
+        steps = transform(sess)
+        self.assert_true(
+            len(steps) == 2,
+            f"[PR-19c] idle split → 2 step. 실제: {len(steps)}",
+        )
+        self.assert_true(
+            steps[0].wait_after_ms is not None and abs(steps[0].wait_after_ms - 5300) <= 1,
+            f"[PR-19c] 직전 step.wait_after_ms ≈ 5300ms (gap). 실제: {steps[0].wait_after_ms}",
+        )
+        self.assert_true(
+            steps[1].wait_after_ms is None,
+            f"[PR-19c] 마지막 step.wait_after_ms = None (뒤에 충전할 batch 없음). 실제: "
+            f"{steps[1].wait_after_ms}",
+        )
+
+        self.step("(3) idle_gaps_ms[0] = 0 + idle split batch idx 의 gap > 0")
+        filtered_evs = [
+            _click(t0, meta_id="A"),
+            _click(t0 + timedelta(milliseconds=5300), meta_id="B"),
+        ]
+        bs, gs = _split_into_batches(filtered_evs, opts)
+        self.assert_true(
+            len(bs) == 2 and gs[0] == 0 and gs[1] > 5000,
+            f"[PR-19c] idle split idx=1 의 gap > 0. 실제: batches={len(bs)}, gaps={gs!r}",
+        )
+
+        self.step("(4) non-idle 분리 (key→click) → wait_after_ms 충전 X")
+        # key (vk=A) → 200ms 후 click (idle 안 됨, key→click 경계로 분리)
+        sess2 = RecordingSession(id="t2", started_at=t0)
+        sess2.events.append(_key(t0))
+        sess2.events.append(_click(t0 + timedelta(milliseconds=200)))
+        steps2 = transform(sess2)
+        self.assert_true(
+            len(steps2) == 2,
+            f"[PR-19c] key→click 분리 → 2 step. 실제: {len(steps2)}",
+        )
+        self.assert_true(
+            steps2[0].wait_after_ms is None,
+            f"[PR-19c] key→click 분리 시 충전 X. 실제: {steps2[0].wait_after_ms}",
+        )
+
+        self.step("(5) non-idle 분리 (click→다른 element) → 충전 X")
+        sess3 = RecordingSession(id="t3", started_at=t0)
+        sess3.events.append(_click(t0, meta_id="A"))
+        sess3.events.append(_click(t0 + timedelta(milliseconds=100), meta_id="B"))
+        steps3 = transform(sess3)
+        self.assert_true(
+            len(steps3) == 2 and steps3[0].wait_after_ms is None,
+            f"[PR-19c] click→다른 element 분리 시 충전 X. "
+            f"len={len(steps3)}, wait={steps3[0].wait_after_ms if steps3 else None}",
+        )
+
+        self.step("(6) F8 marker 분리 → 충전 X")
+        sess4 = RecordingSession(id="t4", started_at=t0)
+        sess4.events.append(_click(t0))
+        sess4.events.append(RawEvent(ts=t0 + timedelta(milliseconds=100), kind="marker"))
+        sess4.events.append(_click(t0 + timedelta(milliseconds=200), meta_id="B"))
+        steps4 = transform(sess4)
+        self.assert_true(
+            len(steps4) == 2 and steps4[0].wait_after_ms is None,
+            f"[PR-19c] F8 marker 분리 시 충전 X. "
+            f"len={len(steps4)}, wait={steps4[0].wait_after_ms if steps4 else None}",
+        )
+
+        self.step("(7) 단일 batch (분리 없음) → wait_after_ms = None")
+        sess5 = RecordingSession(id="t5", started_at=t0)
+        sess5.events.append(_click(t0))
+        steps5 = transform(sess5)
+        self.assert_true(
+            len(steps5) == 1 and steps5[0].wait_after_ms is None,
+            f"[PR-19c] 단일 batch 의 wait_after_ms = None. 실제: "
+            f"len={len(steps5)}, wait={steps5[0].wait_after_ms if steps5 else None}",
+        )
+
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
         ``replaces_step_id`` 인자 누락 fix.
