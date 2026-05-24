@@ -11425,6 +11425,52 @@ if __name__ == "__main__":
             empty_steps = replay_jsonl(empty_path)
             self.assert_true(empty_steps == [], f"[PR-19m] 빈 JSONL → []. 실제: {empty_steps!r}")
 
+    def test_203_settings_dialog_tab_qss_contrast(self):
+        """[2026-05-24 사용자 보고] 환경설정 다이얼로그의 비활성 탭 글씨가 어두운
+        배경 위에서 거의 안 보임. fix: SettingsDialog 의 QTabWidget 에 명시적 QSS
+        적용 (Catppuccin Mocha 토큰) — ui_v2 가 dialog 띄울 때 main window stylesheet
+        가 cascade 안 됨 + themes.py 도 적용 안 됨.
+
+        가드:
+        1. `SettingsDialog._setup_ui` source 가 `tabs.setStyleSheet(` 포함
+        2. QSS 에 핵심 selector 포함: `QTabBar::tab`, `QTabBar::tab:selected`,
+           `QTabWidget::pane`
+        3. inactive + active 둘 다 visible color (#cdd6f4)
+        4. active accent (border-bottom: 2px solid #89b4fa) 적용
+        """
+        import inspect as _inspect
+
+        from ui.settings_dialog import SettingsDialog
+
+        src = _inspect.getsource(SettingsDialog._setup_ui)
+
+        self.step("(1) tabs.setStyleSheet( 호출 존재")
+        self.assert_true(
+            "tabs.setStyleSheet(" in src,
+            f"[QSS] SettingsDialog._setup_ui 가 tabs.setStyleSheet 호출 필수.\n{src}",
+        )
+
+        self.step("(2) 핵심 selector 포함")
+        for needle in ("QTabBar::tab", "QTabBar::tab:selected", "QTabWidget::pane"):
+            self.assert_true(
+                needle in src,
+                f"[QSS] QSS 에 {needle!r} 필수.\n{src}",
+            )
+
+        self.step("(3) inactive + active 둘 다 visible color (#cdd6f4)")
+        # color: #cdd6f4 가 두 번 이상 (inactive base + active override 둘 다)
+        self.assert_true(
+            src.count("#cdd6f4") >= 2,
+            f"[QSS] visible text color (#cdd6f4) 가 두 번 이상 (inactive + active). "
+            f"실제 count: {src.count('#cdd6f4')}",
+        )
+
+        self.step("(4) active accent (border-bottom + #89b4fa)")
+        self.assert_true(
+            "border-bottom: 2px solid #89b4fa" in src,
+            f"[QSS] active 탭 accent (border-bottom: 2px solid #89b4fa) 필수.\n{src}",
+        )
+
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
         ``replaces_step_id`` 인자 누락 fix.

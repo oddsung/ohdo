@@ -57,6 +57,32 @@ class SettingsDialog(QDialog):
 
         # 탭 위젯
         tabs = QTabWidget()
+        # 2026-05-24 사용자 보고: 비활성 탭 글씨가 어두운 배경 위에서 거의 안 보임.
+        # ui_v2 (메인 windowsstylesheet 가 dialog 로 cascade 안 됨 — themes.py 도
+        # 적용 안 됨). dialog 자체에 명시적 QSS 적용 (Catppuccin Mocha 토큰).
+        tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #313244;
+                background-color: #1e1e2e;
+            }
+            QTabBar::tab {
+                background-color: #181825;
+                color: #cdd6f4;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border: 1px solid #313244;
+                border-bottom: none;
+            }
+            QTabBar::tab:hover {
+                background-color: #313244;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e2e;
+                color: #cdd6f4;
+                border-bottom: 2px solid #89b4fa;
+                font-weight: bold;
+            }
+        """)
 
         # 1. AI 설정 탭
         tabs.addTab(self._create_ai_tab(), "🤖 AI 엔진")
