@@ -145,8 +145,15 @@ class SettingsDialog(QDialog):
         widget = QWidget()
         form = QFormLayout(widget)
 
+        # 2026-05-24 (handoff §36): 구 "gemini_cli" + command="gemini" → "cli_ai" + "agy"
+        # 자동 마이그레이션 — settings dict 가 legacy 라도 새 UI 가 정상 동작.
+        # core.ai_engine 은 ui/ banned 목록 — adapter 모듈에서 import (banned 제외).
+        from core.adapters.cli_ai_adapter import migrate_ai_settings as _migrate_ai
+
+        self.settings["ai"] = _migrate_ai(self.settings.get("ai", {}))
+
         engines = self.settings.get("ai", {}).get("available_engines", {})
-        current = self.settings.get("ai", {}).get("selected", "gemini_cli")
+        current = self.settings.get("ai", {}).get("selected", "cli_ai")
 
         # AI 엔진 선택
         self.ai_combo = QComboBox()
@@ -155,19 +162,79 @@ class SettingsDialog(QDialog):
         self.ai_combo.setCurrentText(current)
         form.addRow("AI 엔진:", self.ai_combo)
 
-        # 타임아웃 (Gemini CLI 전용)
+        # ── CLI AI 설정 (Agy / Claude Code / Codex / Custom) ────────
+        # 2026-05-24 (handoff §36): Google 이 gemini CLI 를 agy 로 rename + 사용자
+        # 요청으로 일반 CLI AI 어댑터로 통합. preset 선택 시 command / model 자동
+        # 채움 (수동 override 가능). custom preset 은 사용자 직접 입력.
+        from core.adapters.cli_ai_adapter import CLI_AI_PRESETS as _CLI_PRESETS
+
+        cli_config = engines.get("cli_ai", {})
+
+        cli_group = QGroupBox("CLI AI 도구 (subprocess 호출)")
+        cli_group.setToolTip(
+            "subprocess 로 직접 호출하는 CLI AI 도구. preset 선택 시 command + model "
+            "자동 채움. custom 선택 시 직접 입력 가능."
+        )
+        cli_form = QFormLayout(cli_group)
+
+        self.cli_preset_combo = QComboBox()
+        self.cli_preset_combo.addItem("(custom)", "custom")
+        for preset_name, preset_meta in _CLI_PRESETS.items():
+            label = preset_meta.get("display_name", preset_name)
+            self.cli_preset_combo.addItem(label, preset_name)
+        current_preset = (cli_config.get("preset") or "agy").lower()
+        idx = self.cli_preset_combo.findData(current_preset)
+        if idx >= 0:
+            self.cli_preset_combo.setCurrentIndex(idx)
+        self.cli_preset_combo.setToolTip(
+            "프리셋 선택 시 command + model 이 자동으로 채워집니다. "
+            "직접 수정도 가능 (custom 선택 시 모든 필드 수동 입력)."
+        )
+        self.cli_preset_combo.currentIndexChanged.connect(
+            lambda _: self._on_cli_preset_changed(_CLI_PRESETS)
+        )
+        cli_form.addRow("프리셋:", self.cli_preset_combo)
+
+        self.cli_command_edit = QLineEdit()
+        self.cli_command_edit.setPlaceholderText("agy / claude / codex")
+        self.cli_command_edit.setText(cli_config.get("command", "agy"))
+        self.cli_command_edit.setToolTip("실행 binary 이름 — PATH 에 등록돼 있어야 함.")
+        cli_form.addRow("command:", self.cli_command_edit)
+
+        self.cli_model_edit = QLineEdit()
+        self.cli_model_edit.setPlaceholderText("agy-3.1-pro / claude-opus-4-7 / gpt-5-codex")
+        self.cli_model_edit.setText(cli_config.get("model", ""))
+        self.cli_model_edit.setToolTip(
+            "모델 이름 — preset 마다 다름. 빈 값이면 CLI default 사용 (preview 자동 매핑 위험)."
+        )
+        cli_form.addRow("model:", self.cli_model_edit)
+
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(30, 600)
         self.timeout_spin.setSuffix(" 초")
         self.timeout_spin.setToolTip("AI 응답 대기 최대 시간 (권장: 180초)")
-        gemini_config = engines.get("gemini_cli", {})
-        self.timeout_spin.setValue(gemini_config.get("timeout_seconds", 180))
-        form.addRow("Gemini 응답 타임아웃:", self.timeout_spin)
+        self.timeout_spin.setValue(int(cli_config.get("timeout_seconds", 180)))
+        cli_form.addRow("timeout:", self.timeout_spin)
 
         self.retry_spin = QSpinBox()
         self.retry_spin.setRange(0, 10)
-        self.retry_spin.setValue(gemini_config.get("max_retries", 3))
-        form.addRow("Gemini 최대 재시도:", self.retry_spin)
+        self.retry_spin.setValue(int(cli_config.get("max_retries", 3)))
+        cli_form.addRow("max_retries:", self.retry_spin)
+
+        # 연결 테스트 — `<command> --version` 호출로 가용성 빠르게 검증
+        self.cli_test_btn = QPushButton("Test connection")
+        self.cli_test_btn.setToolTip(
+            "현재 입력한 command 가 PATH 에 존재하는지 + '--version' 호출 성공 여부 확인."
+        )
+        self.cli_test_btn.clicked.connect(self._test_cli_command)
+        cli_form.addRow("연결 테스트:", self.cli_test_btn)
+
+        self.cli_test_result_label = QLabel("")
+        self.cli_test_result_label.setWordWrap(True)
+        self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #6c7086;")
+        cli_form.addRow("", self.cli_test_result_label)
+
+        form.addRow(cli_group)
 
         # ── OpenAI 호환 API 설정 ────────────────────────────────────
         # base_url + api_key 만 등록하면 OpenAI / DeepSeek / Groq /
@@ -343,6 +410,78 @@ class SettingsDialog(QDialog):
             self.openai_base_url_edit.setText(preset["base_url"])
         if preset.get("model"):
             self.openai_model_edit.setText(preset["model"])
+
+    def _on_cli_preset_changed(self, presets: dict) -> None:
+        """[handoff §36] CLI AI preset 선택 시 command + model 자동 채움.
+
+        ``custom`` 선택 시 자동 채움 X — 사용자 직접 입력 유지.
+        """
+        preset_name = self.cli_preset_combo.currentData()
+        if not preset_name or preset_name == "custom":
+            return
+        preset = presets.get(preset_name, {})
+        if preset.get("command"):
+            self.cli_command_edit.setText(preset["command"])
+        if preset.get("model"):
+            self.cli_model_edit.setText(preset["model"])
+
+    def _test_cli_command(self) -> None:
+        """[handoff §36] CLI AI 도구 가용성 빠르게 검증.
+
+        1. ``shutil.which(command)`` 로 PATH 등록 확인
+        2. 등록되어 있으면 ``<command> --version`` (timeout 5s) 호출 — 성공/실패 보고
+
+        Save 전 입력값으로 즉시 검증 — 다른 CLI AI 설치 안 한 상태에서 preset 만
+        바꿔보고 진단 가능.
+        """
+        import shutil
+        import subprocess
+
+        cmd = self.cli_command_edit.text().strip()
+        if not cmd:
+            self.cli_test_result_label.setText("❌ command 비어있음")
+            self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #f38ba8;")
+            return
+
+        exec_path = shutil.which(cmd)
+        if not exec_path:
+            self.cli_test_result_label.setText(
+                f"❌ '{cmd}' PATH 에 없음 — 해당 CLI AI 도구 설치 + PATH 등록 필요"
+            )
+            self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #f38ba8;")
+            return
+
+        self.cli_test_result_label.setText(f"🔄 '{cmd} --version' 호출 중...")
+        self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #f9e2af;")
+
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.processEvents()
+
+        try:
+            result = subprocess.run(
+                [exec_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                encoding="utf-8",
+            )
+            out = (result.stdout or result.stderr or "").strip()
+            version_preview = out.splitlines()[0][:120] if out else "(no output)"
+            if result.returncode == 0:
+                self.cli_test_result_label.setText(f"✅ {exec_path}\n   {version_preview}")
+                self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #a6e3a1;")
+            else:
+                self.cli_test_result_label.setText(
+                    f"⚠ '{cmd} --version' 종료 코드 {result.returncode}: {version_preview}"
+                )
+                self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #f9e2af;")
+        except subprocess.TimeoutExpired:
+            self.cli_test_result_label.setText(f"⚠ '{cmd} --version' 5초 timeout")
+            self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #f9e2af;")
+        except Exception as exc:  # noqa: BLE001
+            self.cli_test_result_label.setText(f"❌ 실행 예외: {type(exc).__name__}: {exc}")
+            self.cli_test_result_label.setStyleSheet("padding: 4px 0; color: #f38ba8;")
 
     def _create_image_tab(self) -> QWidget:
         widget = QWidget()
@@ -870,9 +1009,25 @@ class SettingsDialog(QDialog):
         """현재 설정값을 딕셔너리로 반환"""
         # AI
         self.settings["ai"]["selected"] = self.ai_combo.currentText()
-        gemini = self.settings["ai"]["available_engines"].get("gemini_cli", {})
-        gemini["timeout_seconds"] = self.timeout_spin.value()
-        gemini["max_retries"] = self.retry_spin.value()
+
+        # CLI AI (preset + command + model + timeout + max_retries)
+        # 2026-05-24 (handoff §36): 구 "gemini_cli" 섹션 대신 "cli_ai" 섹션 저장.
+        # _create_ai_tab 의 migration 으로 dialog 진입 시점에 이미 cli_ai 섹션 존재.
+        engines_dict = self.settings["ai"].setdefault("available_engines", {})
+        cli_ai = engines_dict.setdefault("cli_ai", {})
+        preset_data = self.cli_preset_combo.currentData() or "custom"
+        cli_ai["preset"] = preset_data
+        cli_ai["command"] = self.cli_command_edit.text().strip() or "agy"
+        cli_ai["model"] = self.cli_model_edit.text().strip()
+        cli_ai["timeout_seconds"] = self.timeout_spin.value()
+        cli_ai["max_retries"] = self.retry_spin.value()
+        # preset default 채워서 어댑터 init 시 fallback 안정성 확보
+        from core.adapters.cli_ai_adapter import CLI_AI_PRESETS as _CLI_PRESETS
+
+        if preset_data in _CLI_PRESETS:
+            preset_meta = _CLI_PRESETS[preset_data]
+            cli_ai.setdefault("model_arg", preset_meta.get("model_arg", "-m"))
+            cli_ai.setdefault("prompt_arg", preset_meta.get("prompt_arg"))
 
         # OpenAI 호환 API
         engines_dict = self.settings["ai"].setdefault("available_engines", {})

@@ -224,8 +224,9 @@ class EnvironmentSetupDialog(QDialog):
 
         layout.addWidget(pkg_group)
 
-        # Gemini CLI 상태 (F.2)
-        gemini_group = QGroupBox("🤖 Gemini CLI (AI 채팅에 필수)")
+        # CLI AI 상태 (F.2) — 2026-05-24 (handoff §36): "Gemini CLI" → "CLI AI"
+        # (Agy / Claude Code / Codex 등 지원). 내부 위젯 이름은 history 보존 위해 유지.
+        gemini_group = QGroupBox("🤖 CLI AI (AI 채팅에 필수 — Agy / Claude Code / Codex 등)")
         gemini_layout = QFormLayout(gemini_group)
         self.gemini_status_label = QLabel("검사 중...")
         self.gemini_path_label = QLabel("-")

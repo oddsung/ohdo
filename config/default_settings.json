@@ -1,11 +1,13 @@
 {
   "ai": {
-    "selected": "gemini_cli",
+    "selected": "cli_ai",
     "available_engines": {
-      "gemini_cli": {
-        "command": "gemini",
-        "model": "gemini-3.1-pro-preview",
-        "flags": "-p",
+      "cli_ai": {
+        "preset": "agy",
+        "command": "agy",
+        "model": "agy-3.1-pro",
+        "model_arg": "-m",
+        "prompt_arg": "-p",
         "timeout_seconds": 120,
         "max_retries": 3
       },

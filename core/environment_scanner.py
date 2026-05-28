@@ -160,14 +160,18 @@ class EnvironmentScanner:
             print(f"[DEBUG] Python 버전 조회 실패 ({python_path}): {e}")
             return "unknown"
 
-    def check_gemini_cli(self, command: str = "gemini", timeout: int = 10) -> Dict:
-        """Gemini CLI 가 설치되어 있고 실행 가능한지 검증.
+    def check_cli_ai(self, command: str = "agy", timeout: int = 10) -> Dict:
+        """[handoff §36 2026-05-24] CLI AI 도구가 설치되어 있고 실행 가능한지 검증.
+
+        이전 ``check_gemini_cli`` 의 일반화 버전. agy / claude / codex 등 어떤
+        CLI AI 든 ``<command> --version`` 으로 검증. ``check_gemini_cli`` 는
+        back-compat alias 로 유지.
 
         반환 dict 키:
             - installed: PATH 에서 찾았고 --version 호출이 성공한 경우 True
-            - command: 검사한 명령어 (기본 'gemini')
+            - command: 검사한 명령어 (기본 'agy')
             - path: shutil.which 결과 (없으면 None)
-            - version: 'gemini --version' 의 stdout (실패 시 None)
+            - version: '<command> --version' 의 stdout (실패 시 None)
             - error: 'not_found' | 'timeout' | 'non_zero_exit' | None
             - detail: 사람이 읽을 수 있는 추가 메시지 (옵션)
         """
@@ -211,6 +215,10 @@ class EnvironmentScanner:
         result["installed"] = True
         result["version"] = version or "unknown"
         return result
+
+    # 2026-05-24 (handoff §36): back-compat alias — 기존 호출자 ``check_gemini_cli``
+    # 가 그대로 동작. default command 만 새 이름 'agy' 로 변경 (Google rename).
+    check_gemini_cli = check_cli_ai
 
     def find_python_paths(self) -> List[Dict]:
         """시스템에서 사용 가능한 Python 경로 탐색"""
@@ -388,17 +396,22 @@ class EnvironmentScanner:
             "python_version": self._probe_python_version(python_path),
             "available_pythons": self.find_python_paths(),
             "packages": None,
-            "gemini_cli": None,
+            "cli_ai": None,
+            "gemini_cli": None,  # back-compat alias (handoff §36) — 동일 값 가리킴
             "scan_time": datetime.now().isoformat(),
         }
 
         # 패키지 상태 확인
         env_data["packages"] = self.check_all_packages(python_path)
 
-        # Gemini CLI 검사 — 미설치여도 앱은 기동 가능 (UI 만 동작), 따라서
+        # CLI AI 검사 — 미설치여도 앱은 기동 가능 (UI 만 동작), 따라서
         # full_scan 결과에는 포함하되 is_environment_valid 의 invalid 사유에는
         # 포함하지 않는다. dialog 가 별도로 게이트한다.
-        env_data["gemini_cli"] = self.check_gemini_cli()
+        # 2026-05-24 (handoff §36): "gemini" → "agy" rename, "cli_ai" 키 신규.
+        # 기존 호출자 호환 위해 "gemini_cli" 키에도 같은 값 alias.
+        cli_status = self.check_cli_ai()
+        env_data["cli_ai"] = cli_status
+        env_data["gemini_cli"] = cli_status
 
         return env_data
 

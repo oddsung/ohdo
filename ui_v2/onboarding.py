@@ -184,11 +184,14 @@ class OnboardingWizard(QDialog):
         self._engine_group = QButtonGroup(self)
 
         # 사용 가능한 엔진 동적 표시 (settings.ai.available_engines 기준)
+        # 2026-05-24 (handoff §36): "gemini_cli" → "cli_ai" rename. legacy 키도
+        # 같이 노출해 기존 settings.json 호환.
         engines_cfg = self._settings.get("ai", {}).get("available_engines", {})
-        current_selected = self._settings.get("ai", {}).get("selected", "gemini_cli")
+        current_selected = self._settings.get("ai", {}).get("selected", "cli_ai")
 
         engine_options = [
-            ("gemini_cli", tr("ui_v2.onboarding.engine_gemini_cli")),
+            ("cli_ai", tr("ui_v2.onboarding.engine_cli_ai")),
+            ("gemini_cli", tr("ui_v2.onboarding.engine_gemini_cli")),  # legacy alias
             ("openai_compat", tr("ui_v2.onboarding.engine_openai_compat")),
         ]
         for key, label in engine_options:

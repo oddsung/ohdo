@@ -3298,6 +3298,8 @@ class ScenariosTest(TestCase):
             self.assert_true(raised, "ai_manager 미주입 + switch → RuntimeError")
 
             # ai_manager 주입 — 정상 동작
+            # 2026-05-24 (handoff §36): legacy "gemini_cli" 키도 마이그레이션으로
+            # "cli_ai" 자동 전환. selected 도 "cli_ai" 로 정규화됨.
             ai = AIEngineManager(
                 {
                     "ai": {
@@ -3310,7 +3312,7 @@ class ScenariosTest(TestCase):
                 }
             )
             svc = AppService(session_repo=repo, ai_manager=ai)
-            self.assert_equal(svc.get_ai_engine_name(), "gemini_cli")
+            self.assert_equal(svc.get_ai_engine_name(), "cli_ai")
             svc.switch_ai_engine("openai_compat")
             self.assert_equal(svc.get_ai_engine_name(), "openai_compat")
             engines = svc.list_ai_engines()

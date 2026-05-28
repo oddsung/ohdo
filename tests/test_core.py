@@ -279,10 +279,10 @@ class CoreTest(TestCase):
     # ──────────────────────────────────────────
 
     def test_13_ai_engine_manager_init(self):
-        """AIEngineManager 초기화"""
+        """AIEngineManager 초기화 + gemini_cli → cli_ai 자동 마이그레이션 (handoff §36)"""
         from core.ai_engine import AIEngineManager
 
-        self.step("설정으로 초기화")
+        self.step("legacy 'gemini_cli' selected → 'cli_ai' 로 자동 마이그레이션")
         settings = {
             "ai": {
                 "selected": "gemini_cli",
@@ -291,7 +291,16 @@ class CoreTest(TestCase):
         }
         manager = AIEngineManager(settings)
         self.assert_equal(
-            manager.get_current_name(), "gemini_cli", "기본 엔진이 gemini_cli이어야 합니다"
+            manager.get_current_name(),
+            "cli_ai",
+            "handoff §36 — legacy 'gemini_cli' 가 'cli_ai' 로 자동 전환",
+        )
+        # command "gemini" → "agy" 자동 rename 도 확인
+        cli_cfg = manager.ai_settings.get("available_engines", {}).get("cli_ai", {})
+        self.assert_equal(
+            cli_cfg.get("command"),
+            "agy",
+            "handoff §36 — command 'gemini' → 'agy' 자동 rename",
         )
 
         self.step("사용 가능한 엔진 목록")
@@ -670,7 +679,11 @@ class CoreTest(TestCase):
             self.assert_not_none(result["detail"], "사용자에게 보일 detail 메시지가 있어야 함")
 
     def test_31_check_gemini_cli_shape(self):
-        """기본 'gemini' 호출의 결과 dict 가 약속된 shape 를 가져야 한다.
+        """기본 CLI AI 호출의 결과 dict 가 약속된 shape 를 가져야 한다.
+
+        2026-05-24 (handoff §36): Gemini CLI → Agy CLI rename + 일반 CLI AI 통합.
+        default command 가 'gemini' → 'agy'. ``check_gemini_cli`` 는 back-compat
+        alias 로 유지되며 ``check_cli_ai`` 로 위임 — default 'agy'.
 
         설치 여부와 무관하게 dict 의 키 집합과 타입이 일관되어야 dialog
         쪽에서 분기 코드를 단순하게 유지할 수 있다.
@@ -683,7 +696,7 @@ class CoreTest(TestCase):
 
             for key in ("installed", "command", "path", "version", "error", "detail"):
                 self.assert_true(key in result, f"결과 dict 에 '{key}' 키가 있어야 합니다")
-            self.assert_equal(result["command"], "gemini")
+            self.assert_equal(result["command"], "agy")
             self.assert_true(isinstance(result["installed"], bool), "installed 는 bool")
             if result["installed"]:
                 self.assert_true(result["error"] is None, "installed=True 면 error=None")
@@ -2307,15 +2320,29 @@ if __name__ == "__main__":
         )
 
     def test_71_gemini_adapter_passes_model_flag(self):
-        """[회귀] GeminiCLIAdapter 가 config.model 을 -m 인자로 명시 전달.
+        """[회귀] CliAIAdapter (구 GeminiCLIAdapter) 가 config.model 을 ``model_arg``
+        인자로 명시 전달.
 
         Bug (2026-05-04): gemini CLI headless (-p / stdin) default 가
         gemini-3-flash-preview (preview) 로 잡혀 capacity 부족 → 180초 timeout 회귀.
         Fix: config.model 을 -m 플래그로 명시 → preview 자동 매핑 회피.
+
+        2026-05-24 (handoff §36): Gemini → Agy rename + 일반 CLI AI 통합. test 는
+        CliAIAdapter 기반으로 갱신 — GeminiCLIAdapter 는 back-compat alias.
+        sentinel 의 ``gemini_exec`` → ``cli_exec`` 로 변수명 변경. settings.json
+        engine key 도 ``gemini_cli`` → ``cli_ai`` 로 갱신.
         """
+        from core.adapters.cli_ai_adapter import CliAIAdapter
         from core.adapters.gemini_cli_adapter import GeminiCLIAdapter
 
-        adapter = GeminiCLIAdapter({"command": "gemini", "model": "gemini-2.5-flash"})
+        # GeminiCLIAdapter 는 CliAIAdapter alias — 동일 클래스
+        self.assert_true(
+            GeminiCLIAdapter is CliAIAdapter,
+            "[handoff §36] GeminiCLIAdapter 는 CliAIAdapter alias",
+        )
+
+        # model 명시 + preset 없음 → -m <model> 추가 (legacy back-compat)
+        adapter = CliAIAdapter({"command": "gemini", "model": "gemini-2.5-flash"})
         args_with_model = adapter._build_args("gemini.exe")
         self.assert_true(
             "-m" in args_with_model and "gemini-2.5-flash" in args_with_model,
@@ -2326,10 +2353,10 @@ if __name__ == "__main__":
             "-m" in args_with_p and "-p" in args_with_p,
             f"[회귀] -p 모드에서도 -m 보존. args: {args_with_p!r}",
         )
-        adapter_no_model = GeminiCLIAdapter({"command": "gemini"})
+        adapter_no_model = CliAIAdapter({"command": "gemini"})
         self.assert_true(
             "-m" not in adapter_no_model._build_args("gemini.exe"),
-            "[회귀] config.model 미설정 시 -m 추가 안 함",
+            "[회귀] config.model 미설정 + preset 미명시 시 -m 추가 안 함 (back-compat)",
         )
 
         import json
@@ -2338,37 +2365,39 @@ if __name__ == "__main__":
         cfg = json.loads(
             (Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8")
         )
-        gemini_cfg = cfg.get("ai", {}).get("available_engines", {}).get("gemini_cli", {})
-        # 가드 의도 (5/4): CLI 의 default preview 자동 매핑 회피 — model 이 명시적으로 지정돼야 함.
-        # 5/6 사용자 결정: gemini-3.x preview 도 사용자 명시 선택 시 허용 (자동 매핑이 아님).
-        # 따라서 "gemini-" prefix 만 검증 (빈 값 / 공백 / 다른 provider 만 차단).
+        cli_cfg = cfg.get("ai", {}).get("available_engines", {}).get("cli_ai", {})
+        # 가드 의도 (5/4 + handoff §36): CLI 의 default preview 자동 매핑 회피 — model 이
+        # 명시적으로 지정돼야 함. 5/6 사용자 결정: gemini-3.x preview 도 사용자 명시
+        # 선택 시 허용 (자동 매핑이 아님). agy CLI 도 동일 — model 명시 필수.
+        # 따라서 "agy-" / "gemini-" prefix 만 검증 (빈 값 / 다른 provider 만 차단).
+        model = cli_cfg.get("model", "")
         self.assert_true(
-            gemini_cfg.get("model", "").startswith("gemini-"),
-            f"[회귀] settings.json gemini_cli.model 명시 필수 (gemini-* prefix). "
-            f"실제: {gemini_cfg.get('model')!r}",
+            model.startswith("agy-") or model.startswith("gemini-"),
+            f"[회귀] settings.json cli_ai.model 명시 필수 (agy-* / gemini-* prefix). "
+            f"실제: {model!r}",
         )
 
         # Production path 검증 (5/5 추가): _build_args 가 정의만 돼 있고
         # 실제 subprocess.Popen 호출에서 사용 안 되면 -m 플래그가 안 붙어
         # capacity 회귀 재발. 두 path 모두 _build_args 경유 필수.
+        # handoff §36: 변수명 gemini_exec → cli_exec (일반화).
         import inspect
 
-        gen_src = inspect.getsource(GeminiCLIAdapter.generate)
+        gen_src = inspect.getsource(CliAIAdapter.generate)
         self.assert_true(
-            "self._build_args(gemini_exec)" in gen_src,
-            "[회귀] stdin path Popen 가 self._build_args(gemini_exec) 사용 필수 "
-            "(raw [gemini_exec] 리터럴은 -m 플래그 누락 회귀)",
+            "self._build_args(cli_exec)" in gen_src,
+            "[회귀] stdin path Popen 가 self._build_args(cli_exec) 사용 필수 "
+            "(raw [cli_exec] 리터럴은 model flag 누락 회귀)",
         )
         self.assert_true(
-            'self._build_args(gemini_exec, "-p"' in gen_src,
-            '[회귀] -p path Popen 가 self._build_args(gemini_exec, "-p", ...) 사용 필수 '
-            '(raw [gemini_exec, "-p", ...] 리터럴은 -m 플래그 누락 회귀)',
+            "self._build_args(cli_exec, self.prompt_arg" in gen_src,
+            "[회귀] prompt_arg fallback path Popen 가 self._build_args(cli_exec, "
+            "self.prompt_arg, ...) 사용 필수",
         )
         # raw 리터럴 패턴이 production path 에 남으면 안 됨
         self.assert_true(
-            "Popen(\n                    [gemini_exec]" not in gen_src
-            and "Popen([gemini_exec]" not in gen_src,
-            "[회귀] subprocess.Popen 에 [gemini_exec] raw 리터럴 직접 전달 금지 "
+            "Popen([cli_exec]" not in gen_src and "Popen([gemini_exec]" not in gen_src,
+            "[회귀] subprocess.Popen 에 [cli_exec] raw 리터럴 직접 전달 금지 "
             "(_build_args 경유 필수)",
         )
 
@@ -11470,6 +11499,137 @@ if __name__ == "__main__":
             "border-bottom: 2px solid #89b4fa" in src,
             f"[QSS] active 탭 accent (border-bottom: 2px solid #89b4fa) 필수.\n{src}",
         )
+
+    def test_204_cli_ai_adapter_presets_and_migration(self):
+        """[handoff §36 2026-05-24] CLI AI 일반 어댑터 + preset 시스템 회귀.
+
+        Google 이 gemini CLI 를 agy 로 rename + 사용자 요청으로 CLI AI 일반화 ⇒
+        CliAIAdapter (agy / claude_code / codex / custom) + migrate_ai_settings
+        + GeminiCLIAdapter back-compat alias.
+
+        가드:
+        1. CLI_AI_PRESETS 에 agy / claude_code / codex 모두 존재
+        2. 각 preset 의 필수 키 (command + display_name + model)
+        3. CliAIAdapter(preset="agy") → command="agy" + agy model auto-fill
+        4. CliAIAdapter(preset="claude_code") → command="claude" + claude model
+        5. CliAIAdapter(preset="codex") → command="codex"
+        6. preset 미명시 + model 미지정 → _build_args 에 -m 미추가 (back-compat)
+        7. preset 미명시 + model 명시 → _build_args 에 -m <model> 추가
+        8. GeminiCLIAdapter is CliAIAdapter (alias)
+        9. migrate_ai_settings — gemini_cli → cli_ai + command gemini → agy
+        10. AIEngineManager._ADAPTERS 에 cli_ai + gemini_cli (alias) 모두 존재
+        11. AIEngineManager(legacy settings) → selected="cli_ai" 자동 전환
+        12. settings_dialog 에 preset dropdown sentinel
+        """
+        import inspect as _inspect
+
+        from core.adapters.cli_ai_adapter import (
+            CLI_AI_PRESETS,
+            CliAIAdapter,
+            migrate_ai_settings,
+        )
+        from core.adapters.gemini_cli_adapter import GeminiCLIAdapter
+        from core.ai_engine import AIEngineManager
+
+        self.step("(1) CLI_AI_PRESETS 핵심 키 존재")
+        for key in ("agy", "claude_code", "codex"):
+            self.assert_true(key in CLI_AI_PRESETS, f"[§36] CLI_AI_PRESETS 에 '{key}' 필수")
+
+        self.step("(2) 각 preset 의 필수 필드")
+        for name, preset in CLI_AI_PRESETS.items():
+            for field in ("command", "display_name", "model"):
+                self.assert_true(
+                    field in preset,
+                    f"[§36] preset '{name}' 에 '{field}' 필드 필수. 실제: {preset!r}",
+                )
+
+        self.step("(3) preset='agy' → command + model 자동 채움")
+        a = CliAIAdapter({"preset": "agy"})
+        self.assert_equal(a.command, "agy", "[§36] agy preset command")
+        self.assert_true(a.model.startswith("agy-"), f"[§36] agy model. 실제: {a.model!r}")
+
+        self.step("(4) preset='claude_code' → command='claude' + model='claude-...'")
+        c = CliAIAdapter({"preset": "claude_code"})
+        self.assert_equal(c.command, "claude", "[§36] claude_code command")
+        self.assert_true(c.model.startswith("claude-"), f"[§36] claude model. 실제: {c.model!r}")
+
+        self.step("(5) preset='codex' → command='codex'")
+        x = CliAIAdapter({"preset": "codex"})
+        self.assert_equal(x.command, "codex", "[§36] codex command")
+
+        self.step("(6) preset 미명시 + model 미지정 → -m 미추가 (back-compat)")
+        b = CliAIAdapter({"command": "gemini"})  # legacy GeminiCLIAdapter 호출 패턴
+        args = b._build_args("gemini.exe")
+        self.assert_true(
+            "-m" not in args,
+            "[§36] preset 미명시 + model= → -m 미추가 (back-compat). 실제: {args!r}",
+        )
+
+        self.step("(7) preset 미명시 + model 명시 → -m <model> 추가")
+        bm = CliAIAdapter({"command": "gemini", "model": "gemini-2.5-flash"})
+        args2 = bm._build_args("gemini.exe")
+        self.assert_true(
+            "-m" in args2 and "gemini-2.5-flash" in args2,
+            f"[§36] model 명시 시 -m 추가. 실제: {args2!r}",
+        )
+
+        self.step("(8) GeminiCLIAdapter is CliAIAdapter (alias)")
+        self.assert_true(
+            GeminiCLIAdapter is CliAIAdapter,
+            "[§36] GeminiCLIAdapter back-compat alias of CliAIAdapter",
+        )
+
+        self.step("(9) migrate_ai_settings — gemini_cli → cli_ai + command rename")
+        legacy = {
+            "selected": "gemini_cli",
+            "available_engines": {
+                "gemini_cli": {"command": "gemini", "model": "gemini-2.5-flash"},
+            },
+        }
+        new = migrate_ai_settings(legacy)
+        self.assert_equal(new["selected"], "cli_ai", "[§36] selected 자동 전환")
+        cli_cfg = new["available_engines"]["cli_ai"]
+        self.assert_equal(cli_cfg["command"], "agy", "[§36] command gemini→agy")
+        self.assert_equal(cli_cfg["preset"], "agy", "[§36] preset default 'agy'")
+        # 원본 dict 비변형
+        self.assert_equal(legacy["selected"], "gemini_cli", "[§36] migrate 원본 비변형")
+
+        self.step("(10) AIEngineManager._ADAPTERS 에 cli_ai + gemini_cli 모두")
+        for key in ("cli_ai", "gemini_cli", "openai_compat"):
+            self.assert_true(
+                key in AIEngineManager.ADAPTER_REGISTRY,
+                f"[§36] ADAPTER_REGISTRY 에 '{key}' 필수",
+            )
+
+        self.step("(11) AIEngineManager(legacy settings) → selected='cli_ai'")
+        mgr = AIEngineManager(
+            {
+                "ai": {
+                    "selected": "gemini_cli",
+                    "available_engines": {"gemini_cli": {"command": "gemini"}},
+                }
+            }
+        )
+        self.assert_equal(
+            mgr.get_current_name(),
+            "cli_ai",
+            "[§36] AIEngineManager 가 legacy settings 자동 마이그레이션",
+        )
+
+        self.step("(12) settings_dialog 에 CLI AI preset dropdown sentinel")
+        from ui.settings_dialog import SettingsDialog
+
+        src = _inspect.getsource(SettingsDialog._create_ai_tab)
+        for needle in (
+            "CLI_AI_PRESETS",
+            "cli_preset_combo",
+            "_on_cli_preset_changed",
+            "cli_command_edit",
+        ):
+            self.assert_true(
+                needle in src,
+                f"[§36] SettingsDialog._create_ai_tab 에 {needle!r} 필수.\n",
+            )
 
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의

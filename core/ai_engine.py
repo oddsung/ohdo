@@ -10,10 +10,17 @@ import logging
 from typing import Optional
 
 from .adapters.base_adapter import AIResponse, BaseAIAdapter
+from .adapters.cli_ai_adapter import CliAIAdapter, migrate_ai_settings
 from .adapters.gemini_cli_adapter import GeminiCLIAdapter
 from .adapters.openai_compat_adapter import OpenAICompatAdapter
 
 logger = logging.getLogger(__name__)
+
+
+# 2026-05-24 (handoff §36): _migrate_ai_settings 는 core.adapters.cli_ai_adapter
+# 의 ``migrate_ai_settings`` 로 이동 (UI 가 ``core.ai_engine`` 직접 import 못 함 —
+# ui-core KPI). 본 모듈에는 back-compat alias 만 유지.
+_migrate_ai_settings = migrate_ai_settings
 
 
 class AIEngineManager:
@@ -27,10 +34,13 @@ class AIEngineManager:
     """
 
     # 등록된 어댑터 클래스 매핑
+    # 2026-05-24: "cli_ai" 신규 (CliAIAdapter, 일반 CLI AI — agy/claude_code/codex/custom)
+    # "gemini_cli" 는 back-compat alias (구 settings.json 직접 로드 시) — 마이그레이션
+    # 안 거친 path 에서도 안전. _migrate_ai_settings 가 settings 단계에서 변환.
     ADAPTER_REGISTRY = {
-        "gemini_cli": GeminiCLIAdapter,
+        "cli_ai": CliAIAdapter,
+        "gemini_cli": GeminiCLIAdapter,  # alias of CliAIAdapter (back-compat)
         "openai_compat": OpenAICompatAdapter,
-        # "claude": ClaudeAdapter,     # Anthropic Messages API (별도 어댑터, 미구현)
     }
 
     def __init__(self, settings: dict):
@@ -39,8 +49,8 @@ class AIEngineManager:
             settings: settings.json의 전체 설정 딕셔너리
         """
         self.settings = settings
-        self.ai_settings = settings.get("ai", {})
-        self._current_name = self.ai_settings.get("selected", "gemini_cli")
+        self.ai_settings = _migrate_ai_settings(settings.get("ai", {}))
+        self._current_name = self.ai_settings.get("selected", "cli_ai")
         self._adapters: dict[str, BaseAIAdapter] = {}
         self._initialize_adapters()
 
@@ -73,7 +83,7 @@ class AIEngineManager:
         다른 AI 엔진으로 전환합니다.
 
         Args:
-            name: 전환할 엔진 이름 (예: "gemini_cli", "openai")
+            name: 전환할 엔진 이름 (예: "cli_ai", "openai_compat", legacy "gemini_cli")
         """
         if name not in self._adapters:
             raise ValueError(
@@ -87,7 +97,7 @@ class AIEngineManager:
         사용 가능한 AI 엔진 목록을 반환합니다.
 
         Returns:
-            [{"name": "gemini_cli", "display_name": "Gemini CLI", "available": True}, ...]
+            [{"name": "cli_ai", "display_name": "...", "available": True}, ...]
         """
         result = []
         for name, adapter in self._adapters.items():
