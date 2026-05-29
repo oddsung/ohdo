@@ -96,7 +96,9 @@ desktop_v3/
 | POST | `/sessions/{id}/steps/{step}/regenerate` | step in-place 재생성 (§47) | Bearer |
 | GET | `/settings` | 설정 조회 (defaults 병합) (§47) | Bearer |
 | PUT | `/settings` | 설정 저장 + AI 재초기화 (§47) | Bearer |
-| POST | `/pick` | 커서 위치 UI element 캡처 (Windows) | Bearer |
+| POST | `/pick` | 커서 위치 UI element 즉시 캡처 (Windows) | Bearer |
+| POST | `/pick/click` | 클릭 시 element 캡처 — 다음 좌클릭까지 블록 (§48) | Bearer |
+| POST | `/pick/cancel` | 진행 중 클릭 캡처 취소 (§48) | Bearer |
 | WS | `/ws/execute` | step 실행 + live 로그 스트리밍 | 쿼리 토큰 |
 | WS | `/ws/generate` | AI 코드 생성 진행상황 스트리밍 | 쿼리 토큰 |
 | POST | `/sessions/{id}/recording/start` | 작업 녹화 시작 (Windows) | Bearer |
