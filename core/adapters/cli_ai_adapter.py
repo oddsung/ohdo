@@ -37,19 +37,22 @@ from .base_adapter import AIResponse, BaseAIAdapter
 
 CLI_AI_PRESETS: dict[str, dict] = {
     "agy": {
-        # 2026-05-29 사용자 `agy --help` 확인 결과:
-        # - 모델 지정 flag 없음 (CLI default 사용)
-        # - `-p` / `--print` / `--prompt` : "Run a single prompt non-interactively and
-        #   print the response" — headless mode. stdin 으로 prompt 받음.
-        # - `--print` 없으면 interactive 진입 → stdin 닫혀도 응답 없음.
-        # 따라서 `--print` 를 always_args 로 항상 포함 → stdin 으로 prompt + 응답.
+        # 2026-05-29 사용자 실제 호출 결과:
+        # - `agy --print` 단독 → "flag needs an argument: -print" 에러
+        #   → Go flag 패키지의 STRING flag 라 다음 인자로 prompt 값을 받음
+        # - 즉 `agy --print "<prompt 텍스트>"` 형태가 유일한 headless 호출
+        # - stdin 으로 prompt 전달 mode 가 `agy --help` 에 노출 안 됨
+        # 한계: Windows CreateProcess 명령어 길이 한계 (32767 chars) 로 인해
+        # 긴 prompt (>~30000) 는 invocation 자체가 불가. 그 경우 사용자에게
+        # OpenAI compat (HTTP — 길이 제한 없음) 사용 권장.
         "display_name": "Agy CLI (구 Gemini)",
         "command": "agy",
         "model_arg": None,
         "model": "",
-        "prompt_arg": None,
+        "prompt_arg": "--print",
         "supports_images": False,
-        "always_args": ["--print"],
+        "always_args": [],
+        "use_stdin": False,  # stdin path 스킵 — agy 가 stdin prompt 미지원
     },
     "claude_code": {
         "display_name": "Claude Code (Anthropic)",
@@ -59,6 +62,7 @@ CLI_AI_PRESETS: dict[str, dict] = {
         "prompt_arg": "-p",
         "supports_images": False,
         "always_args": [],
+        "use_stdin": True,
     },
     "codex": {
         "display_name": "OpenAI Codex CLI",
@@ -68,6 +72,7 @@ CLI_AI_PRESETS: dict[str, dict] = {
         "prompt_arg": None,  # stdin 만 — prompt-as-arg 미지원
         "supports_images": False,
         "always_args": [],
+        "use_stdin": True,
     },
 }
 
@@ -110,7 +115,7 @@ def migrate_ai_settings(ai_settings: dict) -> dict:
     return migrated
 
 
-_PROTOCOL_FIELDS = ("model_arg", "prompt_arg", "supports_images", "always_args")
+_PROTOCOL_FIELDS = ("model_arg", "prompt_arg", "supports_images", "always_args", "use_stdin")
 """[handoff §36 2026-05-29] preset 이 항상 authoritative 하게 가져가는 protocol 필드.
 
 CLI 별 specific flag 체계 — 사용자가 manual override 할 일 거의 없음 + 잘못된
@@ -192,6 +197,8 @@ class CliAIAdapter(BaseAIAdapter):
         # extra_args: 사용자 customizable, preset 외 추가 flag.
         self.extra_args = list(merged.get("extra_args") or [])
         self.supports_images = bool(merged.get("supports_images", False))
+        # use_stdin: stdin path 사용 여부. False 면 prompt_arg path 로 직행 (예: agy).
+        self.use_stdin = bool(merged.get("use_stdin", True))
         self._proc: Optional[subprocess.Popen] = None
         self._cancelled: bool = False
 
@@ -276,18 +283,29 @@ class CliAIAdapter(BaseAIAdapter):
                 if img_refs:
                     full_prompt = " ".join(img_refs) + "\n\n" + prompt
 
-            prompt_file = None
             raw_output = ""
             stderr_output = ""
             returncode = -1
 
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".txt", delete=False, encoding="utf-8", dir=str(sandbox_dir)
-                ) as f:
-                    f.write(full_prompt)
-                    prompt_file = f.name
+            # 2026-05-29 (handoff §36 hotfix): Windows CreateProcess 명령어 인자
+            # 길이 한계 (~32767). prompt_arg path 만 가능한 CLI (예: agy) 에서 긴
+            # prompt 는 invocation 자체 불가 — 사전 차단 + 명확 가이드.
+            _CMDLINE_SAFE_LIMIT = 30000  # 명령 + 인자 헤더 여유 두고 30k
 
+            if not self.use_stdin and self.prompt_arg and len(full_prompt) > _CMDLINE_SAFE_LIMIT:
+                return AIResponse(
+                    success=False,
+                    error=(
+                        f"{self.command} CLI 는 stdin 으로 prompt 전달 미지원 + "
+                        f"명령어 인자 길이 한계 ({_CMDLINE_SAFE_LIMIT} chars) 초과 "
+                        f"({len(full_prompt)} chars). 더 짧은 요청으로 시도하거나 "
+                        f"OpenAI 호환 API 엔진 (DeepSeek/OpenAI 등 — HTTP, 길이 제한 없음) "
+                        f"으로 전환하세요."
+                    ),
+                )
+
+            # Path 1: stdin mode (use_stdin=True). 대부분 CLI 의 기본 호출 — 긴 prompt 도 지원.
+            if self.use_stdin:
                 self._proc = subprocess.Popen(
                     self._build_args(cli_exec),
                     stdin=subprocess.PIPE,
@@ -308,13 +326,6 @@ class CliAIAdapter(BaseAIAdapter):
                 finally:
                     self._proc = None
 
-            finally:
-                if prompt_file and os.path.exists(prompt_file):
-                    try:
-                        os.unlink(prompt_file)
-                    except OSError:
-                        pass
-
             if self._cancelled:
                 return AIResponse(
                     success=False, cancelled=True, error="사용자가 요청을 취소했습니다."
@@ -322,8 +333,10 @@ class CliAIAdapter(BaseAIAdapter):
 
             elapsed_ms = int((time.time() - start_time) * 1000)
 
-            # stdin 실패 (또는 interactive 로 빠짐) + prompt_arg 가 있으면 인자 모드 fallback
-            if (not raw_output or returncode != 0) and self.prompt_arg and len(full_prompt) < 8000:
+            # Path 2: prompt_arg mode — stdin 미지원 CLI (agy 등) 의 primary path, 또는
+            # stdin 실패 시 fallback. 길이 한계 초과는 위에서 이미 차단됨.
+            need_prompt_arg = (not self.use_stdin) or (not raw_output) or (returncode != 0)
+            if need_prompt_arg and self.prompt_arg and len(full_prompt) <= _CMDLINE_SAFE_LIMIT:
                 self._proc = subprocess.Popen(
                     self._build_args(cli_exec, self.prompt_arg, full_prompt),
                     stdout=subprocess.PIPE,
