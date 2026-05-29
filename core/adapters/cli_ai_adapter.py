@@ -37,12 +37,16 @@ from .base_adapter import AIResponse, BaseAIAdapter
 
 CLI_AI_PRESETS: dict[str, dict] = {
     "agy": {
+        # 2026-05-29 사용자 보고: agy CLI 는 -m / -p flag 미지원 (구 gemini CLI 와
+        # 완전히 다른 flag 체계 — --add-dir / --continue / --conversation /
+        # --dangerously-skip-permissions / -i 등 노출). stdin 전용 + 모델은 CLI
+        # default 사용. 정확한 flag 알려지면 model_arg / prompt_arg 채울 것.
         "display_name": "Agy CLI (구 Gemini)",
         "command": "agy",
-        "model_arg": "-m",
-        "model": "agy-3.1-pro",
-        "prompt_arg": "-p",  # 짧은 prompt 인자 모드 fallback
-        "supports_images": True,  # @"path" 참조 prepend 시도
+        "model_arg": None,
+        "model": "",
+        "prompt_arg": None,
+        "supports_images": False,
     },
     "claude_code": {
         "display_name": "Claude Code (Anthropic)",
@@ -101,29 +105,50 @@ def migrate_ai_settings(ai_settings: dict) -> dict:
     return migrated
 
 
+_PROTOCOL_FIELDS = ("model_arg", "prompt_arg", "supports_images")
+"""[handoff §36 2026-05-29] preset 이 항상 authoritative 하게 가져가는 protocol 필드.
+
+CLI 별 specific flag 체계 — 사용자가 manual override 할 일 거의 없음 + 잘못된
+값이면 invocation 자체가 실패 (예: agy 가 -m 미지원). 사용자가 진짜 customize
+하려면 ``preset="custom"`` 선택.
+"""
+
+
 def _resolve_preset_config(config: dict) -> dict:
     """config 의 ``preset`` 키 기준으로 CLI_AI_PRESETS 의 default 값을 채움.
 
-    사용자가 명시한 값 (config 의 ``command`` / ``model`` 등) 이 preset default 보다
-    우선. ``preset == "custom"`` 또는 unknown 이면 default 채움 안 함.
+    필드 우선순위:
+    - **Protocol 필드** (``model_arg`` / ``prompt_arg`` / ``supports_images``):
+      preset 명시 시 **preset 이 항상 우선**. CLI specific flag 체계는 사용자가
+      잘못 override 하면 invocation 자체가 실패하기 때문. 사용자 manual override
+      는 ``preset="custom"`` 으로만.
+    - 나머지 필드 (``command`` / ``model`` / ``timeout_seconds`` 등):
+      사용자 config 값이 우선 (단 빈 값/None 은 preset default 로 채움).
 
     **Back-compat 정책** (handoff §36): ``preset`` 키가 config 에 명시 안 됨 → preset
     defaults 적용 안 함 (raw config 그대로). 이전 ``GeminiCLIAdapter({"command":
     "gemini"})`` 같이 model 미명시 호출을 그대로 보존 (model="" → ``-m`` flag 미추가).
-    Settings UI 는 항상 ``preset`` 키를 명시 전달 → 신규 path 는 preset default 활용.
     """
     if "preset" not in config:
-        # 명시 preset 없음 → raw config 그대로 (GeminiCLIAdapter back-compat)
         return dict(config)
     preset_name = (config.get("preset") or "").strip().lower()
     if not preset_name or preset_name == "custom":
         return dict(config)
     preset = CLI_AI_PRESETS.get(preset_name)
     if preset is None:
-        # unknown preset — config 그대로 사용 (사용자 입력 보존)
         return dict(config)
+    # 1. preset default 로 시작
     merged = dict(preset)
-    merged.update({k: v for k, v in config.items() if v not in (None, "")})
+    # 2. 사용자 config 의 non-empty 값을 덮어쓰기 — 단 protocol 필드는 skip
+    for k, v in config.items():
+        if k in _PROTOCOL_FIELDS:
+            continue
+        if v not in (None, ""):
+            merged[k] = v
+    # 3. preset 의 protocol 필드는 무조건 덮어쓰기 (사용자 stale 값 무력화)
+    for k in _PROTOCOL_FIELDS:
+        if k in preset:
+            merged[k] = preset[k]
     return merged
 
 

@@ -5,9 +5,7 @@
       "cli_ai": {
         "preset": "agy",
         "command": "agy",
-        "model": "agy-3.1-pro",
-        "model_arg": "-m",
-        "prompt_arg": "-p",
+        "model": "",
         "timeout_seconds": 120,
         "max_retries": 3
       },

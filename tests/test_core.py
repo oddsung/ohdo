@@ -2366,16 +2366,22 @@ if __name__ == "__main__":
             (Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8")
         )
         cli_cfg = cfg.get("ai", {}).get("available_engines", {}).get("cli_ai", {})
-        # 가드 의도 (5/4 + handoff §36): CLI 의 default preview 자동 매핑 회피 — model 이
-        # 명시적으로 지정돼야 함. 5/6 사용자 결정: gemini-3.x preview 도 사용자 명시
-        # 선택 시 허용 (자동 매핑이 아님). agy CLI 도 동일 — model 명시 필수.
-        # 따라서 "agy-" / "gemini-" prefix 만 검증 (빈 값 / 다른 provider 만 차단).
-        model = cli_cfg.get("model", "")
-        self.assert_true(
-            model.startswith("agy-") or model.startswith("gemini-"),
-            f"[회귀] settings.json cli_ai.model 명시 필수 (agy-* / gemini-* prefix). "
-            f"실제: {model!r}",
-        )
+        # 가드 의도 (5/4): Gemini CLI default preview 자동 매핑 회피 — model 명시 필수.
+        # 2026-05-29 사용자 보고: agy CLI 는 -m flag 미지원 (구 gemini 와 완전히 다른
+        # flag 체계). model_arg=None preset 일 때는 model 빈 값이 정상 (CLI default
+        # 사용). 따라서 model_arg 가 있을 때만 model prefix 검증.
+        from core.adapters.cli_ai_adapter import CLI_AI_PRESETS
+
+        preset_name = cli_cfg.get("preset") or "agy"
+        preset_meta = CLI_AI_PRESETS.get(preset_name, {})
+        if preset_meta.get("model_arg"):
+            model = cli_cfg.get("model", "")
+            self.assert_true(
+                model and (model.startswith("agy-") or model.startswith("gemini-")),
+                f"[회귀] settings.json cli_ai.model 명시 필수 (preset 가 model_arg 보유 "
+                f"케이스). 실제: {model!r}",
+            )
+        # else: model_arg=None preset (agy 등) → model 빈 값 정상, 검증 skip
 
         # Production path 검증 (5/5 추가): _build_args 가 정의만 돼 있고
         # 실제 subprocess.Popen 호출에서 사용 안 되면 -m 플래그가 안 붙어
@@ -11543,10 +11549,20 @@ if __name__ == "__main__":
                     f"[§36] preset '{name}' 에 '{field}' 필드 필수. 실제: {preset!r}",
                 )
 
-        self.step("(3) preset='agy' → command + model 자동 채움")
+        self.step("(3) preset='agy' → command 'agy' + model_arg None (agy CLI 는 -m 미지원)")
         a = CliAIAdapter({"preset": "agy"})
         self.assert_equal(a.command, "agy", "[§36] agy preset command")
-        self.assert_true(a.model.startswith("agy-"), f"[§36] agy model. 실제: {a.model!r}")
+        # 2026-05-29 사용자 보고: agy CLI 가 -m / -p flag 미지원 → preset model_arg=None.
+        # model 도 빈 값 (CLI default 사용). _build_args 에 -m 추가 안 됨.
+        self.assert_true(
+            a.model_arg is None,
+            f"[§36] agy preset model_arg None (CLI 가 -m 미지원). 실제: {a.model_arg!r}",
+        )
+        agy_args = a._build_args("agy.exe")
+        self.assert_true(
+            "-m" not in agy_args,
+            f"[§36] agy _build_args 에 -m flag 없음. 실제: {agy_args!r}",
+        )
 
         self.step("(4) preset='claude_code' → command='claude' + model='claude-...'")
         c = CliAIAdapter({"preset": "claude_code"})

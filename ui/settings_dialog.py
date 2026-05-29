@@ -1021,13 +1021,16 @@ class SettingsDialog(QDialog):
         cli_ai["model"] = self.cli_model_edit.text().strip()
         cli_ai["timeout_seconds"] = self.timeout_spin.value()
         cli_ai["max_retries"] = self.retry_spin.value()
-        # preset default 채워서 어댑터 init 시 fallback 안정성 확보
+        # 2026-05-29 사용자 보고: 구 stale protocol 필드 (예: agy 의 잘못된 -m) 가
+        # 사용자 설정에 남아 invocation 실패. preset 명시 시 protocol 필드는 항상
+        # preset 값으로 reset (사용자 manual override 가 의미 있는 필드 아님 —
+        # custom preset 일 때만 raw 입력 보존).
         from core.adapters.cli_ai_adapter import CLI_AI_PRESETS as _CLI_PRESETS
 
         if preset_data in _CLI_PRESETS:
             preset_meta = _CLI_PRESETS[preset_data]
-            cli_ai.setdefault("model_arg", preset_meta.get("model_arg", "-m"))
-            cli_ai.setdefault("prompt_arg", preset_meta.get("prompt_arg"))
+            cli_ai["model_arg"] = preset_meta.get("model_arg")
+            cli_ai["prompt_arg"] = preset_meta.get("prompt_arg")
 
         # OpenAI 호환 API
         engines_dict = self.settings["ai"].setdefault("available_engines", {})
