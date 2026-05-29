@@ -19,5 +19,14 @@ export default defineConfig({
       },
     },
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        input: {
+          // 메인 UI + element picker 투명 오버레이 (handoff §49) 2개 엔트리.
+          index: resolve("src/renderer/index.html"),
+          overlay: resolve("src/renderer/overlay.html"),
+        },
+      },
+    },
   },
 });

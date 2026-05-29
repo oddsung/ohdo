@@ -12,7 +12,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { createServer } from "net";
 import { randomBytes } from "crypto";
 import { join } from "path";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, screen } from "electron";
 
 const READY_MARKER = "OHDO_API_READY";
 const PREFERRED_PORT = 8765;
@@ -27,6 +27,7 @@ interface ApiInfo {
 let pyProc: ChildProcessWithoutNullStreams | null = null;
 let apiInfo: ApiInfo | null = null;
 let mainWindow: BrowserWindow | null = null;
+let overlayWindow: BrowserWindow | null = null;
 
 /** 프로젝트 루트 = desktop_v3/ 의 부모. dev 에서 .venv 와 api_server 가 여기에 있다. */
 function projectRoot(): string {

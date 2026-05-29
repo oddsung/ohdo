@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- 오버레이는 IPC(preload)로만 통신 — 네트워크 불필요. 최소 CSP. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self';"
+    />
+    <title>ohdo element picker</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background: transparent;
+        cursor: crosshair;
+        user-select: none;
+      }
+      /* 실시간 하이라이트 박스 — 대상 element 위에 그려진다. */
+      #hl {
+        position: fixed;
+        border: 2px solid #ef4444;
+        background: rgba(239, 68, 68, 0.12);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+        pointer-events: none;
+        display: none;
+        z-index: 1;
+        transition:
+          left 40ms linear,
+          top 40ms linear,
+          width 40ms linear,
+          height 40ms linear;
+      }
+      /* 상단 안내 배너. */
+      #hint {
+        position: fixed;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 18px;
+        border-radius: 9999px;
+        background: rgba(20, 20, 24, 0.92);
+        color: #f4f4f5;
+        font:
+          14px/1.4 "Segoe UI",
+          system-ui,
+          sans-serif;
+        border: 1px solid rgba(239, 68, 68, 0.6);
+        z-index: 2;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hl"></div>
+    <div id="hint">선택할 UI 요소를 클릭하세요 · Esc 취소</div>
+    <script type="module" src="/src/renderer/overlay.ts"></script>
+  </body>
+</html>
