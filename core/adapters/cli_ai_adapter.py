@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -26,6 +27,20 @@ from pathlib import Path
 from typing import Optional
 
 from .base_adapter import AIResponse, BaseAIAdapter
+
+# 2026-05-29 (handoff §36 hotfix 3): Windows TTY 우회 — agy 등 Go TUI 라이브러리
+# 기반 CLI 는 부모 콘솔을 상속하면 ``WriteConsoleW`` 같은 Win32 API 로 직접 쓸 수
+# 있어 Python subprocess 의 stdout pipe 가 빈 채로 끝남. CREATE_NO_WINDOW 로
+# 콘솔 상속 차단 → stdout pipe 가 정상 캡처되도록 강제.
+_WIN_NO_CONSOLE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+# 같은 의도의 환경변수 — TUI 라이브러리 (charmbracelet/bubbletea, termenv 등) 가
+# 색상/raw escape sequence 출력 안 하도록 plain mode 유도.
+_PLAIN_OUTPUT_ENV = {
+    "NO_COLOR": "1",
+    "TERM": "dumb",
+    "CI": "1",  # 많은 CLI 가 CI 환경에서 자동으로 plain mode 전환
+}
 
 # ── CLI AI 프리셋 ─────────────────────────────────────────────
 #
@@ -302,6 +317,9 @@ class CliAIAdapter(BaseAIAdapter):
                     ),
                 )
 
+            # 부모 env + plain output env 합쳐 child 에 주입 (color/TUI 비활성화 유도)
+            child_env = {**os.environ, **_PLAIN_OUTPUT_ENV}
+
             # Path 1: stdin mode (use_stdin=True). 대부분 CLI 의 기본 호출 — 긴 prompt 도 지원.
             if self.use_stdin:
                 self._proc = subprocess.Popen(
@@ -311,6 +329,8 @@ class CliAIAdapter(BaseAIAdapter):
                     stderr=subprocess.PIPE,
                     encoding="utf-8",
                     cwd=str(sandbox_dir),
+                    creationflags=_WIN_NO_CONSOLE_FLAGS,
+                    env=child_env,
                 )
                 try:
                     stdout, stderr = self._proc.communicate(input=full_prompt, timeout=self.timeout)
@@ -341,6 +361,8 @@ class CliAIAdapter(BaseAIAdapter):
                     stderr=subprocess.PIPE,
                     encoding="utf-8",
                     cwd=str(sandbox_dir),
+                    creationflags=_WIN_NO_CONSOLE_FLAGS,
+                    env=child_env,
                 )
                 try:
                     stdout, stderr = self._proc.communicate(timeout=self.timeout)
