@@ -13,7 +13,8 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { fetchSession, generateStep, type Step } from "@/api/client";
+import { fetchSession, type GenerateResult, type Step } from "@/api/client";
+import { generateStream } from "@/api/ws";
 import { useUiStore } from "@/store/uiStore";
 import { usePickStore } from "@/store/pickStore";
 import { useRecordStore } from "@/store/recordStore";
@@ -91,6 +92,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const { running, run, stop } = useExecution(sessionId);
   const [input, setInput] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [progress, setProgress] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: session, isLoading } = useQuery({
@@ -110,8 +112,19 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   } = useRecordStore();
 
   const genMut = useMutation({
+    // 진행상황 스트리밍 (handoff §44, /ws/generate). generateStream 을 Promise 로 감싸
+    // onProgress 는 setProgress 로 라이브 표시, onDone/onError 로 resolve/reject.
     // pending element 는 호출 시점에 store 에서 읽어 stale closure 회피.
-    mutationFn: (req: string) => generateStep(sessionId, req, usePickStore.getState().pending),
+    mutationFn: (req: string) =>
+      new Promise<GenerateResult>((resolve, reject) => {
+        setProgress("");
+        generateStream(sessionId, req, usePickStore.getState().pending, {
+          onProgress: (m) => setProgress(m),
+          onDone: (result) => resolve(result),
+          onError: (msg) => reject(new Error(msg)),
+        }).catch(reject);
+      }),
+    onSettled: () => setProgress(""),
     onSuccess: (result) => {
       if (!result.success) {
         setErrorMsg(result.error ?? "AI 생성 실패");
@@ -246,7 +259,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           {busy && (
             <div className="flex items-center gap-2 rounded-md bg-discord-card/50 p-3 text-sm text-discord-muted">
               <Loader2 className="h-4 w-4 animate-spin" />
-              AI 가 코드를 생성하는 중… (agy CLI 는 10~30초 걸릴 수 있습니다)
+              {progress || "AI 가 코드를 생성하는 중… (agy CLI 는 10~30초 걸릴 수 있습니다)"}
             </div>
           )}
         </div>
