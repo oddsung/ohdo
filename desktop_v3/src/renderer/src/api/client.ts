@@ -185,3 +185,71 @@ export function recordingStopCommit(
 export function recordingCancel(): Promise<{ success: boolean; was_recording: boolean }> {
   return apiFetch("/recording/cancel", { method: "POST" });
 }
+
+// ── v3 패리티 (A)유형 세션/step 변경 (§47) ───────────
+
+export async function renameSession(sessionId: string, title: string): Promise<SessionDetail> {
+  const data = await apiFetch<{ session: SessionDetail }>(`/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+  return data.session;
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  await apiFetch(`/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+export async function deleteStep(sessionId: string, stepId: number): Promise<SessionDetail> {
+  const data = await apiFetch<{ session: SessionDetail }>(
+    `/sessions/${sessionId}/steps/${stepId}`,
+    { method: "DELETE" },
+  );
+  return data.session;
+}
+
+export async function moveStep(
+  sessionId: string,
+  stepId: number,
+  direction: "up" | "down",
+): Promise<SessionDetail> {
+  const data = await apiFetch<{ session: SessionDetail }>(
+    `/sessions/${sessionId}/steps/${stepId}/move`,
+    { method: "POST", body: JSON.stringify({ direction }) },
+  );
+  return data.session;
+}
+
+export async function insertStep(
+  sessionId: string,
+  afterStepId: number,
+): Promise<{ session: SessionDetail; new_step_id: number }> {
+  return apiFetch<{ session: SessionDetail; new_step_id: number }>(
+    `/sessions/${sessionId}/steps/${afterStepId}/insert`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export function regenerateStep(sessionId: string, stepId: number): Promise<GenerateResult> {
+  return apiFetch<GenerateResult>(`/sessions/${sessionId}/steps/${stepId}/regenerate`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+// ── 설정 (§47 #20) ──────────────────────────────────
+
+export type AppSettings = Record<string, unknown>;
+
+export interface SettingsResponse {
+  settings: AppSettings;
+  defaults: AppSettings;
+}
+
+export function fetchSettings(): Promise<SettingsResponse> {
+  return apiFetch<SettingsResponse>("/settings");
+}
+
+export async function saveSettings(settings: AppSettings): Promise<void> {
+  await apiFetch("/settings", { method: "PUT", body: JSON.stringify({ settings }) });
+}

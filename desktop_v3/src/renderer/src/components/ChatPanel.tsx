@@ -5,16 +5,31 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ChevronsDown,
   Circle,
   Flag,
   Loader2,
   MousePointerClick,
   Play,
+  Plus,
+  RefreshCw,
   SendHorizonal,
   Square,
+  Trash2,
   X,
 } from "lucide-react";
-import { fetchSession, type GenerateResult, type Step } from "@/api/client";
+import {
+  fetchSession,
+  deleteStep,
+  moveStep,
+  insertStep,
+  regenerateStep,
+  type GenerateResult,
+  type Step,
+} from "@/api/client";
 import { generateStream } from "@/api/ws";
 import { useUiStore } from "@/store/uiStore";
 import { usePickStore } from "@/store/pickStore";
@@ -25,19 +40,73 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+interface StepCardProps {
+  step: Step;
+  running: boolean;
+  busy: boolean;
+  regenerating: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onRun: (stepId: number) => void;
+  onRunFrom: (stepId: number) => void;
+  onRegenerate: (stepId: number) => void;
+  onMove: (stepId: number, dir: "up" | "down") => void;
+  onInsert: (stepId: number) => void;
+  onDelete: (stepId: number) => void;
+}
+
+/** step 카드 액션 아이콘 (div onClick 안에 중첩, stopPropagation). */
+function CardAction({
+  title,
+  onClick,
+  disabled,
+  danger,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button
+      size="icon"
+      variant="ghost"
+      className={`h-6 w-6 text-discord-muted ${danger ? "hover:text-red-400" : "hover:text-white"}`}
+      title={title}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </Button>
+  );
+}
+
 function StepCard({
   step,
-  onRun,
   running,
-}: {
-  step: Step;
-  onRun: (stepId: number) => void;
-  running: boolean;
-}) {
+  busy,
+  regenerating,
+  isFirst,
+  isLast,
+  onRun,
+  onRunFrom,
+  onRegenerate,
+  onMove,
+  onInsert,
+  onDelete,
+}: StepCardProps) {
   const { t } = useTranslation();
   const selectStep = useUiStore((st) => st.selectStep);
   const selectedStepId = useUiStore((st) => st.selectedStepId);
   const active = selectedStepId === step.step_id;
+  const warnings = step.validation_warnings ?? [];
+  const pkgs = step.required_packages ?? [];
+  const blocked = running || busy || regenerating;
   const statusColor =
     step.status === "completed"
       ? "text-discord-green"
@@ -53,23 +122,36 @@ function StepCard({
           : "border-transparent bg-discord-card/50 hover:bg-discord-card"
       }`}
     >
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-1 flex items-center justify-between gap-1">
         <span className="text-xs font-semibold text-discord-muted">STEP {step.step_id}</span>
-        <div className="flex items-center gap-2">
-          <span className={`text-xs ${statusColor}`}>{step.status}</span>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 text-discord-muted opacity-0 transition-opacity hover:text-discord-green group-hover:opacity-100"
-            title={t("chat.runThisStep")}
-            disabled={running}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRun(step.step_id);
-            }}
-          >
-            <Play className="h-3.5 w-3.5" />
-          </Button>
+        <div className="flex items-center gap-1">
+          <span className={`mr-1 text-xs ${statusColor}`}>{step.status}</span>
+          {(busy || regenerating) && (
+            <Loader2 className="h-3 w-3 animate-spin text-discord-muted" />
+          )}
+          <div className="flex items-center opacity-0 transition-opacity group-hover:opacity-100">
+            <CardAction title={t("chat.runThisStep")} onClick={() => onRun(step.step_id)} disabled={blocked}>
+              <Play className="h-3.5 w-3.5" />
+            </CardAction>
+            <CardAction title={t("chat.runFromHere")} onClick={() => onRunFrom(step.step_id)} disabled={blocked}>
+              <ChevronsDown className="h-3.5 w-3.5" />
+            </CardAction>
+            <CardAction title={t("chat.regenerate")} onClick={() => onRegenerate(step.step_id)} disabled={blocked}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </CardAction>
+            <CardAction title={t("chat.moveUp")} onClick={() => onMove(step.step_id, "up")} disabled={blocked || isFirst}>
+              <ArrowUp className="h-3.5 w-3.5" />
+            </CardAction>
+            <CardAction title={t("chat.moveDown")} onClick={() => onMove(step.step_id, "down")} disabled={blocked || isLast}>
+              <ArrowDown className="h-3.5 w-3.5" />
+            </CardAction>
+            <CardAction title={t("chat.insertAfter")} onClick={() => onInsert(step.step_id)} disabled={blocked}>
+              <Plus className="h-3.5 w-3.5" />
+            </CardAction>
+            <CardAction title={t("chat.deleteStep")} onClick={() => onDelete(step.step_id)} disabled={blocked} danger>
+              <Trash2 className="h-3.5 w-3.5" />
+            </CardAction>
+          </div>
         </div>
       </div>
       {step.user_request && (
@@ -81,10 +163,44 @@ function StepCard({
       {step.ai_description && (
         <p className="mt-1 line-clamp-3 text-xs text-discord-muted">🤖 {step.ai_description}</p>
       )}
-      {step.validation_warnings?.length > 0 && (
-        <p className="mt-1 text-xs text-amber-400">
-          {t("chat.stepWarn", { count: step.validation_warnings.length })}
+      {warnings.length > 0 && (
+        <p className="mt-1 flex items-center gap-1 text-xs text-amber-400">
+          <AlertTriangle className="h-3 w-3" />
+          {t("chat.stepWarn", { count: warnings.length })}
         </p>
+      )}
+      {active && pkgs.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <span className="text-[10px] uppercase tracking-wide text-discord-muted">
+            {t("chat.packages")}
+          </span>
+          {pkgs.map((p) => (
+            <span
+              key={p}
+              className="rounded bg-black/30 px-1.5 py-0.5 font-mono text-[10px] text-discord-text"
+            >
+              {p}
+            </span>
+          ))}
+        </div>
+      )}
+      {active && warnings.length > 0 && (
+        <div className="mt-1.5 rounded border border-amber-500/30 bg-amber-500/5 p-1.5">
+          <div className="mb-0.5 text-[11px] font-medium text-amber-400">
+            {t("chat.warningsTitle", { count: warnings.length })}
+          </div>
+          <ul className="space-y-0.5">
+            {warnings.map((w, i) => (
+              <li key={i} className="flex gap-1 text-[11px] text-amber-300/90">
+                <span className="font-mono text-amber-500/70">[{w.kind}]</span>
+                <span className="flex-1">{w.message}</span>
+                {w.line > 0 && (
+                  <span className="text-amber-500/50">{t("chat.warningLine", { line: w.line })}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -98,6 +214,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [input, setInput] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [progress, setProgress] = useState("");
+  const [busyStepId, setBusyStepId] = useState<number | null>(null);
+  const [regenStepId, setRegenStepId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: session, isLoading } = useQuery({
@@ -148,6 +266,58 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       toast.error((e as Error).message);
     },
   });
+
+  // ── step 변경 액션 (§47 (A)유형) — 공용 래퍼로 busy/에러/invalidate 처리 ──
+  const runStepAction = async (
+    stepId: number,
+    fn: () => Promise<unknown>,
+    okMsg: string,
+  ) => {
+    if (running || busyStepId !== null) return;
+    setBusyStepId(stepId);
+    try {
+      await fn();
+      await qc.invalidateQueries({ queryKey: ["session", sessionId] });
+      toast.success(okMsg);
+    } catch (e) {
+      toast.error(t("chat.actionFailed", { message: (e as Error).message }));
+    } finally {
+      setBusyStepId(null);
+    }
+  };
+  const onDeleteStep = (stepId: number) => {
+    if (!window.confirm(t("chat.confirmDeleteStep", { id: stepId }))) return;
+    void runStepAction(stepId, () => deleteStep(sessionId, stepId), t("chat.stepDeleted", { id: stepId }));
+  };
+  const onMoveStep = (stepId: number, dir: "up" | "down") =>
+    void runStepAction(stepId, () => moveStep(sessionId, stepId, dir), t("chat.stepMoved"));
+  const onInsertStep = (stepId: number) =>
+    void runStepAction(
+      stepId,
+      async () => {
+        const r = await insertStep(sessionId, stepId);
+        selectStep(r.new_step_id);
+      },
+      t("chat.stepInserted", { id: stepId }),
+    );
+  const onRegenerateStep = async (stepId: number) => {
+    if (running || busyStepId !== null || regenStepId !== null) return;
+    setRegenStepId(stepId);
+    try {
+      const res = await regenerateStep(sessionId, stepId);
+      if (!res.success) {
+        toast.error(res.error || t("chat.regenFailed"));
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: ["session", sessionId] });
+      selectStep(stepId);
+      toast.success(t("chat.stepRegenerated", { id: stepId }));
+    } catch (e) {
+      toast.error(t("chat.actionFailed", { message: (e as Error).message }));
+    } finally {
+      setRegenStepId(null);
+    }
+  };
 
   // 새 step 생성 시 맨 아래로 스크롤.
   useEffect(() => {
@@ -256,8 +426,22 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           {session && session.steps.length === 0 && (
             <p className="px-1 py-6 text-center text-sm text-discord-muted">{t("chat.emptyHint")}</p>
           )}
-          {session?.steps.map((s) => (
-            <StepCard key={s.step_id} step={s} running={running} onRun={(id) => run("single", id)} />
+          {session?.steps.map((s, i) => (
+            <StepCard
+              key={s.step_id}
+              step={s}
+              running={running}
+              busy={busyStepId === s.step_id}
+              regenerating={regenStepId === s.step_id}
+              isFirst={i === 0}
+              isLast={i === (session?.steps.length ?? 0) - 1}
+              onRun={(id) => run("single", id)}
+              onRunFrom={(id) => run("from", id)}
+              onRegenerate={onRegenerateStep}
+              onMove={onMoveStep}
+              onInsert={onInsertStep}
+              onDelete={onDeleteStep}
+            />
           ))}
           {busy && (
             <div className="flex items-center gap-2 rounded-md bg-discord-card/50 p-3 text-sm text-discord-muted">
