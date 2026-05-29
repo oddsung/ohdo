@@ -79,6 +79,11 @@ export const ko = {
     overlayHint: "선택할 UI 요소 위에 마우스를 올려두세요…",
     captureFailed: "element 캡처 실패",
   },
+  ws: {
+    connError: "WebSocket 연결 오류",
+    genError: "AI 생성 오류",
+    closedEarly: "생성이 완료되지 않고 연결이 종료됨",
+  },
   record: {
     started: "녹화 시작 — 대상 앱에서 작업하세요",
     startFailed: "녹화 시작 실패: {{message}}",

@@ -117,5 +117,5 @@ WS 메시지: `{type:"log"|"step_done"|"done"|"error", ...}`. 클라이언트 �
   - ✅ 작업 녹화 lifecycle (start/marker/stop_commit/cancel + status polling) (§41).
   - 잔여: 녹화 review/편집 (현재는 stop 시 바로 commit).
 - **C. 통합 기능** — picker/실행/녹화 완료, review·고급 옵션 후속.
-- **D. Polish** — i18n + 애니메이션 (단축키·테마는 §40 선반영).
+- **D. Polish** ✅ — i18n (react-i18next, ko/en + 언어 토글) + 핵심 애니메이션 (§45). 단축키·테마는 §40.
 - **E. 배포** — electron-builder.

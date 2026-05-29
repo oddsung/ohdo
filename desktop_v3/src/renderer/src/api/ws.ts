@@ -2,6 +2,7 @@
 // WebSocket 클라이언트 — /ws/execute (실행 live 로그) + /ws/generate (AI 생성 진행상황).
 // 브라우저 WebSocket 은 헤더 설정이 어려워 토큰을 쿼리 파라미터로 전달한다.
 import type { GenerateResult, PendingElement, SessionDetail, Step } from "@/api/client";
+import i18n from "@/i18n";
 
 export type RunMode = "all" | "from" | "single";
 
@@ -25,7 +26,7 @@ export async function runExecution(
   handlers: ExecHandlers,
 ): Promise<ExecHandle> {
   const info = await window.ohdo.getApiInfo();
-  if (!info) throw new Error("Python 브리지에 연결할 수 없습니다.");
+  if (!info) throw new Error(i18n.t("bridge.disconnected"));
 
   const wsBase = info.baseUrl.replace(/^http/, "ws");
   const params = new URLSearchParams({ token: info.token, session_id: sessionId, mode });
@@ -59,14 +60,14 @@ export async function runExecution(
         ws.close();
         break;
       case "error":
-        handlers.onError(msg.message ?? "실행 오류");
+        handlers.onError(msg.message ?? i18n.t("console.runError", { message: "" }));
         finished = true;
         ws.close();
         break;
     }
   };
 
-  ws.onerror = () => handlers.onError("WebSocket 연결 오류");
+  ws.onerror = () => handlers.onError(i18n.t("ws.connError"));
   ws.onclose = () => finish();
 
   return {
@@ -100,7 +101,7 @@ export async function generateStream(
   handlers: GenerateStreamHandlers,
 ): Promise<void> {
   const info = await window.ohdo.getApiInfo();
-  if (!info) throw new Error("Python 브리지에 연결할 수 없습니다.");
+  if (!info) throw new Error(i18n.t("bridge.disconnected"));
 
   const wsBase = info.baseUrl.replace(/^http/, "ws");
   const params = new URLSearchParams({ token: info.token, session_id: sessionId });
@@ -148,15 +149,15 @@ export async function generateStream(
       ws.close();
     } else if (msg.type === "error") {
       settled = true;
-      handlers.onError(msg.error ?? msg.message ?? "AI 생성 오류");
+      handlers.onError(msg.error ?? msg.message ?? i18n.t("ws.genError"));
       ws.close();
     }
   };
 
   ws.onerror = () => {
-    if (!settled) handlers.onError("WebSocket 연결 오류");
+    if (!settled) handlers.onError(i18n.t("ws.connError"));
   };
   ws.onclose = () => {
-    if (!settled) handlers.onError("생성이 완료되지 않고 연결이 종료됨");
+    if (!settled) handlers.onError(i18n.t("ws.closedEarly"));
   };
 }

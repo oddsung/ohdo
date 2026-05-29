@@ -81,6 +81,11 @@ export const en: Catalog = {
     overlayHint: "Hover the mouse over the UI element to select…",
     captureFailed: "element capture failed",
   },
+  ws: {
+    connError: "WebSocket connection error",
+    genError: "AI generation error",
+    closedEarly: "Connection closed before generation completed",
+  },
   record: {
     started: "Recording started — work in the target app",
     startFailed: "Failed to start recording: {{message}}",
