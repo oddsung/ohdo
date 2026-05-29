@@ -114,3 +114,16 @@ desktop_v3/.vite/
 # electron-vite 가 dev/build 시 생성하는 임시 config 파일 (timestamp suffix).
 desktop_v3/electron.vite.config.*.mjs
 desktop_v3/*.timestamp-*.mjs
+# electron-builder 설치본 출력 (handoff §46).
+desktop_v3/release/
+# PyInstaller freeze 산출물 (사용자가 로컬에서 생성, 커밋 X) — 브리지 동봉용.
+desktop_v3/build/pybridge/
+# PyInstaller 작업 디렉터리 (프로젝트 루트에서 freeze 시 생성).
+build/ohdo-bridge/
+dist/ohdo-bridge/
+# 단, desktop_v3/build/ 의 freeze 도구 (spec + entry) 는 커밋한다.
+# (위 최상단 `build/` 광범위 ignore 의 예외 — desktop_v3/build/ 는 electron-builder
+#  buildResources 디렉터리이기도 함.)
+!desktop_v3/build/
+!desktop_v3/build/bridge_entry.py
+!desktop_v3/build/ohdo-bridge.spec

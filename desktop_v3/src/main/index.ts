@@ -28,20 +28,45 @@ let pyProc: ChildProcessWithoutNullStreams | null = null;
 let apiInfo: ApiInfo | null = null;
 let mainWindow: BrowserWindow | null = null;
 
-/** 프로젝트 루트 = desktop_v3/ 의 부모. .venv 와 api_server 가 여기에 있다. */
+/** 프로젝트 루트 = desktop_v3/ 의 부모. dev 에서 .venv 와 api_server 가 여기에 있다. */
 function projectRoot(): string {
-  // dev: app.getAppPath() === .../ohdo/desktop_v3
-  // prod(packaged): app.getAppPath() === .../resources/app(.asar) — OHDO_PROJECT_ROOT 로 override.
+  // dev: app.getAppPath() === .../ohdo/desktop_v3 → 부모가 프로젝트 루트.
+  // packaged: OHDO_PROJECT_ROOT override 가 없으면 resourcesPath (frozen 번들 spawn 시 cwd 미사용).
   return process.env.OHDO_PROJECT_ROOT || join(app.getAppPath(), "..");
 }
 
-/** 번들된 .venv 의 Python 실행 파일 경로 (OHDO_PYTHON 으로 override 가능). */
-function pythonExecutable(): string {
-  if (process.env.OHDO_PYTHON) return process.env.OHDO_PYTHON;
+/** Python 브리지 실행 커맨드 (handoff §46).
+ *
+ * - **packaged** (app.isPackaged): electron-builder extraResources 로 동봉된 **frozen 브리지**
+ *   (`resources/pybridge/ohdo-bridge[.exe]`, PyInstaller onedir) 를 직접 실행. Python 런타임
+ *   미설치 PC 에서도 동작. 인자는 `--port <p>` 만 (PyInstaller entry 가 api_server.__main__).
+ * - **dev**: `..\.venv\Scripts\python.exe -m api_server`.
+ * - `OHDO_PYTHON` env 가 있으면 dev/packaged 무관하게 그 인터프리터로 `-m api_server` (디버그용).
+ */
+function bridgeCommand(port: number): { cmd: string; args: string[]; cwd: string } {
   const root = projectRoot();
-  return process.platform === "win32"
-    ? join(root, ".venv", "Scripts", "python.exe")
-    : join(root, ".venv", "bin", "python");
+
+  if (process.env.OHDO_PYTHON) {
+    return {
+      cmd: process.env.OHDO_PYTHON,
+      args: ["-m", "api_server", "--port", String(port)],
+      cwd: root,
+    };
+  }
+
+  if (app.isPackaged) {
+    // extraResources: { from: "build/pybridge", to: "pybridge" } → process.resourcesPath/pybridge/
+    const exe = process.platform === "win32" ? "ohdo-bridge.exe" : "ohdo-bridge";
+    const frozen = join(process.resourcesPath, "pybridge", exe);
+    return { cmd: frozen, args: ["--port", String(port)], cwd: join(process.resourcesPath, "pybridge") };
+  }
+
+  // dev: 로컬 .venv 인터프리터.
+  const python =
+    process.platform === "win32"
+      ? join(root, ".venv", "Scripts", "python.exe")
+      : join(root, ".venv", "bin", "python");
+  return { cmd: python, args: ["-m", "api_server", "--port", String(port)], cwd: root };
 }
 
 /** 주어진 포트가 비었는지 확인하고, 비었으면 그 포트를, 아니면 임의의 빈 포트를 반환한다. */

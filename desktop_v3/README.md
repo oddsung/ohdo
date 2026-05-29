@@ -118,4 +118,49 @@ WS 메시지: `{type:"log"|"step_done"|"done"|"error", ...}`. 클라이언트 �
   - 잔여: 녹화 review/편집 (현재는 stop 시 바로 commit).
 - **C. 통합 기능** — picker/실행/녹화 완료, review·고급 옵션 후속.
 - **D. Polish** ✅ — i18n (react-i18next, ko/en + 언어 토글) + 핵심 애니메이션 (§45). 단축키·테마는 §40.
-- **E. 배포** — electron-builder.
+- **E. 배포** — electron-builder 설정 + 패키징 경로 해석 완료 (§46). freeze/설치 실측은 사용자 머신.
+
+## 배포 / 패키징 (Phase E, handoff §46)
+
+설치본은 **Electron 앱 + frozen Python 브리지**를 함께 담는다. Python 미설치 PC 에서도
+동작하도록 `api_server`+`core` 를 PyInstaller onedir 로 freeze 해 `extraResources` 로 동봉한다.
+
+### 1) Python 브리지 freeze (프로젝트 루트에서)
+
+```powershell
+# 루트에 .venv 활성화 + pyinstaller 설치 (uv add --dev pyinstaller 또는 pip install)
+uv run pyinstaller desktop_v3/build/ohdo-bridge.spec --noconfirm
+# 결과: dist/ohdo-bridge/ohdo-bridge.exe  (onedir 폴더)
+```
+
+### 2) frozen 결과를 동봉 위치로 복사
+
+```powershell
+Remove-Item -Recurse -Force desktop_v3/build/pybridge -EA SilentlyContinue
+Copy-Item -Recurse dist/ohdo-bridge desktop_v3/build/pybridge
+# → desktop_v3/build/pybridge/ohdo-bridge.exe 가 있어야 함 (main 이 packaged 모드에서 spawn)
+```
+
+### 3) Electron 설치본 빌드
+
+```powershell
+cd desktop_v3
+npm run dist        # electron-vite build + electron-builder --win (nsis 설치본)
+# 결과: desktop_v3/release/ohdo-<version>-setup.exe
+```
+
+### 동작 원리
+
+- `main/index.ts` 의 `bridgeCommand()` 가 모드를 분기:
+  - **packaged** (`app.isPackaged`): `process.resourcesPath/pybridge/ohdo-bridge.exe --port <p>` spawn.
+  - **dev**: `..\.venv\Scripts\python.exe -m api_server`.
+  - `OHDO_PYTHON` env: 모드 무관하게 그 인터프리터로 `-m api_server` (디버그).
+- frozen exe 도 stdout 에 `OHDO_API_READY {json}` 한 줄을 내므로 포트/토큰 협상은 동일.
+
+### 주의 / 미검증
+
+- **이 개발 환경에서는 freeze/설치/실행 검증 불가** (GUI·설치 테스트 머신 아님). 위 절차는
+  사용자 Windows 머신에서 1회 실측 필요.
+- PyInstaller hidden-import 누락 시 frozen exe 가 `ImportError` 로 죽는다 → 콘솔(`--port` 직접
+  실행)로 확인. spec 의 `hiddenimports` 에 누락 모듈 추가.
+- 코드 서명(인증서)·자동 업데이트는 미구성 (후속).
