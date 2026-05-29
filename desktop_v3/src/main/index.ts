@@ -211,9 +211,124 @@ function createWindow(): void {
   }
 }
 
+/** element picker 투명 오버레이 (handoff §49).
+ *
+ * 가상 데스크톱 전체를 덮는 투명·프레임리스·클릭통과(WS_EX_TRANSPARENT) 창.
+ * `setIgnoreMouseEvents(true)` 가 WS_EX_TRANSPARENT 를 설정 → UIA ElementFromPoint 가
+ * 이 창을 건너뛰고 그 아래 대상 앱 element 를 반환한다(v2 가 풀던 문제를 동일 원리로 해결).
+ * 클릭/Esc 는 이 창이 아니라 전역 LL 후크(Python pick_pump)가 잡는다.
+ */
+function createPickOverlay(): void {
+  if (overlayWindow) return;
+
+  // 모든 디스플레이를 덮는 union bounds (DIP).
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const d of screen.getAllDisplays()) {
+    minX = Math.min(minX, d.bounds.x);
+    minY = Math.min(minY, d.bounds.y);
+    maxX = Math.max(maxX, d.bounds.x + d.bounds.width);
+    maxY = Math.max(maxY, d.bounds.y + d.bounds.height);
+  }
+
+  overlayWindow = new BrowserWindow({
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    hasShadow: false,
+    enableLargerThanScreen: true,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, "../preload/index.js"),
+      sandbox: false,
+    },
+  });
+
+  // 클릭통과(WS_EX_TRANSPARENT) — 대상 앱이 클릭을 받고 LL 후크가 캡처. forward 로
+  // 마우스 이동 이벤트는 받아 cursor 표시 유지.
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+
+  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  if (devUrl) {
+    overlayWindow.loadURL(`${devUrl}/overlay.html`);
+  } else {
+    // 빌드 시 두 엔트리(index/overlay) 모두 out/renderer/ 루트로 emit (index.html 과 동일 레벨).
+    overlayWindow.loadFile(join(__dirname, "../renderer/overlay.html"));
+  }
+  overlayWindow.once("ready-to-show", () => overlayWindow?.showInactive());
+  overlayWindow.on("closed", () => {
+    overlayWindow = null;
+  });
+}
+
+function closePickOverlay(): void {
+  if (overlayWindow) {
+    overlayWindow.destroy();
+    overlayWindow = null;
+  }
+}
+
+/** Python 물리픽셀 rect → 오버레이 로컬 CSS px(DIP). 멀티모니터/고DPI 대응. */
+function physicalRectToOverlayCss(rect: {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}): { x: number; y: number; w: number; h: number } | null {
+  if (!overlayWindow) return null;
+  // screenToDipPoint: 물리 스크린 px → DIP (Windows). 두 모서리를 각각 변환해야
+  // 모니터별 scaleFactor 가 다른 경우에도 정확.
+  const tl = screen.screenToDipPoint({ x: rect.left, y: rect.top });
+  const br = screen.screenToDipPoint({ x: rect.right, y: rect.bottom });
+  const b = overlayWindow.getBounds();
+  return { x: tl.x - b.x, y: tl.y - b.y, w: br.x - tl.x, h: br.y - tl.y };
+}
+
+/** 메인 윈도우에서 호출하는 picker IPC 핸들러 등록 (1회). */
+function registerPickIpc(): void {
+  ipcMain.handle("pick:start", () => {
+    // v2 처럼 메인 윈도우를 숨겨 대상 앱이 가려지지 않게 한다.
+    mainWindow?.minimize();
+    createPickOverlay();
+  });
+  ipcMain.handle("pick:stop", () => {
+    closePickOverlay();
+    if (mainWindow?.isMinimized()) mainWindow.restore();
+  });
+  ipcMain.handle("pick:hover", async () => {
+    if (!apiInfo) return null;
+    try {
+      const res = await fetch(`${apiInfo.baseUrl}/pick/hover`, {
+        headers: { Authorization: `Bearer ${apiInfo.token}` },
+      });
+      const data = (await res.json()) as {
+        rect?: { left: number; top: number; right: number; bottom: number } | null;
+      };
+      return data?.rect ? physicalRectToOverlayCss(data.rect) : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
 app.whenReady().then(async () => {
   // renderer 가 API 접속 정보를 요청할 때 응답 (preload → contextBridge).
   ipcMain.handle("ohdo:get-api-info", () => apiInfo);
+  registerPickIpc();
 
   try {
     apiInfo = await startPythonBridge();
@@ -231,7 +346,10 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", stopPythonBridge);
+app.on("before-quit", () => {
+  closePickOverlay();
+  stopPythonBridge();
+});
 
 app.on("window-all-closed", () => {
   stopPythonBridge();

@@ -21,6 +21,8 @@ declare global {
   }
 }
 
+export {};
+
 let stopped = false;
 
 async function tick(): Promise<void> {

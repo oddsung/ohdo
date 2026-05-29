@@ -10,6 +10,9 @@ export interface ApiInfo {
 
 export interface OhdoBridge {
   getApiInfo: () => Promise<ApiInfo | null>;
+  // element picker 투명 오버레이 제어 (handoff §49).
+  startPickOverlay: () => Promise<void>;
+  stopPickOverlay: () => Promise<void>;
 }
 
 declare global {

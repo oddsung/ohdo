@@ -13,8 +13,16 @@ export interface ApiInfo {
 const api = {
   /** Python 브리지 접속 정보 {baseUrl, token}. 브리지 미기동 시 null. */
   getApiInfo: (): Promise<ApiInfo | null> => ipcRenderer.invoke("ohdo:get-api-info"),
+  // element picker 투명 오버레이 제어 (handoff §49) — 메인 윈도우에서 호출.
+  startPickOverlay: (): Promise<void> => ipcRenderer.invoke("pick:start"),
+  stopPickOverlay: (): Promise<void> => ipcRenderer.invoke("pick:stop"),
 };
 
 contextBridge.exposeInMainWorld("ohdo", api);
+
+// 오버레이 창 전용 — hover rect 폴링 (main 이 물리픽셀→오버레이 로컬 CSS px 변환).
+contextBridge.exposeInMainWorld("ohdoPick", {
+  hover: () => ipcRenderer.invoke("pick:hover"),
+});
 
 export type OhdoApi = typeof api;
