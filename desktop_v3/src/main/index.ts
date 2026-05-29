@@ -101,13 +101,12 @@ function startPythonBridge(): Promise<ApiInfo> {
   return new Promise(async (resolve, reject) => {
     const token = randomBytes(32).toString("hex");
     const port = await findFreePort();
-    const python = pythonExecutable();
-    const root = projectRoot();
+    const { cmd, args, cwd } = bridgeCommand(port);
 
-    console.log(`[main] python bridge spawn: ${python} -m api_server --port ${port} (cwd=${root})`);
+    console.log(`[main] python bridge spawn: ${cmd} ${args.join(" ")} (cwd=${cwd})`);
 
-    const child = spawn(python, ["-m", "api_server", "--port", String(port)], {
-      cwd: root,
+    const child = spawn(cmd, args, {
+      cwd,
       env: { ...process.env, OHDO_API_TOKEN: token, PYTHONUNBUFFERED: "1" },
     });
     pyProc = child;

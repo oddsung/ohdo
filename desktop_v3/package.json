@@ -37,10 +37,36 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^38.0.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^4.0.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.6.3",
     "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "ai.ohdo.desktop",
+    "productName": "ohdo",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": ["out/**/*", "package.json"],
+    "extraResources": [
+      {
+        "from": "build/pybridge",
+        "to": "pybridge",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "artifactName": "ohdo-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }
