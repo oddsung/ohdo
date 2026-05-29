@@ -55,3 +55,29 @@ def pick_element(request: Request, _: None = Depends(require_token)) -> dict:
         "label": format_element_label(element),
         "is_browser_element": is_browser,
     }
+
+
+@router.post("/pick/click")
+def pick_on_click_route(request: Request, _: None = Depends(require_token)) -> dict:
+    """클릭 시 캡처 (handoff §48, 절충안) — 다음 좌클릭의 element 를 캡처.
+
+    카운트다운(/pick) 대신 전역 LL 마우스 후크로 사용자가 대상을 클릭할 때까지 블록한다.
+    선택 클릭은 삼켜서 대상 앱이 눌리지 않게 한다. ESC/타임아웃/``/pick/cancel`` 로 취소.
+    하이라이트 없음. Windows 전용(그 외 501).
+    """
+    import sys as _sys
+
+    if _sys.platform != "win32":
+        raise HTTPException(status_code=501, detail="element picker 는 Windows 전용입니다.")
+
+    from api_server.pick_pump import pick_on_click
+
+    return pick_on_click()
+
+
+@router.post("/pick/cancel")
+def pick_cancel_route(request: Request, _: None = Depends(require_token)) -> dict:
+    """진행 중인 클릭 캡처 취소 (UI Esc/취소 버튼용)."""
+    from api_server.pick_pump import cancel_pick
+
+    return {"cancelled": cancel_pick()}
