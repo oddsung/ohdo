@@ -2711,6 +2711,11 @@ output_project/logging/element_picker) 중 **v3 에서 만질 수 있는 건 테
 2. **(A)유형 일괄 구현** = 백로그 #1,2,3,4,5,6,7,8,9 (P0) → handoff 후속 절
 3. **설정 화면** = 백로그 #20, 브리지 settings GET/PUT 부터 → handoff 후속 절
 
+### 구현 완료 (동일 세션)
+- **(A)유형 일괄** (커밋 9e30aff 백엔드/4d8f9da 프론트/ce1f9e3 README): 브리지 6개 엔드포인트 (DELETE/PATCH sessions, DELETE/move/insert/regenerate steps) + StepCard 액션 툴바 (run/from/regenerate/up/down/insert/delete + 선택 시 경고상세/required_packages) + SessionRow rename/delete. 모두 기존 AppService 메서드 위임 (core 0줄). 재생성은 generate_step replaces_step_id 활용(in-place).
+- **설정 화면** (커밋 e29eef3 백엔드/0a2c0c2 UI): GET/PUT /settings (config/settings.json read/write, default 병합, 저장 시 reload_ai 즉시 반영, v2 와 파일 공유) + 사이드바 기어 → SettingsDialog (엔진 선택 + config 제네릭 편집, api_key 마스킹).
+- 검증: core 213/213 (test_217 패리티 라우트 + test_218 settings), ruff/tsc/build 그린. 남은 백로그: P1+ (#10~22 — 설정 확장/시크릿 볼트/녹화 review/멀티탭 등).
+
 ## 46. 2026-05-29 Phase E — electron-builder 배포 셋업 (Python freeze 동봉, 설정+문서)
 
 **컨텍스트**: 사용자 순서 #3 (마지막). 사용자 결정: **설정/문서만, freeze 는 사용자 머신**.

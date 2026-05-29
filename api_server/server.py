@@ -46,6 +46,7 @@ from api_server.routes import (
     pick,
     recording,
     sessions,
+    settings,
     steps,
 )
 
@@ -103,5 +104,6 @@ def create_app(token: str = "", data_dir: "str | Path | None" = None) -> FastAPI
     app.include_router(recording.router)
     app.include_router(execution.router)
     app.include_router(generate.router)
+    app.include_router(settings.router)
 
     return app

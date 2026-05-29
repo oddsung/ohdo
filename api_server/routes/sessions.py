@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from api_server.deps import (
     CreateSessionRequest,
     GenerateRequest,
+    RenameSessionRequest,
+    drop_kernel,
     get_app_service,
     require_token,
     to_dict,
@@ -47,6 +49,44 @@ def create_session(
         description=body.description,
     )
     return {"session": to_dict(session)}
+
+
+@router.patch("/sessions/{session_id}")
+def rename_session(
+    session_id: str,
+    body: RenameSessionRequest,
+    request: Request,
+    _: None = Depends(require_token),
+) -> dict:
+    """세션 이름변경 (handoff §47 백로그 #9) — title 만 갱신 후 ``save_session``."""
+    service = get_app_service(request.app)
+    try:
+        session = service.get_session(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+    title = (body.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title 이 비어 있습니다.")
+    session.title = title
+    service.save_session(session)
+    return {"success": True, "session": to_dict(service.get_session(session_id))}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, request: Request, _: None = Depends(require_token)) -> dict:
+    """세션 삭제 (handoff §47 백로그 #8) — ``AppService.delete_session`` 위임.
+
+    캐시된 kernel 도 함께 정리한다.
+    """
+    app = request.app
+    service = get_app_service(app)
+    try:
+        service.get_session(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+    service.delete_session(session_id)
+    drop_kernel(app, session_id)
+    return {"success": True, "session_id": session_id}
 
 
 @router.post("/sessions/{session_id}/generate")

@@ -74,6 +74,47 @@ class UpdateStepRequest(BaseModel):
     generated_code: str
 
 
+class RenameSessionRequest(BaseModel):
+    """세션 이름변경 (handoff §47 백로그 #9 — save_session 위임)."""
+
+    title: str
+
+
+class MoveStepRequest(BaseModel):
+    """step 이동 (handoff §47 백로그 #5 — move_step 위임)."""
+
+    direction: str  # "up" | "down"
+
+
+class InsertStepRequest(BaseModel):
+    """step 삽입 (handoff §47 백로그 #6 — insert_step 위임)."""
+
+    code: str = ""
+    description: str = "삽입된 단계"
+
+
+class RegenerateRequest(BaseModel):
+    """step 재생성 (handoff §47 백로그 #7 — generate_step replaces_step_id).
+
+    user_request 미지정 시 기존 step 의 user_request 를 재사용한다.
+    """
+
+    user_request: Optional[str] = None
+    element_context: Optional[str] = None
+    is_browser_element: bool = False
+
+
+class SaveSettingsRequest(BaseModel):
+    """설정 저장 (handoff §47 백로그 #20 — config/settings.json 쓰기 + AI 재초기화)."""
+
+    settings: dict
+
+
+def save_json(path: Path, data: dict) -> None:
+    """dict 를 들여쓰기 JSON(UTF-8)으로 저장 — config/settings.json 쓰기용."""
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 # ── AppService / 인증 / kernel / 녹화 컨트롤러 ─────────
 
 

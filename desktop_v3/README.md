@@ -86,8 +86,16 @@ desktop_v3/
 | GET | `/sessions` | 세션 목록 | Bearer |
 | GET | `/sessions/{id}` | 세션 상세 (steps 포함) | Bearer |
 | POST | `/sessions` | 새 세션 생성 | Bearer |
+| PATCH | `/sessions/{id}` | 세션 이름변경 (§47) | Bearer |
+| DELETE | `/sessions/{id}` | 세션 삭제 (§47) | Bearer |
 | POST | `/sessions/{id}/generate` | 자연어 → AI 코드 생성 (element_context 첨부 가능) | Bearer |
 | PUT | `/sessions/{id}/steps/{step}` | step 코드 편집 저장 | Bearer |
+| DELETE | `/sessions/{id}/steps/{step}` | step 삭제 (§47) | Bearer |
+| POST | `/sessions/{id}/steps/{step}/move` | step 이동 up/down (§47) | Bearer |
+| POST | `/sessions/{id}/steps/{step}/insert` | step 뒤 빈 step 삽입 (§47) | Bearer |
+| POST | `/sessions/{id}/steps/{step}/regenerate` | step in-place 재생성 (§47) | Bearer |
+| GET | `/settings` | 설정 조회 (defaults 병합) (§47) | Bearer |
+| PUT | `/settings` | 설정 저장 + AI 재초기화 (§47) | Bearer |
 | POST | `/pick` | 커서 위치 UI element 캡처 (Windows) | Bearer |
 | WS | `/ws/execute` | step 실행 + live 로그 스트리밍 | 쿼리 토큰 |
 | WS | `/ws/generate` | AI 코드 생성 진행상황 스트리밍 | 쿼리 토큰 |
