@@ -490,7 +490,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             className="h-[60px] w-10 shrink-0 text-discord-muted hover:text-primary"
             title={t("chat.pickElementTitle")}
             disabled={busy || picking}
-            onClick={() => startPick(3)}
+            onClick={() => startPick()}
           >
             <MousePointerClick className="h-5 w-5" />
           </Button>
