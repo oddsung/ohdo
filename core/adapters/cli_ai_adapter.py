@@ -37,16 +37,19 @@ from .base_adapter import AIResponse, BaseAIAdapter
 
 CLI_AI_PRESETS: dict[str, dict] = {
     "agy": {
-        # 2026-05-29 사용자 보고: agy CLI 는 -m / -p flag 미지원 (구 gemini CLI 와
-        # 완전히 다른 flag 체계 — --add-dir / --continue / --conversation /
-        # --dangerously-skip-permissions / -i 등 노출). stdin 전용 + 모델은 CLI
-        # default 사용. 정확한 flag 알려지면 model_arg / prompt_arg 채울 것.
+        # 2026-05-29 사용자 `agy --help` 확인 결과:
+        # - 모델 지정 flag 없음 (CLI default 사용)
+        # - `-p` / `--print` / `--prompt` : "Run a single prompt non-interactively and
+        #   print the response" — headless mode. stdin 으로 prompt 받음.
+        # - `--print` 없으면 interactive 진입 → stdin 닫혀도 응답 없음.
+        # 따라서 `--print` 를 always_args 로 항상 포함 → stdin 으로 prompt + 응답.
         "display_name": "Agy CLI (구 Gemini)",
         "command": "agy",
         "model_arg": None,
         "model": "",
         "prompt_arg": None,
         "supports_images": False,
+        "always_args": ["--print"],
     },
     "claude_code": {
         "display_name": "Claude Code (Anthropic)",
@@ -55,6 +58,7 @@ CLI_AI_PRESETS: dict[str, dict] = {
         "model": "claude-opus-4-7",
         "prompt_arg": "-p",
         "supports_images": False,
+        "always_args": [],
     },
     "codex": {
         "display_name": "OpenAI Codex CLI",
@@ -63,6 +67,7 @@ CLI_AI_PRESETS: dict[str, dict] = {
         "model": "gpt-5-codex",
         "prompt_arg": None,  # stdin 만 — prompt-as-arg 미지원
         "supports_images": False,
+        "always_args": [],
     },
 }
 
@@ -105,12 +110,16 @@ def migrate_ai_settings(ai_settings: dict) -> dict:
     return migrated
 
 
-_PROTOCOL_FIELDS = ("model_arg", "prompt_arg", "supports_images")
+_PROTOCOL_FIELDS = ("model_arg", "prompt_arg", "supports_images", "always_args")
 """[handoff §36 2026-05-29] preset 이 항상 authoritative 하게 가져가는 protocol 필드.
 
 CLI 별 specific flag 체계 — 사용자가 manual override 할 일 거의 없음 + 잘못된
 값이면 invocation 자체가 실패 (예: agy 가 -m 미지원). 사용자가 진짜 customize
 하려면 ``preset="custom"`` 선택.
+
+- ``always_args``: preset 가 항상 포함시키는 mandatory flags (예: agy 의 ``--print``).
+  ``extra_args`` (사용자 customizable) 와 분리 — 사용자 편집이 critical flag 제거하지
+  못하도록.
 """
 
 
@@ -174,18 +183,28 @@ class CliAIAdapter(BaseAIAdapter):
         self.timeout = int(merged.get("timeout_seconds", 180))
         self.max_retries = int(merged.get("max_retries", 3))
         self.model = merged.get("model", "")
+        # preset 명시 시 model_arg/prompt_arg 가 None 이면 그대로 None (preset 의도).
+        # preset 없으면 key 자체가 없으니 default "-m"/"-p" (back-compat).
         self.model_arg = merged.get("model_arg", "-m")
         self.prompt_arg = merged.get("prompt_arg", "-p")
-        self.extra_args = list(merged.get("extra_args", []) or [])
+        # always_args: preset-mandated, 사용자 편집 영향 X (protocol field).
+        self.always_args = list(merged.get("always_args") or [])
+        # extra_args: 사용자 customizable, preset 외 추가 flag.
+        self.extra_args = list(merged.get("extra_args") or [])
         self.supports_images = bool(merged.get("supports_images", False))
         self._proc: Optional[subprocess.Popen] = None
         self._cancelled: bool = False
 
     def _build_args(self, cli_exec: str, *extra: str) -> list:
-        """CLI 실행 인자 빌드. model + extra_args + 호출자 추가 인자 합본."""
+        """CLI 실행 인자 빌드.
+
+        순서: command + model flag + always_args (preset 필수) + extra_args (사용자) + 호출자 추가.
+        """
         args = [cli_exec]
         if self.model and self.model_arg:
             args.extend([self.model_arg, self.model])
+        if self.always_args:
+            args.extend(self.always_args)
         if self.extra_args:
             args.extend(self.extra_args)
         args.extend(extra)

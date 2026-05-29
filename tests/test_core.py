@@ -11549,19 +11549,41 @@ if __name__ == "__main__":
                     f"[§36] preset '{name}' 에 '{field}' 필드 필수. 실제: {preset!r}",
                 )
 
-        self.step("(3) preset='agy' → command 'agy' + model_arg None (agy CLI 는 -m 미지원)")
+        self.step("(3) preset='agy' → --print always_args + 모델 flag 없음")
         a = CliAIAdapter({"preset": "agy"})
         self.assert_equal(a.command, "agy", "[§36] agy preset command")
-        # 2026-05-29 사용자 보고: agy CLI 가 -m / -p flag 미지원 → preset model_arg=None.
-        # model 도 빈 값 (CLI default 사용). _build_args 에 -m 추가 안 됨.
+        # 2026-05-29 사용자 보고 + `agy --help` 확인: agy 는 -m / model flag 없음,
+        # `--print` 가 headless mode 필수 (없으면 interactive 진입). preset 의
+        # always_args 에 --print 강제 포함.
         self.assert_true(
             a.model_arg is None,
-            f"[§36] agy preset model_arg None (CLI 가 -m 미지원). 실제: {a.model_arg!r}",
+            f"[§36] agy preset model_arg None (agy 가 model flag 없음). 실제: {a.model_arg!r}",
+        )
+        self.assert_true(
+            "--print" in (a.always_args or []),
+            f"[§36] agy preset always_args 에 --print 포함 (headless mode 필수). "
+            f"실제: {a.always_args!r}",
         )
         agy_args = a._build_args("agy.exe")
         self.assert_true(
-            "-m" not in agy_args,
-            f"[§36] agy _build_args 에 -m flag 없음. 실제: {agy_args!r}",
+            "-m" not in agy_args and "--print" in agy_args,
+            f"[§36] agy _build_args: -m 없음 + --print 포함. 실제: {agy_args!r}",
+        )
+
+        # 사용자 stale settings.json (구 -m / -p 박혀 있던 케이스) 도 preset 으로 reset
+        a_stale = CliAIAdapter(
+            {
+                "preset": "agy",
+                "command": "agy",
+                "model": "agy-3.1-pro",
+                "model_arg": "-m",  # stale
+                "prompt_arg": "-p",  # stale
+            }
+        )
+        stale_args = a_stale._build_args("agy.exe")
+        self.assert_true(
+            "-m" not in stale_args and "--print" in stale_args,
+            f"[§36] agy stale config (구 -m/-p) → preset 우선 reset. 실제: {stale_args!r}",
         )
 
         self.step("(4) preset='claude_code' → command='claude' + model='claude-...'")
