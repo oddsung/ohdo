@@ -2,6 +2,7 @@
 // element picker 상태 (handoff §40 #3) — 카운트다운 + 보류 중 element.
 import { create } from "zustand";
 import { pickElement, type PendingElement } from "@/api/client";
+import i18n from "@/i18n";
 
 interface PickState {
   picking: boolean;
@@ -43,7 +44,7 @@ export const usePickStore = create<PickState>((set, get) => ({
               picking: false,
             });
           } else {
-            set({ picking: false, error: res.error ?? "element 캡처 실패" });
+            set({ picking: false, error: res.error ?? i18n.t("pick.captureFailed") });
           }
         })
         .catch((e: Error) => {

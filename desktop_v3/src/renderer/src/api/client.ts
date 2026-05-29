@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Python 브리지 HTTP 클라이언트. main 프로세스가 보유한 {baseUrl, token} 를
 // preload(window.ohdo) 를 통해 받아 Authorization 헤더를 붙인다.
+import i18n from "@/i18n";
 
 export interface SessionSummary {
   session_id: string;
@@ -55,7 +56,7 @@ export interface GenerateResult {
 
 async function apiInfo(): Promise<{ baseUrl: string; token: string }> {
   const info = await window.ohdo.getApiInfo();
-  if (!info) throw new Error("Python 브리지에 연결할 수 없습니다 (브리지 미기동).");
+  if (!info) throw new Error(i18n.t("bridge.disconnected"));
   return info;
 }
 

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // 중앙 채팅/스텝 패널 — 세션 상세(steps) 표시 + 자연어 요청 → AI 코드 생성.
-// 동기 요청 + 로딩 (handoff §38 결정). 생성 완료 시 step 목록/코드 뷰어 갱신.
+// AI 생성은 /ws/generate 진행상황 스트리밍 (handoff §44). 완료 시 step 목록/코드 뷰어 갱신.
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   Circle,
   Flag,
@@ -33,6 +34,7 @@ function StepCard({
   onRun: (stepId: number) => void;
   running: boolean;
 }) {
+  const { t } = useTranslation();
   const selectStep = useUiStore((st) => st.selectStep);
   const selectedStepId = useUiStore((st) => st.selectedStepId);
   const active = selectedStepId === step.step_id;
@@ -59,7 +61,7 @@ function StepCard({
             size="icon"
             variant="ghost"
             className="h-6 w-6 text-discord-muted opacity-0 transition-opacity hover:text-discord-green group-hover:opacity-100"
-            title="이 step 실행"
+            title={t("chat.runThisStep")}
             disabled={running}
             onClick={(e) => {
               e.stopPropagation();
@@ -80,7 +82,9 @@ function StepCard({
         <p className="mt-1 line-clamp-3 text-xs text-discord-muted">🤖 {step.ai_description}</p>
       )}
       {step.validation_warnings?.length > 0 && (
-        <p className="mt-1 text-xs text-amber-400">⚠ 경고 {step.validation_warnings.length}건</p>
+        <p className="mt-1 text-xs text-amber-400">
+          {t("chat.stepWarn", { count: step.validation_warnings.length })}
+        </p>
       )}
     </div>
   );
@@ -88,6 +92,7 @@ function StepCard({
 
 export function ChatPanel({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
+  const { t } = useTranslation();
   const selectStep = useUiStore((st) => st.selectStep);
   const { running, run, stop } = useExecution(sessionId);
   const [input, setInput] = useState("");
@@ -127,13 +132,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     onSettled: () => setProgress(""),
     onSuccess: (result) => {
       if (!result.success) {
-        setErrorMsg(result.error ?? "AI 생성 실패");
-        toast.error("AI 코드 생성 실패");
+        setErrorMsg(result.error ?? t("chat.genFailed"));
+        toast.error(t("chat.genFailed"));
         return;
       }
       setErrorMsg(null);
       setInput("");
-      toast.success(`STEP ${result.step?.step_id} 생성 완료`);
+      toast.success(t("chat.stepCreated", { id: result.step?.step_id }));
       qc.invalidateQueries({ queryKey: ["session", sessionId] });
       qc.invalidateQueries({ queryKey: ["sessions"] });
       if (result.step) selectStep(result.step.step_id);
@@ -168,13 +173,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             <>
               <span className="mr-1 flex items-center gap-1 text-xs text-red-400">
                 <Circle className="h-2.5 w-2.5 animate-pulse fill-red-500 text-red-500" />
-                녹화중 · {eventCount}
+                {t("chat.recording", { count: eventCount })}
               </span>
               <Button
                 size="icon"
                 variant="ghost"
                 className="h-7 w-7"
-                title="구분점 추가 (step 경계)"
+                title={t("chat.addMarkerTitle")}
                 disabled={recBusy}
                 onClick={() => addMarker()}
               >
@@ -190,20 +195,20 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                     qc.invalidateQueries({ queryKey: ["session", sessionId] }),
                   )
                 }
-                title="녹화 종료 + 저장"
+                title={t("chat.recordStopTitle")}
               >
                 {recBusy ? (
                   <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <Square className="mr-1 h-3.5 w-3.5" />
                 )}
-                종료
+                {t("chat.recordStop")}
               </Button>
               <Button
                 size="icon"
                 variant="ghost"
                 className="h-7 w-7 text-discord-muted"
-                title="녹화 취소 (저장 안 함)"
+                title={t("chat.recordCancelTitle")}
                 disabled={recBusy}
                 onClick={() => cancelRec()}
               >
@@ -215,11 +220,11 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
               size="sm"
               variant="ghost"
               className="h-7 text-discord-muted hover:text-red-400"
-              title="작업 녹화 시작 (다른 앱 조작을 step 으로 기록)"
+              title={t("chat.recordStartTitle")}
               disabled={running}
               onClick={() => startRec(sessionId)}
             >
-              <Circle className="mr-1 h-3.5 w-3.5" /> 녹화
+              <Circle className="mr-1 h-3.5 w-3.5" /> {t("chat.record")}
             </Button>
           )}
 
@@ -229,7 +234,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             session.steps.length > 0 &&
             (running ? (
               <Button size="sm" variant="destructive" className="h-7" onClick={stop}>
-                <Square className="mr-1 h-3.5 w-3.5" /> 중단
+                <Square className="mr-1 h-3.5 w-3.5" /> {t("chat.stop")}
               </Button>
             ) : (
               <Button
@@ -237,9 +242,9 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 variant="secondary"
                 className="h-7"
                 onClick={() => run("all", null)}
-                title="전체 실행"
+                title={t("chat.runAll")}
               >
-                <Play className="mr-1 h-3.5 w-3.5" /> 전체 실행
+                <Play className="mr-1 h-3.5 w-3.5" /> {t("chat.runAll")}
               </Button>
             ))}
         </div>
@@ -247,11 +252,9 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
       <ScrollArea className="flex-1">
         <div ref={scrollRef} className="space-y-2 p-3">
-          {isLoading && <p className="text-sm text-discord-muted">세션 로딩 중…</p>}
+          {isLoading && <p className="text-sm text-discord-muted">{t("chat.loadingSession")}</p>}
           {session && session.steps.length === 0 && (
-            <p className="px-1 py-6 text-center text-sm text-discord-muted">
-              아래에 자연어로 작업을 요청하면 AI 가 첫 step 코드를 생성합니다.
-            </p>
+            <p className="px-1 py-6 text-center text-sm text-discord-muted">{t("chat.emptyHint")}</p>
           )}
           {session?.steps.map((s) => (
             <StepCard key={s.step_id} step={s} running={running} onRun={(id) => run("single", id)} />
@@ -259,7 +262,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           {busy && (
             <div className="flex items-center gap-2 rounded-md bg-discord-card/50 p-3 text-sm text-discord-muted">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {progress || "AI 가 코드를 생성하는 중… (agy CLI 는 10~30초 걸릴 수 있습니다)"}
+              {progress || t("chat.generatingDefault")}
             </div>
           )}
         </div>
@@ -273,7 +276,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
       {pickError && (
         <div className="border-t border-amber-900/40 bg-amber-950/20 px-4 py-1.5 text-xs text-amber-300">
-          ⚠ 요소 선택: {pickError}
+          {t("chat.pickPrefix", { message: pickError })}
         </div>
       )}
 
@@ -281,8 +284,14 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         <div className="flex items-center gap-2 border-t border-black/20 px-3 pt-2">
           <span className="flex max-w-full items-center gap-1 rounded-full bg-primary/20 px-2 py-1 text-xs text-discord-text">
             <MousePointerClick className="h-3 w-3 shrink-0 text-primary" />
-            <span className="truncate">첨부된 요소: {pending.label.split("\n")[0].slice(0, 60)}</span>
-            <button onClick={clearPending} className="ml-1 shrink-0 hover:text-white" title="첨부 제거">
+            <span className="truncate">
+              {t("chat.attached", { label: pending.label.split("\n")[0].slice(0, 60) })}
+            </span>
+            <button
+              onClick={clearPending}
+              className="ml-1 shrink-0 hover:text-white"
+              title={t("chat.removeAttach")}
+            >
               <X className="h-3 w-3" />
             </button>
           </span>
@@ -295,7 +304,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             size="icon"
             variant="ghost"
             className="h-[60px] w-10 shrink-0 text-discord-muted hover:text-primary"
-            title="UI 요소 선택 (3초 카운트다운 후 커서 위치 캡처)"
+            title={t("chat.pickElementTitle")}
             disabled={busy || picking}
             onClick={() => startPick(3)}
           >
@@ -310,12 +319,21 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 submit();
               }
             }}
-            placeholder="작업을 자연어로 요청하세요 (Enter 전송, Shift+Enter 줄바꿈)"
+            placeholder={t("chat.placeholder")}
             disabled={busy}
             rows={2}
           />
-          <Button onClick={submit} disabled={busy || !input.trim()} size="icon" className="h-[60px] w-12">
-            {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizonal className="h-5 w-5" />}
+          <Button
+            onClick={submit}
+            disabled={busy || !input.trim()}
+            size="icon"
+            className="h-[60px] w-12"
+          >
+            {busy ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <SendHorizonal className="h-5 w-5" />
+            )}
           </Button>
         </div>
       </div>

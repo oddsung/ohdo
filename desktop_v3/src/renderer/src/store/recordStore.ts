@@ -10,6 +10,7 @@ import {
   recordingStopCommit,
 } from "@/api/client";
 import { toast } from "@/store/toastStore";
+import i18n from "@/i18n";
 
 interface RecordState {
   recording: boolean;
@@ -34,7 +35,7 @@ export const useRecordStore = create<RecordState>((set, get) => ({
     try {
       await recordingStart(sessionId);
       set({ recording: true, eventCount: 0 });
-      toast.success("녹화 시작 — 대상 앱에서 작업하세요");
+      toast.success(i18n.t("record.started"));
       const poll = window.setInterval(async () => {
         try {
           const st = await recordingStatus();
@@ -50,7 +51,7 @@ export const useRecordStore = create<RecordState>((set, get) => ({
       }, 1000);
       set({ _poll: poll });
     } catch (e) {
-      toast.error(`녹화 시작 실패: ${(e as Error).message}`);
+      toast.error(i18n.t("record.startFailed", { message: (e as Error).message }));
     } finally {
       set({ busy: false });
     }
@@ -59,9 +60,9 @@ export const useRecordStore = create<RecordState>((set, get) => ({
   marker: async () => {
     try {
       await recordingMarker();
-      toast.info("구분점 추가됨");
+      toast.info(i18n.t("record.markerAdded"));
     } catch (e) {
-      toast.error(`구분점 실패: ${(e as Error).message}`);
+      toast.error(i18n.t("record.markerFailed", { message: (e as Error).message }));
     }
   },
 
@@ -74,11 +75,11 @@ export const useRecordStore = create<RecordState>((set, get) => ({
     try {
       const res = await recordingStopCommit(sessionId);
       set({ recording: false, eventCount: 0 });
-      toast.success(`녹화 완료 — step ${res.step_count}개 추가`);
+      toast.success(i18n.t("record.complete", { count: res.step_count }));
       onCommitted?.();
     } catch (e) {
       set({ recording: false });
-      toast.error(`녹화 저장 실패: ${(e as Error).message}`);
+      toast.error(i18n.t("record.saveFailed", { message: (e as Error).message }));
     } finally {
       set({ busy: false });
     }
@@ -94,6 +95,6 @@ export const useRecordStore = create<RecordState>((set, get) => ({
       /* best-effort */
     }
     set({ recording: false, eventCount: 0, busy: false });
-    toast.info("녹화 취소됨");
+    toast.info(i18n.t("record.canceled"));
   },
 }));

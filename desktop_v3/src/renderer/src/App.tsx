@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phase B — Discord-like 3-column 셸: 서버 레일 + 세션 사이드바 + 채팅/스텝 + Monaco 코드 뷰어.
-// AI 코드 생성 루프(§37 검증 목표 "코드 생성 → 화면 표시")가 동작한다.
+// Discord-like 3-column 셸: 서버 레일 + 세션 사이드바 + 채팅/스텝 + Monaco 코드 뷰어 + 콘솔.
+// 전역: 단축키(useShortcuts) + 요소 선택 오버레이(PickOverlay) + 토스트(Toaster).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { createSession, fetchSession } from "./api/client";
 import { useUiStore } from "./store/uiStore";
 import { usePickStore } from "./store/pickStore";
@@ -50,21 +51,50 @@ function CodePane({ sessionId }: { sessionId: string }) {
 }
 
 function EmptyState() {
+  const { t } = useTranslation();
   return (
     <main className="flex h-full flex-1 items-center justify-center">
       <div className="text-center text-discord-muted">
-        <p className="text-lg">👋 ohdo desktop_v3 (Phase B)</p>
-        <p className="mt-2 text-sm">왼쪽에서 세션을 선택하거나 + 로 새로 만드세요.</p>
-        <p className="mt-1 text-xs">
-          세션을 열고 자연어로 작업을 요청하면 AI 가 Python 자동화 코드를 생성합니다.
-        </p>
+        <p className="text-lg">{t("app.welcome")}</p>
+        <p className="mt-2 text-sm">{t("app.pickOrCreate")}</p>
+        <p className="mt-1 text-xs">{t("app.hint")}</p>
       </div>
     </main>
   );
 }
 
 export default function App() {
+  const qc = useQueryClient();
+  const { t } = useTranslation();
   const selectedSessionId = useUiStore((st) => st.selectedSessionId);
+  const selectSession = useUiStore((st) => st.selectSession);
+  const cancelPick = usePickStore((st) => st.cancel);
+
+  // 전역 단축키용 실행 훅 — 세션 미선택 시 빈 문자열(핸들러에서 가드).
+  const { run, stop } = useExecution(selectedSessionId ?? "");
+
+  const newSessionMut = useMutation({
+    mutationFn: () => {
+      const stamp = new Date().toISOString().slice(5, 16).replace("T", " ");
+      return createSession(t("sidebar.newSessionName", { stamp }));
+    },
+    onSuccess: (s) => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      selectSession(s.session_id);
+      toast.success(t("session.created"));
+    },
+    onError: (e) => toast.error(t("session.createFailed", { message: (e as Error).message })),
+  });
+
+  useShortcuts({
+    onRunToggle: () => {
+      if (!selectedSessionId) return;
+      if (useExecStore.getState().running) stop();
+      else run("all", null);
+    },
+    onNewSession: () => newSessionMut.mutate(),
+    onEscape: () => cancelPick(),
+  });
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -78,6 +108,8 @@ export default function App() {
       ) : (
         <EmptyState />
       )}
+      <PickOverlay />
+      <Toaster />
     </div>
   );
 }

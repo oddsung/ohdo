@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Pencil, Save, X } from "lucide-react";
 import { updateStepCode } from "@/api/client";
 import { toast } from "@/store/toastStore";
@@ -18,6 +19,7 @@ interface CodeViewerProps {
 
 export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) {
   const qc = useQueryClient();
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(code);
 
@@ -31,11 +33,11 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
     mutationFn: () => updateStepCode(sessionId, stepId as number, draft),
     onSuccess: () => {
       setEditing(false);
-      toast.success("코드 저장됨");
+      toast.success(t("code.saved"));
       qc.invalidateQueries({ queryKey: ["session", sessionId] });
       qc.invalidateQueries({ queryKey: ["sessions"] });
     },
-    onError: (e) => toast.error(`저장 실패: ${(e as Error).message}`),
+    onError: (e) => toast.error(t("code.saveFailed", { message: (e as Error).message })),
   });
 
   const canEdit = stepId != null && !!code;
@@ -44,7 +46,7 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
     <div className="flex h-full flex-col bg-discord-rail">
       <header className="flex h-9 items-center justify-between border-b border-black/30 px-3 text-xs text-discord-muted">
         <span>
-          {title ?? "코드"} · {editing ? "편집 중" : "읽기 전용"}
+          {title ?? t("code.title")} · {editing ? t("code.editing") : t("code.readOnly")}
         </span>
         {canEdit && (
           <div className="flex items-center gap-1">
@@ -58,13 +60,13 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
                   onClick={() => saveMut.mutate()}
                 >
                   <Save className="mr-1 h-3 w-3" />
-                  {saveMut.isPending ? "저장 중…" : "저장"}
+                  {saveMut.isPending ? t("common.saving") : t("common.save")}
                 </Button>
                 <Button
                   size="icon"
                   variant="ghost"
                   className="h-6 w-6"
-                  title="취소"
+                  title={t("common.cancel")}
                   onClick={() => {
                     setEditing(false);
                     setDraft(code);
@@ -80,7 +82,7 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
                 className="h-6 px-2 text-xs"
                 onClick={() => setEditing(true)}
               >
-                <Pencil className="mr-1 h-3 w-3" /> 편집
+                <Pencil className="mr-1 h-3 w-3" /> {t("code.edit")}
               </Button>
             )}
           </div>
@@ -88,7 +90,7 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
       </header>
       {saveMut.isError && (
         <div className="bg-red-950/30 px-3 py-1 text-xs text-red-300">
-          저장 실패: {(saveMut.error as Error).message}
+          {t("code.saveFailed", { message: (saveMut.error as Error).message })}
         </div>
       )}
       <div className="flex-1">
@@ -114,7 +116,7 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-discord-muted">
-            코드가 있는 step 을 선택하세요.
+            {t("code.selectStep")}
           </div>
         )}
       </div>

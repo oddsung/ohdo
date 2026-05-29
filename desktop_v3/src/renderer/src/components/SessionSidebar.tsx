@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// 좌측 세션 사이드바 — 목록 + 새 세션 생성 + 브리지 상태.
+// 좌측 세션 사이드바 — 목록 + 새 세션 생성 + 브리지 상태 + 테마/언어 토글.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Moon, Plus, Sun } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Languages, Moon, Plus, Sun } from "lucide-react";
 import { createSession, fetchHealth, fetchSessions, type SessionSummary } from "@/api/client";
 import { useUiStore } from "@/store/uiStore";
 import { useThemeStore } from "@/store/themeStore";
 import { toast } from "@/store/toastStore";
+import { currentLang, setLang } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 function HealthDot() {
+  const { t } = useTranslation();
   const { data, isError } = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const ok = !!data && !isError && data.status === "ok";
   return (
@@ -19,12 +22,13 @@ function HealthDot() {
         className={`inline-block h-2 w-2 rounded-full ${ok ? "bg-discord-green" : "bg-red-500"}`}
         title={ok ? "bridge online" : "bridge offline"}
       />
-      {ok ? `bridge v${data?.version}` : "bridge 연결 안됨"}
+      {ok ? t("bridge.online", { version: data?.version }) : t("bridge.offline")}
     </div>
   );
 }
 
 function SessionRow({ s }: { s: SessionSummary }) {
+  const { t } = useTranslation();
   const selectedId = useUiStore((st) => st.selectedSessionId);
   const select = useUiStore((st) => st.selectSession);
   const active = selectedId === s.session_id;
@@ -35,9 +39,13 @@ function SessionRow({ s }: { s: SessionSummary }) {
         active ? "bg-discord-card text-white" : "text-discord-muted hover:bg-discord-card/60"
       }`}
     >
-      <div className="truncate text-sm font-medium">{s.title || "(제목 없음)"}</div>
+      <div className="truncate text-sm font-medium">{s.title || t("chat.untitled")}</div>
       <div className="mt-0.5 text-xs text-discord-muted">
-        {s.project_type} · {s.completed_steps}/{s.total_steps} steps
+        {t("chat.stepsInfo", {
+          project: s.project_type,
+          done: s.completed_steps,
+          total: s.total_steps,
+        })}
       </div>
     </button>
   );
@@ -45,6 +53,7 @@ function SessionRow({ s }: { s: SessionSummary }) {
 
 export function SessionSidebar() {
   const qc = useQueryClient();
+  const { t, i18n } = useTranslation();
   const select = useUiStore((st) => st.selectSession);
   const [creating, setCreating] = useState(false);
   const { data, isLoading, isError, error } = useQuery({
@@ -54,30 +63,31 @@ export function SessionSidebar() {
 
   const theme = useThemeStore((st) => st.theme);
   const toggleTheme = useThemeStore((st) => st.toggle);
+  const lang = (i18n.language || currentLang()).startsWith("ko") ? "ko" : "en";
 
   const createMut = useMutation({
     mutationFn: () => {
       const stamp = new Date().toISOString().slice(5, 16).replace("T", " ");
-      return createSession(`v3 새 세션 ${stamp}`);
+      return createSession(t("sidebar.newSessionName", { stamp }));
     },
     onSuccess: (session) => {
       qc.invalidateQueries({ queryKey: ["sessions"] });
       select(session.session_id);
-      toast.success("새 세션 생성됨");
+      toast.success(t("session.created"));
     },
-    onError: (e) => toast.error(`세션 생성 실패: ${(e as Error).message}`),
+    onError: (e) => toast.error(t("session.createFailed", { message: (e as Error).message })),
     onSettled: () => setCreating(false),
   });
 
   return (
     <aside className="flex h-full w-60 flex-col bg-discord-sidebar">
       <header className="flex h-12 items-center justify-between border-b border-black/20 px-4 shadow-sm">
-        <span className="font-semibold">세션</span>
+        <span className="font-semibold">{t("sidebar.sessions")}</span>
         <Button
           size="icon"
           variant="ghost"
           className="h-7 w-7 text-discord-muted hover:text-white"
-          title="새 세션"
+          title={t("sidebar.newSession")}
           disabled={creating || createMut.isPending}
           onClick={() => {
             setCreating(true);
@@ -89,27 +99,42 @@ export function SessionSidebar() {
       </header>
       <ScrollArea className="flex-1">
         <div className="space-y-1 p-2">
-          {isLoading && <p className="px-2 py-4 text-sm text-discord-muted">불러오는 중…</p>}
+          {isLoading && (
+            <p className="px-2 py-4 text-sm text-discord-muted">{t("sidebar.loading")}</p>
+          )}
           {isError && (
-            <p className="px-2 py-4 text-sm text-red-400">에러: {(error as Error).message}</p>
+            <p className="px-2 py-4 text-sm text-red-400">
+              {t("sidebar.error", { message: (error as Error).message })}
+            </p>
           )}
           {data && data.length === 0 && (
-            <p className="px-2 py-4 text-sm text-discord-muted">세션이 없습니다. + 로 생성하세요.</p>
+            <p className="px-2 py-4 text-sm text-discord-muted">{t("sidebar.empty")}</p>
           )}
           {data?.map((s) => <SessionRow key={s.session_id} s={s} />)}
         </div>
       </ScrollArea>
       <footer className="flex items-center justify-between border-t border-black/20 px-4 py-2">
         <HealthDot />
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-6 w-6 text-discord-muted hover:text-white"
-          title={theme === "dark" ? "라이트 테마로" : "다크 테마로"}
-          onClick={toggleTheme}
-        >
-          {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 text-discord-muted hover:text-white"
+            title={lang === "ko" ? t("sidebar.toEnglish") : t("sidebar.toKorean")}
+            onClick={() => setLang(lang === "ko" ? "en" : "ko")}
+          >
+            <Languages className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 text-discord-muted hover:text-white"
+            title={theme === "dark" ? t("sidebar.toLightTheme") : t("sidebar.toDarkTheme")}
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
       </footer>
     </aside>
   );
