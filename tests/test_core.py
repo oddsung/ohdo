@@ -11549,35 +11549,29 @@ if __name__ == "__main__":
                     f"[§36] preset '{name}' 에 '{field}' 필드 필수. 실제: {preset!r}",
                 )
 
-        self.step("(3) preset='agy' → always_args=['-p', ''] + use_stdin=True (stdin pipe)")
+        self.step("(3) preset='agy' → use_pty=True (ConPTY 우회 — agy 가 TUI 기반)")
         a = CliAIAdapter({"preset": "agy"})
         self.assert_equal(a.command, "agy", "[§36] agy preset command")
-        # 2026-05-29 사용자 실측 확정: `echo "<prompt>" | agy -p ""` 패턴이 작동.
-        # `-p` 는 string flag — 빈 ""을 값으로 넘기면 agy 가 stdin 에서 prompt 읽음.
-        # → 명령어 길이 한계 우회 가능 (stdin 무제한). preset: always_args=["-p", ""]
-        #   + use_stdin=True + prompt_arg=None (fallback 불필요).
+        # 2026-05-29 사용자 실측 + 디버깅으로 확정 (handoff §36 hotfix):
+        # agy 는 Go TUI 라이브러리 — Win32 console API (WriteConsoleW) 로 직접 출력.
+        # 일반 subprocess pipe / PowerShell `>` redirect 모두 무력화. 유일한 해결:
+        # ConPTY (pywinpty) + cmd 우회 (`type promptfile | agy -p ""`).
         self.assert_true(
             a.model_arg is None,
             f"[§36] agy preset model_arg None (agy 가 model flag 없음). 실제: {a.model_arg!r}",
         )
         self.assert_equal(
-            a.always_args,
-            ["-p", ""],
-            f"[§36] agy always_args=['-p', ''] (print mode 트리거 + stdin 활성화). "
-            f"실제: {a.always_args!r}",
+            a.use_pty,
+            True,
+            f"[§36 PTY] agy use_pty=True (ConPTY 우회 필수). 실제: {a.use_pty!r}",
         )
         self.assert_equal(
             a.use_stdin,
-            True,
-            f"[§36] agy use_stdin=True (stdin path 로 prompt 전달). 실제: {a.use_stdin!r}",
-        )
-        agy_args = a._build_args("agy.exe")
-        self.assert_true(
-            agy_args == ["agy.exe", "-p", ""],
-            f"[§36] agy _build_args: [agy.exe, -p, '']. 실제: {agy_args!r}",
+            False,
+            f"[§36 PTY] agy use_stdin=False (PTY path 가 stdin 처리). 실제: {a.use_stdin!r}",
         )
 
-        # 사용자 stale settings.json (구 -m / --print 박혀 있던 케이스) 도 preset 으로 reset
+        # 사용자 stale settings.json 도 preset 으로 reset (use_pty 도 protocol field)
         a_stale = CliAIAdapter(
             {
                 "preset": "agy",
@@ -11585,14 +11579,15 @@ if __name__ == "__main__":
                 "model": "agy-3.1-pro",
                 "model_arg": "-m",  # stale
                 "prompt_arg": "--print",  # stale
-                "use_stdin": False,  # stale
+                "use_stdin": True,  # stale
+                "use_pty": False,  # stale
             }
         )
         self.assert_equal(
-            a_stale.always_args, ["-p", ""], "[§36] agy stale config → preset always_args reset"
+            a_stale.use_pty, True, "[§36 PTY] agy stale config → preset use_pty=True reset"
         )
         self.assert_equal(
-            a_stale.use_stdin, True, "[§36] agy stale config → preset use_stdin=True reset"
+            a_stale.use_stdin, False, "[§36 PTY] agy stale config → preset use_stdin=False reset"
         )
 
         self.step("(4) preset='claude_code' → command='claude' + model='claude-...'")
@@ -11734,19 +11729,15 @@ if __name__ == "__main__":
             f"[§36] error 에 OpenAI compat 전환 권장. 실제: {resp.error!r}",
         )
 
-        self.step("(2) agy (use_stdin=True) 는 긴 prompt 가드 안 걸림")
+        self.step("(2) agy (use_pty=True) 는 PTY 경로 사용 → 길이 가드와 무관")
         a = CliAIAdapter({"preset": "agy"})
-        self.assert_equal(a.use_stdin, True, "[§36 hotfix2] agy use_stdin=True (stdin pipe)")
-        self.assert_equal(
-            a.always_args,
-            ["-p", ""],
-            "[§36 hotfix2] agy always_args=['-p', ''] (print + stdin 트리거)",
-        )
+        self.assert_equal(a.use_pty, True, "[§36 PTY] agy use_pty=True (ConPTY 우회)")
+        self.assert_equal(a.use_stdin, False, "[§36 PTY] agy use_stdin=False (PTY 가 stdin 처리)")
 
-        self.step("(3) _PROTOCOL_FIELDS 에 use_stdin 등록")
+        self.step("(3) _PROTOCOL_FIELDS 에 use_stdin + use_pty 등록")
         self.assert_true(
-            "use_stdin" in _PROTOCOL_FIELDS,
-            "[§36] _PROTOCOL_FIELDS 에 'use_stdin' 등록 — preset 가 사용자 stale 값 무력화",
+            "use_stdin" in _PROTOCOL_FIELDS and "use_pty" in _PROTOCOL_FIELDS,
+            "[§36] _PROTOCOL_FIELDS 에 'use_stdin' + 'use_pty' 등록",
         )
 
     def test_195_regenerate_inplace_replaces_step_id(self):

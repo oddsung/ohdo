@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,20 +53,24 @@ _PLAIN_OUTPUT_ENV = {
 
 CLI_AI_PRESETS: dict[str, dict] = {
     "agy": {
-        # 2026-05-29 사용자 실측으로 확정된 호출 방법:
-        #   echo "<prompt>" | agy -p ""
-        # `-p` (=`--print`) 는 Go flag 패키지의 string flag — 값 필수. 하지만
-        # 빈 문자열 ``""`` 을 값으로 넘기면 agy 가 stdin 에서 prompt 읽음.
-        # → 명령어 길이 한계 우회 (stdin 은 무제한 — 34k+ prompt 처리 가능)
-        # 모델 지정 flag 는 없음 (CLI default 사용).
-        "display_name": "Agy CLI (구 Gemini)",
+        # 2026-05-29 사용자 실측 + 디버깅으로 확정 (handoff §36 hotfix):
+        # - agy 는 Go TUI 라이브러리 (Antigravity) 기반 — stdout 을 Win32 console
+        #   API (WriteConsoleW) 로 직접 씀. 일반 Python subprocess pipe / PowerShell
+        #   `>` 파일 redirect 모두 무력화 (응답이 빈 채로 캡처됨).
+        # - 유일한 해결: ConPTY (pseudo TTY) 로 가짜 콘솔 제공.
+        # - 추가 트릭: PTY 안에서 cmd 가 `type promptfile | agy -p ""` 호출하면
+        #   agy 의 stdin 은 cmd pipe (non-TTY) → 정상 prompt 읽음, stdout 은
+        #   cmd 의 TTY (PTY) → 우리가 PTY 로 캡처.
+        # - 모델 지정 flag 없음 (CLI default).
+        "display_name": "Agy CLI (구 Gemini / Antigravity)",
         "command": "agy",
         "model_arg": None,
         "model": "",
-        "prompt_arg": None,  # fallback 불필요 — stdin path 가 항상 작동
+        "prompt_arg": None,
         "supports_images": False,
-        "always_args": ["-p", ""],  # `-p ""` 로 print mode 트리거 + stdin 활성화
-        "use_stdin": True,
+        "always_args": [],
+        "use_stdin": False,  # PTY path 가 stdin 처리 — 일반 stdin path 비활성
+        "use_pty": True,  # ConPTY + cmd 우회 — Win32 console API 캡처
     },
     "claude_code": {
         "display_name": "Claude Code (Anthropic)",
@@ -76,6 +81,7 @@ CLI_AI_PRESETS: dict[str, dict] = {
         "supports_images": False,
         "always_args": [],
         "use_stdin": True,
+        "use_pty": False,
     },
     "codex": {
         "display_name": "OpenAI Codex CLI",
@@ -86,6 +92,7 @@ CLI_AI_PRESETS: dict[str, dict] = {
         "supports_images": False,
         "always_args": [],
         "use_stdin": True,
+        "use_pty": False,
     },
 }
 
@@ -128,7 +135,14 @@ def migrate_ai_settings(ai_settings: dict) -> dict:
     return migrated
 
 
-_PROTOCOL_FIELDS = ("model_arg", "prompt_arg", "supports_images", "always_args", "use_stdin")
+_PROTOCOL_FIELDS = (
+    "model_arg",
+    "prompt_arg",
+    "supports_images",
+    "always_args",
+    "use_stdin",
+    "use_pty",
+)
 """[handoff §36 2026-05-29] preset 이 항상 authoritative 하게 가져가는 protocol 필드.
 
 CLI 별 specific flag 체계 — 사용자가 manual override 할 일 거의 없음 + 잘못된
@@ -212,6 +226,9 @@ class CliAIAdapter(BaseAIAdapter):
         self.supports_images = bool(merged.get("supports_images", False))
         # use_stdin: stdin path 사용 여부. False 면 prompt_arg path 로 직행 (예: agy).
         self.use_stdin = bool(merged.get("use_stdin", True))
+        # use_pty: ConPTY 우회 사용 — Win32 console API 로 stdout 우회하는 TUI CLI 용
+        # (handoff §36 hotfix, agy). PyWinPty 필요 (Windows 전용).
+        self.use_pty = bool(merged.get("use_pty", False))
         self._proc: Optional[subprocess.Popen] = None
         self._cancelled: bool = False
 
@@ -249,6 +266,131 @@ class CliAIAdapter(BaseAIAdapter):
     def is_available(self) -> bool:
         """command 가 PATH 에 존재하는지 확인 (실 호출 없음)."""
         return shutil.which(self.command) is not None
+
+    # ── ANSI 필터 (PTY path 용) ────────────────────────────────────
+    _ANSI_OSC = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)")
+    _ANSI_CSI = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+    # ESC + 단일 문자 (DECSC `\x1b7`, DECRC `\x1b8` 등 숫자/대문자/기호)
+    _ANSI_ESC_SOLO = re.compile(r"\x1B[0-9@-Z\\-_]")
+
+    def _strip_ansi(self, text: str) -> str:
+        text = self._ANSI_OSC.sub("", text)
+        text = self._ANSI_CSI.sub("", text)
+        text = self._ANSI_ESC_SOLO.sub("", text)
+        return text
+
+    def _collapse_blank_lines(self, text: str, max_consecutive: int = 2) -> str:
+        """선두 공백 라인 제거 + 연속 빈 줄 축소 (TUI screen clear 잔존 공백 제거)."""
+        lines = text.replace("\r\n", "\n").split("\n")
+        out: list[str] = []
+        saw_content = False
+        blank_run = 0
+        for line in lines:
+            stripped = line.rstrip()
+            if not stripped:
+                if saw_content and blank_run < max_consecutive:
+                    out.append("")
+                    blank_run += 1
+            else:
+                saw_content = True
+                blank_run = 0
+                out.append(stripped)
+        return "\n".join(out).strip()
+
+    def _invoke_via_pty(
+        self, cli_exec: str, full_prompt: str, sandbox_dir: Path
+    ) -> tuple[str, str, int]:
+        """[handoff §36 hotfix 2026-05-29] ConPTY 우회 — agy 같은 TUI 기반 CLI 용.
+
+        구조:
+        1. prompt 를 UTF-8 BOM 파일로 sandbox 에 저장
+        2. PtyProcess (ConPTY) 로 cmd.exe 를 spawn — agy 입장에서 stdout 은 TTY
+        3. cmd 가 `type promptfile | <agy> -p ""` 실행
+           - agy stdin = cmd pipe (non-TTY) → prompt 정상 읽음
+           - agy stdout = cmd 의 TTY (PTY) → 우리가 PTY 로 캡처
+        4. ANSI escape sequences 필터 + 선두/연속 공백 라인 정리
+
+        반환: ``(raw_output, stderr_output, returncode)``. PtyProcess 는 stdout/stderr
+        구분 안 되므로 stderr_output 은 항상 빈 문자열.
+        """
+        if sys.platform != "win32":
+            raise RuntimeError("use_pty=True 는 현재 Windows (ConPTY) 만 지원")
+        try:
+            from winpty import PtyProcess
+        except ImportError as exc:
+            raise RuntimeError(
+                "use_pty=True 는 pywinpty 필요 — `pip install pywinpty` 또는 `uv sync` 후 재시도"
+            ) from exc
+
+        # prompt 를 UTF-8 BOM 파일로 (cmd `type` 가 BOM 보면 UTF-8 인식)
+        prompt_file = sandbox_dir / "prompt.txt"
+        prompt_file.write_text(full_prompt, encoding="utf-8-sig")
+
+        # 복잡한 quote escaping 회피 — bat 래퍼 파일에 명령 작성 후 실행.
+        # cmd /c <bat_file> 은 단순 invocation 이라 quote 갈등 없음.
+        flags_part = ""
+        if self.always_args:
+            flags_part += " " + " ".join(f'"{a}"' for a in self.always_args)
+        bat_file = sandbox_dir / "run.bat"
+        # chcp 65001 = cmd console codepage UTF-8. 한글 응답 garble 방지.
+        bat_content = (
+            "@echo off\r\n"
+            "chcp 65001 >NUL\r\n"
+            f'type "{prompt_file}" | {self.command}{flags_part} -p ""\r\n'
+        )
+        bat_file.write_text(bat_content, encoding="utf-8")
+
+        proc = PtyProcess.spawn(
+            ["cmd.exe", "/c", str(bat_file)],
+            dimensions=(40, 200),
+            cwd=str(sandbox_dir),
+        )
+        # 사용자 cancel 추적용 (cancel() 메서드에서 kill)
+        self._pty_proc = proc
+
+        output = ""
+        deadline = time.time() + self.timeout
+        last_data = time.time()
+        try:
+            while time.time() < deadline:
+                if self._cancelled:
+                    try:
+                        proc.kill(9)
+                    except Exception:
+                        pass
+                    break
+                try:
+                    chunk = proc.read(4096)
+                    if chunk:
+                        output += chunk
+                        last_data = time.time()
+                    elif not proc.isalive():
+                        # drain remaining
+                        try:
+                            while True:
+                                c = proc.read(4096)
+                                if not c:
+                                    break
+                                output += c
+                        except EOFError:
+                            pass
+                        break
+                    else:
+                        time.sleep(0.1)
+                        # 3초간 데이터 없고 프로세스 종료됨 → 종료
+                        if time.time() - last_data > 3.0 and not proc.isalive():
+                            break
+                except EOFError:
+                    break
+        finally:
+            self._pty_proc = None
+
+        rc = proc.exitstatus if proc.exitstatus is not None else 0
+
+        # ANSI 스트립 + 공백 정리
+        clean = self._strip_ansi(output)
+        clean = self._collapse_blank_lines(clean)
+        return (clean, "", rc)
 
     async def generate(
         self,
@@ -299,6 +441,50 @@ class CliAIAdapter(BaseAIAdapter):
             raw_output = ""
             stderr_output = ""
             returncode = -1
+
+            # Path 0: PTY 우회 (use_pty=True — agy 같은 TUI CLI 용).
+            # 다른 path 모두 스킵하고 PTY+cmd 경로로 직행.
+            if self.use_pty:
+                try:
+                    raw_output, stderr_output, returncode = self._invoke_via_pty(
+                        cli_exec, full_prompt, sandbox_dir
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    return AIResponse(
+                        success=False,
+                        error=f"{self.command} PTY 호출 실패: {exc}",
+                    )
+                if self._cancelled:
+                    return AIResponse(
+                        success=False, cancelled=True, error="사용자가 요청을 취소했습니다."
+                    )
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                # PTY path 는 stdin/prompt_arg 우회 — 바로 결과 처리로
+                if raw_output:
+                    code = self.extract_code_from_response(raw_output)
+                    if code:
+                        code = self.restore_user_strings(code, full_prompt)
+                    description = self.extract_description_from_response(raw_output)
+                    packages = self.extract_packages_from_code(code) if code else []
+                    is_partial = self.detect_partial_response(raw_output)
+                    return AIResponse(
+                        text=raw_output,
+                        code=code,
+                        description=description,
+                        packages=packages,
+                        raw_response=raw_output,
+                        response_time_ms=elapsed_ms,
+                        success=True,
+                        partial=is_partial,
+                    )
+                else:
+                    return AIResponse(
+                        raw_response=stderr_output or "응답 없음",
+                        response_time_ms=elapsed_ms,
+                        success=False,
+                        error=f"{self.command} PTY 오류 (코드 {returncode}): "
+                        f"{(stderr_output or '응답 없음')[:500]}",
+                    )
 
             # 2026-05-29 (handoff §36 hotfix): Windows CreateProcess 명령어 인자
             # 길이 한계 (~32767). prompt_arg path 만 가능한 CLI (예: agy) 에서 긴

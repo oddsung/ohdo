@@ -38,6 +38,9 @@ dependencies = [
     "pywinauto>=0.6.8; sys_platform == 'win32'",
     "pywin32>=306; sys_platform == 'win32'",
     "uiautomation>=2.0.18; sys_platform == 'win32'",
+    # ConPTY (pseudo terminal) — agy/Antigravity 같은 TUI 기반 CLI AI 의 stdout 캡처용
+    # (handoff §36 hotfix). 일반 subprocess pipe 우회 → PTY 로 가짜 TTY 제공해야 함.
+    "pywinpty>=2.0.0; sys_platform == 'win32'",
     # Web Automation
     "selenium>=4.15.0",
     # Data Processing
