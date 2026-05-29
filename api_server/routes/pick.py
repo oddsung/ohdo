@@ -81,3 +81,15 @@ def pick_cancel_route(request: Request, _: None = Depends(require_token)) -> dic
     from api_server.pick_pump import cancel_pick
 
     return {"cancelled": cancel_pick()}
+
+
+@router.get("/pick/hover")
+def pick_hover_route(request: Request, _: None = Depends(require_token)) -> dict:
+    """현재 커서 아래 element 의 rect(물리 픽셀) 반환 — 실시간 하이라이트용 (handoff §49).
+
+    클릭 캡처(pick_on_click)가 진행 중일 때만 의미 있는 값. 오버레이가 ~30fps 로 폴링한다.
+    UIA 호출은 펌프 스레드에서만 하고 여기선 저장된 값만 읽으므로 빠르다(동시성 안전).
+    """
+    from api_server.pick_pump import get_hover_rect
+
+    return {"rect": get_hover_rect()}

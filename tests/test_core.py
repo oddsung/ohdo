@@ -12544,15 +12544,19 @@ if __name__ == "__main__":
                 pairs.add((path, m))
         self.assert_true(("/pick/click", "POST") in pairs, "POST /pick/click 라우트 필수")
         self.assert_true(("/pick/cancel", "POST") in pairs, "POST /pick/cancel 라우트 필수")
+        self.assert_true(
+            ("/pick/hover", "GET") in pairs, "GET /pick/hover 라우트 필수 (§49 하이라이트)"
+        )
         self.assert_true(("/pick", "POST") in pairs, "POST /pick (instant) 하위호환 유지")
 
         self.step("(2) pick_pump import 안전 + 초기 상태")
         import api_server.pick_pump as pp
 
-        for fn in ("pick_on_click", "cancel_pick", "is_active"):
+        for fn in ("pick_on_click", "cancel_pick", "is_active", "get_hover_rect"):
             self.assert_true(hasattr(pp, fn), f"pick_pump.{fn} 필수")
         self.assert_true(not pp.is_active(), "초기 상태는 비활성")
         self.assert_true(pp.cancel_pick() is False, "비활성 시 cancel_pick False")
+        self.assert_true(pp.get_hover_rect() is None, "비활성 시 hover rect None")
 
 
 if __name__ == "__main__":

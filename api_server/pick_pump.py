@@ -33,10 +33,21 @@ _lock = threading.Lock()
 _cancel = threading.Event()
 _active = threading.Event()
 
+# 실시간 hover 하이라이트용 — 펌프 루프가 ~50ms 마다 갱신하는 "커서 아래 element 의
+# rect" (물리 픽셀, {left,top,right,bottom} 또는 None). /pick/hover 가 이 값을 읽어
+# Electron 오버레이가 붉은 박스를 그린다. dict 교체는 GIL 하에 원자적이라 별도 lock 불필요.
+_hover_rect: dict | None = None
+_HOVER_INTERVAL_S = 0.05  # 하이라이트 샘플링 주기 (UIA EFP 는 펌프 루프에서 — 후크 proc 금지)
+
 
 def is_active() -> bool:
     """클릭 캡처가 진행 중인가."""
     return _active.is_set()
+
+
+def get_hover_rect() -> dict | None:
+    """현재 커서 아래 element 의 rect(물리 픽셀) 반환 — 없으면 None. (오버레이 폴링용)"""
+    return _hover_rect
 
 
 def cancel_pick() -> bool:
@@ -47,8 +58,12 @@ def cancel_pick() -> bool:
     return False
 
 
-def pick_on_click(timeout_s: float = 20.0) -> dict:
+def pick_on_click(timeout_s: float = 60.0) -> dict:
     """다음 좌클릭(또는 ESC/타임아웃)까지 블록 → 클릭 좌표의 element 캡처.
+
+    블록하는 동안 펌프 루프가 ~50ms 마다 커서 아래 element rect 를 ``_hover_rect`` 에
+    갱신한다(실시간 하이라이트용 — /pick/hover 가 폴링). UIA EFP 는 펌프 루프에서만
+    호출(§42: 후크 proc 안에서 무거운 호출 금지 — LL hook 타임아웃 회피).
 
     동시 호출은 거부(이미 진행 중). 반환 dict 는 ``/pick`` 과 동일 shape + ``cancelled`` 플래그.
     """
@@ -83,7 +98,9 @@ def pick_on_click(timeout_s: float = 20.0) -> dict:
             ("dwExtraInfo", ulong_ptr),
         ]
 
+    global _hover_rect
     captured: dict = {"pt": None}
+    _hover_rect = None
     _cancel.clear()
     _active.set()
 
@@ -120,8 +137,13 @@ def pick_on_click(timeout_s: float = 20.0) -> dict:
         if not h_mouse:
             return {"success": False, "error": "마우스 훅 설치 실패"}
 
+        from core.app_service import format_element_label
+        from core.element_inspect import capture_element_at
+
+        pt = ctypes.wintypes.POINT()
         msg = ctypes.wintypes.MSG()
         start = time.monotonic()
+        last_hover = 0.0
         while True:
             while user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1):  # PM_REMOVE
                 user32.TranslateMessage(ctypes.byref(msg))
@@ -130,14 +152,21 @@ def pick_on_click(timeout_s: float = 20.0) -> dict:
                 break
             if _cancel.is_set():
                 return {"success": False, "cancelled": True}
-            if time.monotonic() - start > timeout_s:
+            now = time.monotonic()
+            if now - start > timeout_s:
                 return {"success": False, "cancelled": True, "error": "시간 초과"}
+            # ── 실시간 hover 샘플링 (후크 proc 아님 — 여기서 무거운 UIA 호출 OK) ──
+            if now - last_hover >= _HOVER_INTERVAL_S:
+                last_hover = now
+                try:
+                    user32.GetCursorPos(ctypes.byref(pt))
+                    el = capture_element_at(int(pt.x), int(pt.y))
+                    _hover_rect = el.get("rect") if el else None
+                except Exception:
+                    _hover_rect = None
             time.sleep(0.005)
 
         x, y = captured["pt"]
-        from core.app_service import format_element_label
-        from core.element_inspect import capture_element_at
-
         element = capture_element_at(x, y)
         if not element:
             return {
@@ -164,6 +193,7 @@ def pick_on_click(timeout_s: float = 20.0) -> dict:
             ctypes.windll.ole32.CoUninitialize()
         except Exception:
             pass
+        _hover_rect = None
         _active.clear()
         _cancel.clear()
         _lock.release()
