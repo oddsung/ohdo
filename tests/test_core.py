@@ -12446,6 +12446,114 @@ if __name__ == "__main__":
             "[회귀] _detect_element_multi_backend 가 _detect_via_efp 호출 필수",
         )
 
+    def test_217_api_server_v3_parity_routes_registered(self):
+        """[api_server §47] v3 패리티 (A)유형 라우트 등록 + AppService 위임 메서드 존재.
+
+        세션 삭제/이름변경 + step 삭제/이동/삽입/재생성. core 메서드는 이미 존재 —
+        브리지 엔드포인트만 신설(core 0줄). 재생성은 generate_step replaces_step_id.
+        """
+        import inspect
+
+        from api_server.server import create_app
+
+        self.step("(1) v3 parity 라우트 노출")
+        app = create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        expected = [
+            ("/sessions/{session_id}", "DELETE"),
+            ("/sessions/{session_id}", "PATCH"),
+            ("/sessions/{session_id}/steps/{step_id}", "DELETE"),
+            ("/sessions/{session_id}/steps/{step_id}/move", "POST"),
+            ("/sessions/{session_id}/steps/{step_id}/insert", "POST"),
+            ("/sessions/{session_id}/steps/{step_id}/regenerate", "POST"),
+        ]
+        for path, method in expected:
+            self.assert_true((path, method) in pairs, f"패리티 라우트 누락: {method} {path}")
+
+        self.step("(2) AppService 위임 메서드 존재")
+        from core.app_service import AppService
+
+        for name in ("delete_session", "save_session", "delete_step", "move_step", "insert_step"):
+            self.assert_true(
+                hasattr(AppService, name), f"AppService.{name} 메서드 필수 (브리지 위임 대상)"
+            )
+        gen_sig = inspect.signature(AppService.generate_step)
+        self.assert_true(
+            "replaces_step_id" in gen_sig.parameters,
+            "generate_step 에 replaces_step_id 파라미터 필수 (in-place 재생성)",
+        )
+
+    def test_218_api_server_settings_routes(self):
+        """[api_server §47] 설정 read/write 라우트 + GET 동작 (백로그 #20).
+
+        GET /settings 가 default_settings.json 병합 결과 반환 + PUT 라우트 등록.
+        core/ 무수정 — 순수 파일 I/O + AppService.reload_ai 위임.
+        """
+        from api_server.server import create_app
+
+        self.step("(1) settings 라우트 노출")
+        app = create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(("/settings", "GET") in pairs, "GET /settings 라우트 필수")
+        self.assert_true(("/settings", "PUT") in pairs, "PUT /settings 라우트 필수")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트 가드까지만")
+            return
+
+        self.step("(2) GET /settings 동작 (defaults 병합)")
+        client = TestClient(app)
+        res = client.get("/settings")
+        self.assert_equal(res.status_code, 200, "GET /settings 200")
+        body = res.json()
+        self.assert_true("settings" in body, "응답에 settings 키")
+        self.assert_true("defaults" in body, "응답에 defaults 키")
+        self.assert_true(
+            isinstance(body["settings"], dict) and "ai" in body["settings"],
+            "병합된 settings 에 ai 섹션 필수",
+        )
+
+        from core.app_service import AppService
+
+        self.assert_true(hasattr(AppService, "reload_ai"), "AppService.reload_ai 필수")
+
+    def test_219_api_server_pick_on_click_routes(self):
+        """[api_server §48] 클릭 시 캡처 라우트 + pick_pump 모듈 (절충안).
+
+        카운트다운(/pick) 대신 전역 LL 마우스 후크로 다음 클릭의 element 캡처.
+        /pick (instant) 는 하위호환 유지. core/ 무수정. pick_pump 은 비-Windows import 안전.
+        """
+        from api_server.server import create_app
+
+        self.step("(1) pick-on-click 라우트 노출")
+        app = create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(("/pick/click", "POST") in pairs, "POST /pick/click 라우트 필수")
+        self.assert_true(("/pick/cancel", "POST") in pairs, "POST /pick/cancel 라우트 필수")
+        self.assert_true(("/pick", "POST") in pairs, "POST /pick (instant) 하위호환 유지")
+
+        self.step("(2) pick_pump import 안전 + 초기 상태")
+        import api_server.pick_pump as pp
+
+        for fn in ("pick_on_click", "cancel_pick", "is_active"):
+            self.assert_true(hasattr(pp, fn), f"pick_pump.{fn} 필수")
+        self.assert_true(not pp.is_active(), "초기 상태는 비활성")
+        self.assert_true(pp.cancel_pick() is False, "비활성 시 cancel_pick False")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
