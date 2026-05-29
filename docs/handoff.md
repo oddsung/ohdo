@@ -2,7 +2,7 @@
 
 > **사용법**: 새 Claude 세션 시작 시 첫 입력으로 "이 파일 읽고 이어서 작업" 하라고 하세요.
 > 이 문서는 Claude 의 auto-memory 가 컴퓨터 간 옮겨지지 않아 새 세션에서 컨텍스트 빠르게 복원하기 위한 용도입니다.
-> 마지막 업데이트: 2026-05-29 (열한 번째 작업 — 자세한 변경은 §5 변경 이력 + §11~§37 인계 노트 참조). baseline: **core 205/205 + scenarios 73/73 + recording_fixtures 2/2 그린** (§37 신규 — TS UI v3 트랙 전환 결정: Electron + React + TS + Tailwind + Zustand, 같은 repo `desktop_v3/`, Discord-like UX. 다음 세션 Phase A 셋업부터 시작. §36 hotfix series 완료 — agy ConPTY 우회 (pywinpty + cmd bat 래퍼) 로 stdout 캡처 성공, CLI AI 일반화 + Gemini→Agy rename + preset UI + test_204/205) (§34 PR-19m +1 = test_202 raw events 사후 재변환 helper + CLI; §33 PR-19l +1 = test_201 generated_code destructive 패턴; §32 PR-19k +1 = test_200 한글 IME pyperclip placeholder; §31 PR-19i +1 = test_199 raw events JSONL 저장; §30 PR-19h +1 = test_198 destructive ⚠️ badge + commit confirm; §29 PR-19c +1 = test_197 idle gap → wait_after_ms 충전; §28 PR-19j +1 = test_195 regenerate in-place fix, PR-19b +1 = test_196 빠른 double-click 감지) (PySide6 단독 `.venv` 기준 — PR-11~18 = +37 + GUI 실측 1차 fix +5 (test_182~186) + PR-19a-g +8 (test_187~194) = 144→194). **2026-05-23~24 PR-19a → PR-19g 7개 fix 모두 완료, 사용자 GUI 실측 검증 통과** — 녹화 + 입력 + 실행 흐름이 처음으로 사용자 의도대로 동작. (a) PR-19a `core/pywinauto_codegen.py` helper 추출 + recorder 통합. (b) PR-19d `Step.element_meta` 보존 + AI 재생성 path adapter (PR-19d 의 hybrid mode 는 미테스트 — 옵션 3 후속). (c) PR-19e `_safe_str_literal` (json.dumps escape) — Win11 메모장 Document name 의 `\r` SyntaxError 회귀 차단 + `_build_connect_block` 이 `process_id` 우선 connect chain (탭 이름만 잡힌 case 처리). (d) **PR-19f modifier 키 인식 — Ctrl+A 등 hotkey 변환** (recorder 가 `GetAsyncKeyState` 로 modifier 캡처 → RawEvent.modifiers 채움; transform 이 `pyautogui.hotkey('ctrl', 'a')` emit). Session.recording_meta list 필드 + commit_recording metadata 보존. (e) **PR-19g UWP `Light Dismiss` / `PopupRoot` noise filter** — 메모장 닫힘 회귀 차단 (실측 v2-새세션-005917). 자세한 §27 신규. **다음 세션 출발점 — P1 옵션 3 실증 결과 분석 (진행 중)** → P2 PR-19h destructive UX / P3 PR-19b F-6 dedup / P4 PR-19c idle wait / P5 PR-19i raw events JSONL / P6 CJK IME. 자세한 §27 끝 "다음 세션 출발점". **2026-05-23 PR-19a 완료 — recorder_transform 코드 품질 1차**: 자세한 §26. **2026-05-20~23 사용자 GUI 실측 1차 — 녹화 lifecycle 6 fix 완료** (test_182~186). 자세한 §24 "다음 세션 출발점" + §25. **2026-05-19 사용자 결정 — TS UI 트랙 진행 순서**: ① GUI 실측 (진행 중) → ② AppService API 보강 → ③ 2~3주 뒤 PR-19 (FastAPI 라우터) + PR-20 (Vite + React + TS, web_ui/). **풀 TS 재작성 X — recorder/element_picker/win_inspector 는 Python 유지**, TS 는 UI 레이어만. **5/19 (오후): ADR 0004 Phase R2 PR-18 완료 — DPI/멀티모니터 안정화. `core/input_hooks.py` 에 `ensure_dpi_awareness()` (SetProcessDpiAwarenessContext PER_MONITOR_AWARE_V2 우선, SHCore SetProcessDpiAwareness fallback) + `get_dpi_for_point(x, y)` (MonitorFromPoint + GetDpiForMonitor) helper 추가. `get_hook_manager()` 가 idempotent 로 매 호출 ensure_dpi_awareness 트리거. drain thread 가 click event 의 `monitor_dpi` 캡처 (RawEvent 새 필드). `recorder_transform` 의 fallback `pyautogui.click(x, y)` 에 비표준 DPI 시 코멘트 첨부 (`# captured at DPI=144 (150%)`). **R2 완료 — PR-16w + PR-17 + PR-18 모두 완료.** 자세한 §24.** **5/19 (오전): PR-17 마이그레이션 모드 event queue + async EFP. LL hook callback 은 RawEvent 생성 + 큐 enqueue 만 (sub-ms, fast return). 별도 drain thread 가 큐를 빼며 element_capture_fn 호출 + session.events 적재. Windows ~300ms LL hook 타임아웃 안전 + 빠른 자동화 스크립트 (Power Automate / pywinauto / AutoHotkey) 입력 따라잡기 가능.** **5/18: ADR 0004 Phase R2 PR-16w 완료 — 창 포커스 자동 경계 (SetWinEventHook EVENT_SYSTEM_FOREGROUND + SKIPOWNPROCESS) + F8 키보드 hook 에서 marker 자동 변환. PR-13 의 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 가 비로소 end-to-end 작동 (이전엔 PR-13 에서 분리 로직만 구현되어 있었고 캡처 path 가 없어서 dead code 였음). 자세한 §24.** **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
+> 마지막 업데이트: 2026-05-29 (열여덟 번째 작업 — 자세한 변경은 §5 변경 이력 + §11~§44 인계 노트 참조). baseline: **core 211/211 + scenarios 73/73 + recording_fixtures 2/2 그린** (§44 신규 — AI 생성 진행상황 스트리밍: WS /ws/generate 가 generate_step 의 on_progress 콜백("프롬프트 구성 중"/"AI 호출 중 N자")을 실시간 전송. core generate() 토큰 스트리밍 미지원 + agy CLI(PTY) 토큰 스트리밍 불가 → 사용자 결정으로 토큰 대신 진행상황 (core 0줄 수정). ChatPanel POST→WS 전환, 로딩 영역 라이브 진행 표시. test_211 +1.) (§43 신규 — api_server 리팩토링: server.py(568줄)를 deps.py + routes/{health,sessions,steps,pick,recording,execution}.py 로 분리, server.py 는 55줄(state 셋업 + include_router)로 축소. 엔드포인트/동작 100% 동일 (13 routes parity + E2E 검증). 스키마는 server.py 에 하위호환 re-export. 기능 변화 0.) (§42 신규 — **녹화 실제 캡처 fix**: §41 의 "InputHookManager 자체 펌프 스레드" 가정이 틀렸음 — LL 훅은 SetWindowsHookEx 호출 스레드에서 메시지 펌프가 돌아야 콜백 발화. FastAPI 브리지엔 펌프 없음 → 입력 0 캡처 (사용자 실측). fix: `api_server/recording_pump.py` RecordingController 가 전용 스레드에서 start_recording(훅 설치)+PeekMessage 펌프+stop_recording(훅 해제) 수행. E2E 검증: 키입력 6회 → event_count 6 + stop_commit → step 2개 생성 확인. core/PySide6 0줄 수정.) (§41 신규 — TS UI v3 #3 잔여 = 작업 녹화 lifecycle: api_server REST (recording start/status/marker/stop_commit/cancel) + desktop_v3 녹화 버튼/구분점/이벤트 카운트 polling. recorder 의 InputHookManager 자체 pump 스레드로 브리지에서 동작. is_recording/recording_event_count 는 @property (() 호출 금지). core/PySide6 0줄 수정, test_210 +1. Monaco "Loading" CDN/CSP fix 는 §41 에 함께 기록.) (§40 신규 — TS UI v3 Phase B 확장: #1 step 실행 + live 로그 (WS /ws/execute) + #2 코드 편집·저장 (Monaco editable + PUT update_step) + #3 element picker (카운트다운 캡처 /pick) + #4 polish (토스트 + 단축키 + 다크/라이트 테마 토글). core/PySide6 0줄 수정, test_208/209 +2. 다음: 녹화 lifecycle + 사용자 GUI 실측.) (§39 신규 — TS UI v3 Phase B 1차 증분: api_server 에 GET /sessions/{id} + POST /sessions + POST /sessions/{id}/generate (AI 코드 생성, async generate_step 위임) 추가 + settings/prompts 주입. desktop_v3 에 shadcn/ui + Monaco + Discord 3-column (사이드바/채팅/코드뷰어) + AI 생성 루프 (동기 요청+로딩). core/PySide6 0줄 수정, test_207 +1. 다음: 사용자 GUI 실측 (세션 생성 -> 자연어 요청 -> 코드 화면 표시).) (§38 신규 — TS UI v3 Phase A 셋업 완료: `api_server/` FastAPI 브리지 (GET /health + /sessions, 토큰 인증, READY 마커 포트 협상) + `desktop_v3/` Electron 38 + React 19 + TS + Vite 6 + Tailwind + Zustand + TanStack Query 보일러플레이트. core/PySide6 0줄 수정, test_206 회귀 가드 +1. 다음 세션 Phase B 핵심 화면 MVP — 사용자 GUI 실측 `npm run dev` 먼저.) (§37 신규 — TS UI v3 트랙 전환 결정: Electron + React + TS + Tailwind + Zustand, 같은 repo `desktop_v3/`, Discord-like UX. 다음 세션 Phase A 셋업부터 시작. §36 hotfix series 완료 — agy ConPTY 우회 (pywinpty + cmd bat 래퍼) 로 stdout 캡처 성공, CLI AI 일반화 + Gemini→Agy rename + preset UI + test_204/205) (§34 PR-19m +1 = test_202 raw events 사후 재변환 helper + CLI; §33 PR-19l +1 = test_201 generated_code destructive 패턴; §32 PR-19k +1 = test_200 한글 IME pyperclip placeholder; §31 PR-19i +1 = test_199 raw events JSONL 저장; §30 PR-19h +1 = test_198 destructive ⚠️ badge + commit confirm; §29 PR-19c +1 = test_197 idle gap → wait_after_ms 충전; §28 PR-19j +1 = test_195 regenerate in-place fix, PR-19b +1 = test_196 빠른 double-click 감지) (PySide6 단독 `.venv` 기준 — PR-11~18 = +37 + GUI 실측 1차 fix +5 (test_182~186) + PR-19a-g +8 (test_187~194) = 144→194). **2026-05-23~24 PR-19a → PR-19g 7개 fix 모두 완료, 사용자 GUI 실측 검증 통과** — 녹화 + 입력 + 실행 흐름이 처음으로 사용자 의도대로 동작. (a) PR-19a `core/pywinauto_codegen.py` helper 추출 + recorder 통합. (b) PR-19d `Step.element_meta` 보존 + AI 재생성 path adapter (PR-19d 의 hybrid mode 는 미테스트 — 옵션 3 후속). (c) PR-19e `_safe_str_literal` (json.dumps escape) — Win11 메모장 Document name 의 `\r` SyntaxError 회귀 차단 + `_build_connect_block` 이 `process_id` 우선 connect chain (탭 이름만 잡힌 case 처리). (d) **PR-19f modifier 키 인식 — Ctrl+A 등 hotkey 변환** (recorder 가 `GetAsyncKeyState` 로 modifier 캡처 → RawEvent.modifiers 채움; transform 이 `pyautogui.hotkey('ctrl', 'a')` emit). Session.recording_meta list 필드 + commit_recording metadata 보존. (e) **PR-19g UWP `Light Dismiss` / `PopupRoot` noise filter** — 메모장 닫힘 회귀 차단 (실측 v2-새세션-005917). 자세한 §27 신규. **다음 세션 출발점 — P1 옵션 3 실증 결과 분석 (진행 중)** → P2 PR-19h destructive UX / P3 PR-19b F-6 dedup / P4 PR-19c idle wait / P5 PR-19i raw events JSONL / P6 CJK IME. 자세한 §27 끝 "다음 세션 출발점". **2026-05-23 PR-19a 완료 — recorder_transform 코드 품질 1차**: 자세한 §26. **2026-05-20~23 사용자 GUI 실측 1차 — 녹화 lifecycle 6 fix 완료** (test_182~186). 자세한 §24 "다음 세션 출발점" + §25. **2026-05-19 사용자 결정 — TS UI 트랙 진행 순서**: ① GUI 실측 (진행 중) → ② AppService API 보강 → ③ 2~3주 뒤 PR-19 (FastAPI 라우터) + PR-20 (Vite + React + TS, web_ui/). **풀 TS 재작성 X — recorder/element_picker/win_inspector 는 Python 유지**, TS 는 UI 레이어만. **5/19 (오후): ADR 0004 Phase R2 PR-18 완료 — DPI/멀티모니터 안정화. `core/input_hooks.py` 에 `ensure_dpi_awareness()` (SetProcessDpiAwarenessContext PER_MONITOR_AWARE_V2 우선, SHCore SetProcessDpiAwareness fallback) + `get_dpi_for_point(x, y)` (MonitorFromPoint + GetDpiForMonitor) helper 추가. `get_hook_manager()` 가 idempotent 로 매 호출 ensure_dpi_awareness 트리거. drain thread 가 click event 의 `monitor_dpi` 캡처 (RawEvent 새 필드). `recorder_transform` 의 fallback `pyautogui.click(x, y)` 에 비표준 DPI 시 코멘트 첨부 (`# captured at DPI=144 (150%)`). **R2 완료 — PR-16w + PR-17 + PR-18 모두 완료.** 자세한 §24.** **5/19 (오전): PR-17 마이그레이션 모드 event queue + async EFP. LL hook callback 은 RawEvent 생성 + 큐 enqueue 만 (sub-ms, fast return). 별도 drain thread 가 큐를 빼며 element_capture_fn 호출 + session.events 적재. Windows ~300ms LL hook 타임아웃 안전 + 빠른 자동화 스크립트 (Power Automate / pywinauto / AutoHotkey) 입력 따라잡기 가능.** **5/18: ADR 0004 Phase R2 PR-16w 완료 — 창 포커스 자동 경계 (SetWinEventHook EVENT_SYSTEM_FOREGROUND + SKIPOWNPROCESS) + F8 키보드 hook 에서 marker 자동 변환. PR-13 의 `auto_window_focus_boundary` / `enable_f8_marker` TransformOptions 가 비로소 end-to-end 작동 (이전엔 PR-13 에서 분리 로직만 구현되어 있었고 캡처 path 가 없어서 dead code 였음). 자세한 §24.** **5/16: ADR 0004 Phase R1 (5 PR) 완료 후 R2 진입 — PR-16a (element 메타 캡처 갭 메움) 추가. PR-11~15 + PR-16a (`core/element_inspect.py` 신규 + `_do_start_recording` 에서 capture_element_at 을 element_capture_fn 으로 주입 — UIA EFP 로 control_type/name/automation_id/window_title/hwnd/exe_name/rect/is_password_field 채움. 이전엔 element_meta=None 으로 떨어져 recorder_transform 이 좌표 fallback 만 생성하던 갭 해소). 자세한 §24.** **5/13~5/14: ADR 0003 Phase 1+2 완료 — 시크릿 처리 + element placeholder end-to-end (PR-1~10, test_117~144, 28 신규 테스트). 자세한 §23.** **wireframe D1~D26 100% 구현 완료**. 5/7~5/8: Phase 0 인프라 표준화 5/7 sub-phase 완료 — pyproject.toml + uv + pre-commit + ruff (lint+format) + LICENSE (AGPL-3.0) + SPDX 헤더 113 파일 + GitHub Actions CI + .devcontainer. **5/8~5/9: Phase 1 5/5 sub-task 모두 완료** — 저장소 추상화 + UI-Core 분리 (Chunk A 5/8 + Chunk B 5/9) + Pydantic 모델 + 설정 레이어 + Agent 브리지. **5/9 시장 타깃 결정**: 한국 niche → **글로벌 + 한국 dual-locale**. 영어 README + UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. **Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정** (5/9 글로벌 dual-locale 반영 갱신). **5/9~5/10: Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 — Step A/B + B1+B2+B4 + P4 + P1a/P1b/P3 + G1/G2/G2.5 + G5 (11 unit, test_86~96)**. **5/10~5/11: Phase 1.8 G7 코드 정적 분석 + 사용자 경고 + 재생성 흐름 — G7-A/B/C/D (4 unit, test_97~100)**. **5/11: Phase 1.8 후속 fix 모음 — G4 + G7-E (E1/E2) + G6 + F2 + G7-UX + F1 (7 unit, test_101~106). handoff §16 잔존 갭 #1~#6 + 후속 fix 옵션 6개 모두 완료**. 자세한 §18. **5/12 (오전): Phase 1.9 C-1 i18n 인프라 시작 — core/i18n.py + locale/{en,ko}.json (1 unit, test_107). 또한 5/12 결정: 최종 PySide6 만 사용 (PyQt6 보관). PySide6 port 회귀 가드 11 catch-up (test_97~107). commit b11b980. 자세한 §19.** **5/12 (오후) Plan 1 완료 — PySide6 (LGPL) 메인 전환 (commits 16d5349 → 833174a → f759ebb → d6642f0 + 50b3115). pyside6_port/ → root, PyQt6 → legacy_pyqt6/, PyQt6 dep → optional extra. 자세한 §20.** **5/12 (오후~저녁) Phase 1.9 C-2 완료 — `.gitattributes` 추가 (autocrlf 항구 해결) + ui_v2 i18n 183 catalog 키 (en/ko) + startup locale 자동 감지 + test_108/109 회귀 가드 추가. 8 commits (b8ce57f → 2d9cece). 자세한 §21.** **5/12 (저녁~밤) GUI 핵심기능 테스트 세션 — 사용자가 ohdo (`--ui v2`) 직접 띄워 cmd 실행 / 메모장 / element picker / step 관리 시나리오 반복 테스트하며 발견한 7 fix (test_110~116, **미커밋**): (1) kernel IPC RESULT marker isolation (실패가 ✅ 로 오보고) (2) Windows console-launch 규칙 (cmd/powershell 은 `CREATE_NEW_CONSOLE` 필수 — kernel_worker 가 콘솔 없는 piped subprocess) (3) ui_v2 `self.settings` AttributeError → `self._load_settings()` (4) 재생성 = in-place 대체 (`replaces_step_id` — 새 step 추가 X) (5) F3 picker 후 main window 잔존 → `showMinimized()` (6) step card 🗑 삭제 버튼 복원 (v2 누락) + ⬆⬇ 레이아웃 (7) `delete_step` generated_code chain 재구성 (삭제된 step 코드 잔존 회귀). core 116/116 + scenarios 73/73 그린. 자세한 §22.**
 
 ## 1. 프로젝트 한 줄 요약
 
@@ -2660,6 +2660,295 @@ Electron Main (Node)  ──subprocess──>  python -m api_server  (자식 lif
 - agy CLI 한글 prose garbling (cosmetic — 코드는 정상)
 - 누적된 PR-19a~m 의 종합 GUI 동작 검증
 - recording_fixtures 사용자 시나리오 5개 수집
+
+## 44. 2026-05-29 AI 생성 진행상황 스트리밍 (WS /ws/generate, core 무수정) — test_211
+
+**컨텍스트**: 동기 요청+로딩(스피너) 이던 AI 생성을 "살아있는" 피드백으로 개선. 사용자
+결정: **진행상황 스트리밍 (core 0줄 수정)**.
+
+### 설계 제약 (왜 토큰 스트리밍이 아닌가)
+- core `BaseAIAdapter.generate()` 는 완성된 `AIResponse` 만 반환 — 토큰 스트리밍 인터페이스 없음.
+- agy CLI 는 PTY 캡처라 CLI 종료 후에야 전체 출력 → 토큰 단위 스트리밍 구조적 불가.
+- 진짜 토큰 스트리밍은 core/adapters 수정 필요 → §37~§43 의 "core 0줄 수정" 원칙 위배.
+- → **타협**: 토큰 대신 `generate_step` 이 이미 emit 하는 `on_progress` 콜백
+  ("프롬프트 구성 중…", "AI 호출 중 (프롬프트 N자)…")을 실시간 WS 전송. 모든 엔진 동일.
+
+### 구현
+- **`api_server/routes/generate.py`** (신규): `WS /ws/generate?token=&session_id=`. 첫 클라이언트
+  메시지 = `{user_request, element_context?, is_browser_element?}` (요청이 길 수 있어 query 대신).
+  서버가 `generate_step(..., on_progress=lambda m: emit(progress))` 를 task 로 실행 + queue 소비
+  루프(execution WS 와 동일 패턴)로 WS 전송. 메시지: `progress` / `done`(success/step/session/
+  description 또는 error) / `error`. AI 미구성·없는 세션 → error+close.
+- server.py `include_router(generate.router)` 추가.
+- **프런트**: `api/ws.ts` `generateStream(sessionId, req, pending, handlers)` (콜백형).
+  ChatPanel genMut.mutationFn 을 POST(`generateStep`) → `generateStream` 을 Promise 로 감싼 형태로
+  전환. `progress` state 를 로딩 영역에 라이브 표시. onSettled 로 clear. POST `/sessions/{id}/generate`
+  는 그대로 유지 (제거 안 함 — 폴백/다른 용도).
+
+### 검증
+- WS 라우트 노출 + 없는 세션 error (TestClient). core 211/211 (test_211 +1) + ruff All passed.
+- typecheck EXIT 0 + build 통과. core/PySide6 0줄 수정.
+
+### 다음 세션 출발점
+1. **사용자 GUI 실측**: 자연어 요청 → 로딩 영역에 "프롬프트 구성 중…" → "AI 호출 중 N자…" 순차 표시.
+   (토큰 단위는 아님 — 진행 단계 표시.)
+2. 다음: **Phase D** (i18n core/locale 재사용 + 애니메이션) → **Phase E** (electron-builder 배포).
+
+## 43. 2026-05-29 api_server 리팩토링 — routes/ 모듈 분리 (기능 변화 0)
+
+**컨텍스트**: §38~§42 누적으로 server.py 가 568줄로 비대 (create_app 단일 클로저에 13개
+엔드포인트 + 헬퍼 전부). 이후 작업 기반 견고화를 위해 도메인별 분리. **엔드포인트/동작
+100% 동일** — 순수 구조 리팩토링.
+
+### 분리 결과
+- **`api_server/deps.py`** (155줄, 신규) — 공용 헬퍼/스키마: `get_app_service(app)`,
+  `require_token(request, ...)`, `get_kernel`/`drop_kernel`, `get_recording_controller`,
+  `to_dict`/`step_result_dict`/`load_json`, 스키마(`CreateSessionRequest`/`GenerateRequest`/
+  `UpdateStepRequest`), 경로 상수(`DEFAULT_DATA_DIR`/`CONFIG_DIR`). 상태는 `app.state` 경유.
+- **`api_server/routes/`** (신규) — `health.py` / `sessions.py` (목록·상세·생성·generate) /
+  `steps.py` (PUT 편집) / `pick.py` / `recording.py` (5개) / `execution.py` (WS). 각 `APIRouter`,
+  `request.app.state` / `ws.app.state` 로 상태 접근 (클로저 → 표준 DI 패턴 전환).
+- **`server.py`** 568→**55줄** — CORS + app.state 셋업 + `include_router` 6개만. 스키마 3종은
+  `from api_server.deps import ...` 로 **하위호환 re-export** (test_209 의 `from api_server.server
+  import GenerateRequest` 유지) + `__all__` 명시.
+
+### 검증
+- 라우트 parity: 13개 (GET /health·/sessions·/sessions/{id}, POST /sessions·generate·/pick·
+  recording start/marker(GET status)/stop_commit/cancel, PUT steps, WS /ws/execute) — 분리 전후 동일.
+- E2E (TestClient): health ok / 401 / 5 sessions / 7 steps / 404 / 녹화 가드 409·cancel /
+  create / ws bad-session error — 모두 분리 전과 동일.
+- core 210/210 (test_207~210 개별 통과) + ruff All passed. core/PySide6 0줄 수정.
+
+### 다음 세션 출발점
+1. (사용자 보류) 녹화 등 반복 실측 — 시간 내서 집중 테스트 예정.
+2. 후보: AI 응답 스트리밍 (WS/SSE) / Phase D (i18n + 애니메이션) / Phase E (electron-builder 배포).
+
+## 42. 2026-05-29 녹화 실제 캡처 fix — Windows 메시지 펌프 스레드 (RecordingController)
+
+**컨텍스트**: §41 녹화를 사용자 실측 → "버튼 상태/녹화중 표시는 뜨는데 마우스·키보드
+입력이 실제로 녹화 안 됨". 근본 원인: **§41 의 가정이 틀렸다.**
+
+### 근본 원인
+- `core/input_hooks.py` 는 LL 훅(WH_MOUSE_LL/WH_KEYBOARD_LL)을 `SetWindowsHookExW(..., 0)`
+  으로 **호출 스레드**에 설치하고, **그 스레드에서 Windows 메시지 펌프가 돌아야** 훅 콜백이
+  발화한다. **자체 펌프 스레드는 없다** (§41 오기재). 소스에도 host message loop 전제 주석.
+- PySide 앱은 Qt 이벤트 루프가 펌프 → 동작. FastAPI 브리지는 uvicorn(asyncio)만 있고 메시지
+  펌프가 없음 → 훅은 설치되나 콜백 0회 → 입력 0 캡처.
+
+### fix — `api_server/recording_pump.py` (신규, core 무수정)
+- `RecordingController` 가 **녹화 전용 데몬 스레드**를 소유. 그 스레드에서:
+  1. `CoInitializeEx(APARTMENTTHREADED)` (UIA element 캡처 COM)
+  2. `service.start_recording(target, element_capture_fn=capture_element_at)` — **이 스레드에 훅 설치**
+  3. `PeekMessageW` 펌프 루프 (5ms) — **LL 훅 콜백이 비로소 발화**
+  4. stop 신호 시 `stop_recording` — **같은 스레드에서 UnhookWindowsHookEx** (Windows 제약)
+- Windows 는 SetWindowsHookEx / 펌프 / UnhookWindowsHookEx 가 동일 스레드일 것을 요구 →
+  start~stop 전체를 이 스레드가 소유. commit(파일 I/O)은 엔드포인트 스레드.
+- server.py: `app.state.recording_controller` + `_get_recording_controller()` lazy. 5개
+  엔드포인트(start/status/marker/stop_commit/cancel)를 컨트롤러 경유로 재배선. marker 는
+  `recorder.add_marker()` 가 lock 으로 thread-safe → 엔드포인트 스레드에서 직접 호출 OK.
+
+### 검증 (E2E 실측)
+- **엔드포인트 E2E**: start=200 → 키 6회 합성 입력 → `event_count=6` (이전 0 = 버그 재현·해결)
+  → marker → 추가 입력 → stop_commit → **step_count=2** (marker 가 step 분리). ✅
+- (주의) recorder 는 mouse **move 미기록**(click/scroll/키 입력만). 사용자 GUI 실측 시 클릭·타이핑 필요.
+- core 210/210 + ruff All passed. 실제 캡처는 합성 입력이라 자동 스위트 미포함 (환경 의존).
+
+### 다음 세션 출발점
+1. **사용자 GUI 재실측**: 녹화 → 메모장 등에서 **클릭/타이핑** → 헤더 이벤트 수 증가 → 종료 → step 추가.
+   (마우스 *이동*만으론 카운트 안 올라감 — 클릭/키 입력 필요.)
+2. 녹화 review/편집 (stop→preview→edit→commit 분리), api_server routes/ 분리, AI 스트리밍, Phase D/E.
+
+## 41. 2026-05-29 TS UI v3 #3 잔여 — 작업 녹화 lifecycle + Monaco 로컬 번들 fix (test_210)
+
+> **정정 (§42)**: 아래 "InputHookManager 의 **자체 메시지 펌프 스레드**" 서술은 오기재.
+> 실제로는 펌프가 없어 브리지에서 입력이 캡처되지 않았고, §42 의 RecordingController
+> (전용 펌프 스레드)로 해결함.
+
+**컨텍스트**: handoff §40 에서 미룬 녹화(recording) lifecycle 구현 + 사용자 실측 Monaco
+"Loading" 멈춤 fix. 원칙 그대로 **core/ + PySide6 0줄 수정**.
+
+### 녹화 lifecycle (REST + status polling)
+- recorder 가 글로벌 WH_MOUSE_LL/WH_KEYBOARD_LL 훅을 설치하고 `InputHookManager` 의
+  **자체 메시지 펌프 스레드**에서 콜백을 받으므로 FastAPI 브리지 프로세스에서도 동작.
+- 이벤트가 서버에 누적되므로 WS 스트리밍 대신 **REST + status polling** (단순/견고):
+  - `POST /sessions/{id}/recording/start` — `start_recording(target=id)`. 이미 녹화 중 409 / 없는 세션 404 / non-Windows 501.
+  - `GET /recording/status` — `{is_recording, event_count}`. 프런트 1s polling.
+  - `POST /recording/marker` — `recorder.add_marker()` (**인자 없음** — 현재 시점 경계). 미녹화 409.
+  - `POST /sessions/{id}/recording/stop_commit {self_window_titles?}` — `stop_recording`(transform) + `commit_recording` → step 추가. 기본 self_window_titles=["ohdo"]. kernel 폐기.
+  - `POST /recording/cancel` — stop + 결과 폐기.
+  - **주의 (실측 버그 fix)**: AppService `is_recording` / `recording_event_count` 는 `@property` —
+    `()` 붙이면 `TypeError: 'bool' object is not callable`. server.py 에서 괄호 없이 접근.
+  - marker/cancel 은 AppService 가 공개 안 해 `service._recorder` 직접 접근 (읽기 — core 무수정).
+- 프런트: `store/recordStore.ts` (start/marker/stopCommit/cancel + 1s polling), ChatPanel 헤더
+  "녹화" 버튼 (항상) → 녹화 중엔 🔴녹화중·이벤트수 + 구분점(Flag) + 종료 + 취소. commit 후 세션 invalidate.
+
+### Monaco "Loading" fix (§40 #2 후속 — 사용자 실측)
+- 증상: step 클릭 시 코드뷰어 "Loading..." 멈춤. 원인: `@monaco-editor/react` 가 jsdelivr CDN
+  에서 로드 → 렌더러 CSP 차단. fix: `monacoSetup.ts` `loader.config({ monaco })` 로 **로컬 번들** +
+  `editor.worker?worker`, `main.tsx` 먼저 import, CSP 에 `worker-src/script-src 'self' blob:`.
+  사용자 확인: "코드 이쁘게 잘 뜬다. IDE 처럼". 빌드에 monaco 언어별 청크 + 8MB main (디스크 로드).
+
+### 검증 (모두 그린)
+- **core 210/210** (209 + test_210) + scenarios 73 + recording_fixtures 2.
+- 녹화 가드 실측 (TestClient): idle status 200 / 미녹화 marker·stop_commit 409 / cancel idle / 없는 세션 start 404.
+  (실제 훅 설치 start→stop 은 글로벌 입력 훅이라 자동 테스트 제외 — 사용자 GUI 실측.)
+- desktop_v3 typecheck EXIT 0 + build 통과. ruff All passed.
+
+### 다음 세션 출발점
+1. **사용자 GUI 실측**: 녹화 버튼 → 다른 앱(메모장 등) 조작 → 종료 → step 추가 확인. 구분점/취소 동작.
+2. **녹화 review/편집** — 현재 stop_commit 이 transform 결과를 바로 commit (review dialog 없음).
+   필요 시 stop → preview(steps) → 편집 → commit 분리 (v2 RecordingReviewDialog 대응).
+3. **api_server `routes/` 분리** (server.py ~480줄) + AI 스트리밍 (WS/SSE) + Phase D(i18n/애니메이션)/E(배포).
+
+## 40. 2026-05-29 TS UI v3 Phase B 확장 — 실행 WS + 코드 편집 + picker + polish (test_208/209)
+
+**컨텍스트**: handoff §39 (Phase B 1차) 에 이어 사용자 요청 순서대로 4개 기능 구현.
+원칙 그대로 **core/ + PySide6 0줄 수정**, api_server + desktop_v3 만 확장.
+
+### #1 step 실행 + live 로그 (WebSocket)
+- `api_server/server.py`: **`WS /ws/execute`** — `run_blocks` 를 executor 스레드에서 돌리고
+  on_step_start/on_step_complete/on_log 콜백을 `loop.call_soon_threadsafe` 로 asyncio 큐에 넣어
+  WS 로 스트리밍. 메시지 타입: `log` / `step_done` / `done` / `error`. 클라이언트 `stop` 수신 시
+  `stop_blocks()` + kernel 폐기. mode = `all`/`from`/`single` (+step_id) — ui_v2 `_on_run_*` 매핑.
+- 세션별 ExecutionKernel 캐시 (`app.state.kernels`) + lazy start + push_secrets (ui_v2 패턴).
+- 프런트: `api/ws.ts` (토큰은 쿼리 파라미터 — 브라우저 WS 헤더 제약), `store/execStore.ts`,
+  `hooks/useExecution.ts`, `components/LogConsole.tsx` (하단 접이식 터미널, 테마 무관 고정 다크).
+  ChatPanel 헤더 "전체 실행"/"중단" + step 카드 hover ▶.
+
+### #2 코드 편집·저장
+- `api_server/server.py`: **`PUT /sessions/{id}/steps/{step_id}`** — `update_step` 위임.
+  `generated_code` + `step_code` 동시 갱신 + `manually_edited=True` (실행이 편집본 반영) + 캐시 kernel 폐기.
+- 프런트: `CodeViewer.tsx` Monaco read-only ↔ 편집 토글 + 저장(PUT)/취소. step 전환 시 편집 리셋.
+- **후속 fix (사용자 실측)**: step 클릭 시 코드뷰어가 "Loading..." 에서 멈춤 — `@monaco-editor/react`
+  가 기본 CDN(jsdelivr)에서 에디터를 받는데 렌더러 CSP(connect-src 'self'+localhost)가 차단.
+  해결: `src/renderer/src/monacoSetup.ts` 에서 `loader.config({ monaco })` 로 **로컬 번들** 주입 +
+  `editor.worker?worker` 등록, `main.tsx` 에서 App 보다 먼저 import. CSP 에 `worker-src 'self' blob:`
+  + `script-src 'self' blob:` 추가. `monaco-editor` 직접 dep 등록. 빌드 2391 모듈(번들 ~5MB, 디스크 로드).
+
+### #3 element picker (카운트다운 캡처 — 사용자 결정)
+- `api_server/server.py`: **`POST /pick`** — `GetCursorPos` + `capture_element_at(x,y)` +
+  `format_element_label` → element_context 문자열 반환 (Windows 전용, 그 외 501).
+  `GenerateRequest` 에 `element_context` + `is_browser_element` 추가 → generate_step 전달.
+- 프런트: `store/pickStore.ts` (3초 카운트다운 + cancel 토큰), `components/PickOverlay.tsx`
+  (pointer-events-none 풀스크린 — 대상 앱 hover 가능), ChatPanel "요소 선택" 버튼 + 첨부 칩.
+  **녹화 lifecycle 은 다음으로 미룸 (사용자 결정).**
+
+### #4 polish
+- **토스트**: `store/toastStore.ts` + `components/Toaster.tsx` (외부 의존 없이 zustand). save/generate/run/new-session 연결.
+- **단축키**: `hooks/useShortcuts.ts` — Ctrl/Cmd+R 실행/중단, Ctrl/Cmd+N 새 세션, Esc picker 취소.
+- **테마 토글**: `store/themeStore.ts` (dark/light, localStorage). Discord 표면색을 CSS 변수
+  (RGB 채널 → 투명도 modifier 유지) 로 전환, `:root`=light / `.dark`=dark. 사이드바 footer 토글.
+
+### 검증 (모두 그린)
+- **core 209/209** (207 + test_208 + test_209) + scenarios 73 + recording_fixtures 2.
+- WS 실측 (TestClient): 없는 세션 → error / 실제 single-step → `log…→step_done→done`.
+- PUT step round-trip + 없는 step 404. /pick 200 + 키.
+- desktop_v3 typecheck EXIT 0 + build 통과 (renderer ~856kB, 1846 모듈).
+- ruff All checks passed. `uv sync` — websockets + httpx 추가.
+
+### 다음 세션 출발점
+1. **사용자 GUI 실측**: 실행(▶/전체 실행) → 콘솔 live 로그 / step 코드 편집·저장 / 요소 선택(3초) →
+   다음 요청에 첨부 / 토스트·단축키·테마 토글 동작 확인.
+2. **#3 잔여**: 녹화(recording) lifecycle — recorder 가 Windows 입력 훅 (자체 pump 스레드) 설치.
+   WS `/ws/record` (start/stop/pause/marker + 이벤트 스트림) + commit → step 추가. AppService
+   `start_recording`/`stop_recording`/`commit_recording` + `add_recording_listener` 재사용.
+3. **api_server `routes/` 분리** (server.py 비대) + AI 스트리밍 (WS/SSE) 결정.
+
+## 39. 2026-05-29 TS UI v3 Phase B 1차 증분 — AI 코드 생성 루프 + shadcn/ui + Monaco (test_207)
+
+**컨텍스트**: handoff §38 (Phase A) 에 이어 Phase B 핵심 화면 MVP 의 **첫 의미 있는 증분**.
+§37 검증 목표 "agy/openai_compat 로 코드 생성 -> 화면 표시" 를 달성. 사용자 결정:
+풀 AI 생성 루프 + Monaco + shadcn/ui, **동기 요청 + 로딩** 방식 (agy CLI 는 PTY 캡처라
+네이티브 토큰 스트리밍이 까다로움 — §36 / WS 스트리밍은 Phase B 후반/C 로 연기).
+
+### 백엔드 (api_server) — core/ 무수정, 호출만
+- `server.py` v0.1 -> **v0.2**:
+  - `GET /sessions/{id}` — 세션 상세 (steps 직렬화 포함).
+  - `POST /sessions` — 새 세션 생성 (`CreateSessionRequest`).
+  - `POST /sessions/{id}/generate` — 자연어 -> `AppService.generate_step` (async) -> step 추가 + 갱신 세션 반환. AI 미구성 503 / 세션 없음 404 / AI 실패 시 `{success:false, error}`.
+  - `get_app_service()` 가 `config/settings.json` (AI) + `config/prompts.json` (PromptBuilder) 로드 -> `create_default(settings)` + `reload_ai` + `set_prompt_builder`. (ui_v2 와 동일 패턴이나 ui_v2 import 는 PySide6 를 끌어오므로 core 만으로 재구성.)
+
+### 프런트 (desktop_v3)
+- **shadcn/ui** 도입: `components.json` + `lib/utils.ts` (cn) + `ui/{button,textarea,scroll-area}.tsx` (Radix Slot/ScrollArea + cva). Tailwind 에 CSS 변수 토큰 (Discord 다크 팔레트 매핑).
+- **Monaco** (`@monaco-editor/react`): `CodeViewer.tsx` — step 코드 읽기 전용 표시 (vs-dark, python). Phase C 에서 편집+저장.
+- **3-column 레이아웃**: `ServerRail` + `SessionSidebar` (목록 + `+` 새 세션 + 브리지 상태) + `ChatPanel` (steps 카드 + 자연어 입력 -> generate, 로딩 스피너, Enter 전송) + `CodePane` (선택 step Monaco). Zustand `uiStore` (selectedSessionId/selectedStepId), TanStack Query (`sessions`/`session/{id}`/`health` + mutation invalidate).
+- 의존성 추가: `@monaco-editor/react`, `@radix-ui/react-{slot,scroll-area}`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tailwindcss-animate`, `lucide-react`.
+
+### 검증 (모두 그린)
+- **core 207/207** (206 + test_207) + scenarios 73 + recording_fixtures 2.
+- **api_server 실측**: /health v0.2.0, /sessions(5), /sessions/{id} (title+steps), 404, POST /sessions (생성) 모두 정상.
+- **desktop_v3**: typecheck EXIT 0 + build 통과 (renderer 834kB, Monaco 포함 1839 모듈).
+- **ruff** All checks passed.
+- test_207: 신규 라우트 노출 + POST 메서드 + (TestClient 가능 시) 세션 상세 직렬화 + 404 + create round-trip.
+
+### 위험 완화 확인
+- `core/`, `ui/`, `ui_v2/`, `main.py` **0줄 수정** (git status invariant).
+- AI 생성은 기존 `AppService.generate_step` 그대로 재사용 — v2 와 동일 코드 경로.
+
+### 다음 세션 출발점
+1. **사용자 GUI 실측** (필수): `cd desktop_v3 && npm run dev` -> 세션 선택/생성 -> 자연어 요청 -> 로딩 후 step 카드 + Monaco 코드 표시 확인. agy CLI 10~30초 소요 정상. 실패 시 채팅 하단 에러 배너 + `[py:err]` 콘솔.
+2. **Phase B 잔여**: step 실행 (run) + live 로그 (WS) / 코드 편집+저장 (update_step) / element picker 트리거 / 녹화 lifecycle. 토스트/단축키/테마 토글.
+3. **api_server 확장**: `routes/` 분리 + WebSocket (execution logs / AI streaming).
+4. **미결정**: AI 스트리밍 WS vs SSE / 코드 편집 저장 시점(자동 vs 명시) / Monaco vs CodeMirror 최종.
+
+## 38. 2026-05-29 TS UI v3 Phase A 셋업 완료 — api_server (FastAPI) + desktop_v3 (Electron+React) 보일러플레이트 (test_206)
+
+**컨텍스트**: handoff §37 결정에 따라 TS UI v3 트랙 Phase A (셋업) 를 구현. Python core /
+PySide6 v1+v2 **무수정** 원칙 준수 — 신규 디렉터리 2개만 추가.
+
+### 신규 구조
+
+- `api_server/` — FastAPI bridge (core/ 호출 전용, PySide6 비의존). `python -m api_server`.
+  - `server.py` — `create_app(token, data_dir)`: GET /health (무인증) + GET /sessions (Bearer 토큰).
+  - `__main__.py` — 포트 bind (요청 포트부터 +1 최대 10회 fallback) + stdout READY 마커 + uvicorn.
+  - `__init__.py` — create_app re-export.
+- `desktop_v3/` — Electron 38 + React 19 + TS 5 + Vite 6 + electron-vite + Tailwind + Zustand + TanStack Query.
+  - `src/main/index.ts` — Python spawn + 포트/토큰/lifecycle + BrowserWindow.
+  - `src/preload/index.ts` — contextBridge `window.ohdo.getApiInfo()`.
+  - `src/renderer/src/{App.tsx, api/client.ts, store/uiStore.ts, env.d.ts, index.css, main.tsx}`.
+
+### Open questions 결정 (handoff §37 끝 — 이번 세션 확정)
+
+| 질문 | 결정 | 근거 |
+|---|---|---|
+| electron-vite 템플릿 vs 직접 | **직접 hand-author** | `create-electron-vite` 헤드리스 비대화형 불가. 직접이 완전 제어 |
+| shadcn/ui 우선 컴포넌트 | **Phase B 로 연기** | Phase A 는 파이프라인 증명만. Tailwind 만 셋업 |
+| API 토큰 | main 이 `randomBytes(32).hex` 생성 —> `OHDO_API_TOKEN` env 로 Python 주입 —> preload `getApiInfo()` 로 renderer 전달 | argv 노출 회피 |
+| subprocess 종료 | `before-quit` + `window-all-closed` —> SIGTERM —> 5s 후 SIGKILL | §37 명시 |
+| 포트 충돌 | main 이 빈 포트 probe (선호 8765, 점유 시 OS 임의) —> `--port` 전달. Python 이 실제 bind 포트를 stdout `OHDO_API_READY {json}` 로 보고 | Python 이 권위적 결정 |
+
+### 통신 계약 (다음 세션 필독)
+
+1. Electron main 이 빈 포트 + random 토큰 준비 —> `python -m api_server --port <p>` spawn (cwd=루트, `OHDO_API_TOKEN` env).
+2. Python 이 소켓 bind —> uvicorn 에 전달 —> stdout 에 정확히 한 줄 `OHDO_API_READY {"port": <int>, "token": "<str>"}`.
+3. main 이 그 줄 파싱 —> `{baseUrl, token}` 확정 —> `ipcMain.handle("ohdo:get-api-info")`.
+4. renderer `api/client.ts` 가 `window.ohdo.getApiInfo()` 로 받아 `Authorization: Bearer <token>` 헤더로 fetch.
+- `/health` 만 무인증 (부팅 readiness 폴링). override env: `OHDO_PYTHON`, `OHDO_PROJECT_ROOT`. 기본 Python: `..\.venv\Scripts\python.exe`.
+
+### 검증 결과 (모두 그린)
+
+- **core 206/206** (205 + test_206 신규) + scenarios 73/73 + recording_fixtures 2/2.
+- **api_server 단독 실측** (spawn —> READY —> fetch): /health ok, /sessions 5건, 토큰 없으면 401, Bearer 토큰 200.
+- **desktop_v3**: `npm install` (208 pkg) + `npm run typecheck` (tsc EXIT 0) + `npm run build` (main 5.25kB / preload 0.28kB / renderer 640kB) 통과.
+- **ruff** check All passed. `uv sync` — fastapi 0.136.3 + uvicorn 0.48.0 설치.
+
+### test_206 (회귀 가드) 6 단계
+1. `api_server.create_app` 존재 + 호출 가능 (QApplication 불필요)
+2. /health + /sessions 라우트 노출
+3. 토큰이 `app.state.api_token` 반영
+4. **격리 가드** — 서브프로세스에서 `import api_server` 후 `'PySide6' not in sys.modules`
+5. `main.py` 소스에 `--ui` 분기 + `MainWindowV2` import 유지
+6. `ui_v2.MainWindowV2` export 유지
+
+### 위험 완화 확인
+- `core/`, `ui/`, `ui_v2/`, `main.py` **0줄 수정** (git status 로 확인 — M 은 .gitignore/ROADMAP/pyproject/test_core/uv.lock 뿐).
+- `python main.py --ui v2` 회귀 가드 test_206 자동화.
+- node_modules/out/dist 는 `.gitignore`, `desktop_v3/package-lock.json` 만 커밋.
+
+### 다음 세션 출발점 — Phase B (핵심 화면 MVP)
+1. **GUI 실측 먼저** (사용자): `cd desktop_v3 && npm run dev` —> Electron 창에 세션 목록이 Python 브리지에서 떠야 함. 미동작 시 `[py]`/`[py:err]` 콘솔 로그 확인.
+2. **Phase B**: Discord-like 3-column + 채팅 패널 (AI 스트리밍 WS) + Monaco 코드 뷰어 + shadcn/ui + 다크 테마.
+3. **api_server 확장**: `routes/` 분리 (sessions/steps/ai/recording/picker/execution/settings) + WebSocket (recording events / execution logs / AI streaming). 현재는 server.py 단일 파일.
 
 ## 35. 2026-05-24 GUI 실측 자동화 인프라 1순위 — JSONL 픽스처 회귀 스위트
 

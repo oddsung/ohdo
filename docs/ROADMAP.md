@@ -6,7 +6,7 @@
 
 ## 0. 문서 메타
 
-- **마지막 업데이트**: 2026-05-12 (**Phase 0 + Phase 1 모두 100% 완료**. Phase 1 sub-task 2 Chunk B (ui/ legacy 정리) 5/9 마무리 → KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족. Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정. **5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 11 unit — handoff §16 참조. baseline 85→96**. **5/12 PySide6 (LGPL) 메인 전환 완료 — handoff §19/§20 — 이전 PyQt6 코드는 legacy_pyqt6/ 보관**)
+- **마지막 업데이트**: 2026-05-29 (**AI 생성 진행상황 스트리밍** (handoff §44) — WS /ws/generate, core 무수정(토큰 대신 on_progress 진행상황). 이전 동일자: **api_server 리팩토링** (§43) — server.py 568→55줄, deps.py + routes/ 분리. 이전 동일자: **녹화 실제 캡처 fix** (§42) — 전용 메시지 펌프 스레드(RecordingController)로 LL 훅 콜백 발화. 이전 동일자: **TS UI v3 #3 잔여 = 작업 녹화 lifecycle** (§41) + Monaco 로컬 번들 fix. 이전 동일자: **Phase B 확장** — 실행 WS + 코드 편집 + element picker + polish (§40), **Phase B 1차 증분** (§39), **Phase A 셋업 완료** — handoff §37/§38. `api_server/` FastAPI 브리지 + `desktop_v3/` Electron+React 보일러플레이트 신규, core/PySide6 0줄 수정. §7 에 Node 툴체인 표준 추가, §10 변경 로그 갱신. 이전: 2026-05-12 — **Phase 0 + Phase 1 모두 100% 완료**. Phase 1 sub-task 2 Chunk B (ui/ legacy 정리) 5/9 마무리 → KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족. Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정. **5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 11 unit — handoff §16 참조. baseline 85→96**. **5/12 PySide6 (LGPL) 메인 전환 완료 — handoff §19/§20 — 이전 PyQt6 코드는 legacy_pyqt6/ 보관**)
 - **Owner**: @toytiger (dohahado22@gmail.com)
 - **타깃 시장**: B2C 개인 개발자 (**글로벌 + 한국 dual-locale**, 오픈코어 전략) — *2026-05-09 사용자 결정으로 한국 niche → 글로벌 우선 + 한국 동시 진행으로 확장*
 - **관련 문서**:
@@ -380,6 +380,18 @@ ohdo/
 
 `core` 를 별도 패키지로 분리하면 desktop/agent/backend 가 동일 버전을 공유.
 
+### 7.5 desktop_v3 (TS UI v3) 툴체인 — 2026-05-29 추가 (handoff §38)
+
+TS UI v3 트랙으로 Python 외 **Node.js 툴체인**이 개발환경 표준에 추가됨. 기존 Python
+(`uv` + `.venv`) 스택과 **독립** — core/ + PySide6 빌드·테스트는 영향 없음.
+
+- **런타임/빌드**: Node 20+ (실측 24), Electron 38, Vite 6 + electron-vite, TypeScript 5 (`desktop_v3/`).
+- **UI 스택**: React 19, TailwindCSS 3 (+ Phase B shadcn/ui), Zustand, TanStack Query.
+- **Python 브리지**: `api_server/` (FastAPI + uvicorn, `pyproject.toml` deps). 실행 `python -m api_server`.
+- **재현**: `cd desktop_v3 && npm install` — lockfile `package-lock.json` 커밋, `node_modules`/`out`/`dist` 는 `.gitignore`.
+- **실행**: 루트 `uv sync` —> `cd desktop_v3 && npm run dev` (Electron 이 Python 브리지 자동 spawn).
+- **CI (미구현, Phase E 예정)**: electron-builder + Node 매트릭스. 현재는 로컬 빌드만.
+
 ---
 
 ## 8. 체크리스트
@@ -432,3 +444,4 @@ Phase 0~1 착수 시 가장 먼저 손대야 할 파일 (프로젝트 루트 기
 | 2026-05-09 | **시장 타깃 글로벌 확장 결정** — 한국 niche → 글로벌 우선 + 한국 dual-locale 양립으로 사용자 결정. 근거: 글로벌 SAM (50-100M USD/yr) 이 한국 (5-10M) 의 10배 + Computer Use 와 시간 경쟁. 차별성 재평가: "한국어 UI" 단일 항목 → "i18n (영어 + 한국어) + Plain Python + Local-first" 조합 niche 로 재포지셔닝. 영어 README + 사용자 facing UI/메시지 i18n 작업이 Phase 2 진입 직전 필수. commercial_review.md §3/§5/§7 동기화 갱신. |
 | 2026-05-09~10 | **Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프** — 사용자 일상 사용 중 발견 갭 11건 fix (settings dialog Test connection / reload_ai / current_engine 속성명 / ui_v2 step_done 메타 / ai.selected persist / 콘솔 가시성 settings / system_context prompt inject (P1a) / system role 분리 (P1b) / 가이드 #3+#5 강화 (P3) / element_context 템플릿 그대로 사용 강제 (G2) / library 블럭 essential imports prepend (G5) / element_context 템플릿 import 라인 제거 (G2.5)). baseline 85→96 (+11 회귀 가드 test_86~96). 자세한 내용: handoff.md §16. 잔존 갭 (DeepSeek 의 가이드 따르기 한계 — step 3/4 의 변수 재정의 + try/except 누락 + 들여쓰기 깨짐) 은 G6/G7 (정적 분석) 후속으로 보류. |
 | 2026-05-12 | **PySide6 (LGPL) 메인 전환 완료 — Plan 1** — 2026-05-02 PySide6 port 추가 이후 양쪽 sync 부담 + PyQt6 (GPL/Riverbank commercial) 라이선스 마찰 해소를 위한 결정. `pyside6_port/` → root promotion (`ui/`, `ui_v2/`, `main.py`, `core/visual_overlay.py`, `core/environment_scanner.py` 의 PySide6 카피로 swap), 이전 PyQt6 코드는 `legacy_pyqt6/` 에 보존 (삭제 X — 사용자 명시 요청), PyQt6 의존성은 `[project.optional-dependencies] legacy-pyqt6` 로 격리. baseline 회귀 0 (core 107 + scenarios 73 그린, PySide6 단독 .venv). 자세한 단계: handoff.md §20. |
+| 2026-05-29 | **TS UI v3 트랙 착수 — Phase A 셋업 완료** (handoff §37 결정 —> §38 구현). 같은 repo 에 신규 디렉터리 2개: `api_server/` (FastAPI + uvicorn 브리지 — core/ 를 AppService 경유 호출, GET /health + /sessions, 토큰 인증, READY 마커 포트 협상) + `desktop_v3/` (Electron 38 + React 19 + TS 5 + Vite 6 + Tailwind + Zustand + TanStack Query 보일러플레이트, Discord-like UX). **위험 완화**: core/ + PySide6 (ui/, ui_v2/, main.py) 0줄 수정. pyproject 에 fastapi/uvicorn 추가. test_206 회귀 가드 +1 (core 205—>206 + scenarios 73 + recording_fixtures 2 그린). §7.5 에 Node 툴체인 추가. 다음: Phase B 핵심 화면 MVP. | TS UI v3 트랙 실착수 (§37 결정 이행) |

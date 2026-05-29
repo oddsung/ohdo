@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- 테마 클래스(dark/light)는 themeStore 가 런타임에 적용. 초기값 dark 로 FOUC 최소화. -->
+<html lang="ko" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Electron 렌더러: localhost 브리지 + self 만 허용하는 최소 CSP -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; script-src 'self' blob:; font-src 'self' data:;"
+    />
+    <title>ohdo</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

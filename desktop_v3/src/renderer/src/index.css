@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* shadcn/ui + Discord 표면색 CSS 변수 (handoff §40 #4 테마 토글).
+   :root = light 기본값, .dark = 다크 오버라이드. themeStore 가 html 에 클래스 토글.
+   Discord 표면색(--d-*)은 RGB 채널 → tailwind 의 <alpha-value> modifier 유지. */
+@layer base {
+  :root {
+    /* shadcn semantic (light) */
+    --background: 0 0% 100%;
+    --foreground: 222 14% 18%;
+    --card: 210 11% 96%;
+    --card-foreground: 222 14% 18%;
+    --primary: 235 86% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 11% 93%;
+    --secondary-foreground: 222 14% 18%;
+    --muted: 210 11% 93%;
+    --muted-foreground: 222 8% 38%;
+    --accent: 210 11% 90%;
+    --accent-foreground: 222 14% 18%;
+    --destructive: 359 67% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 11% 85%;
+    --input: 210 11% 90%;
+    --ring: 235 86% 65%;
+    --radius: 0.5rem;
+
+    /* Discord 표면 (light) — "rgb r g b" 채널 */
+    --d-bg: 255 255 255;
+    --d-sidebar: 242 243 245;
+    --d-rail: 227 229 232;
+    --d-card: 235 237 239;
+    --d-text: 46 51 56;
+    --d-muted: 92 94 102;
+    --d-accent: 88 101 242;
+    --d-green: 26 149 80;
+  }
+
+  .dark {
+    /* shadcn semantic (dark) */
+    --background: 225 7% 21%;
+    --foreground: 220 13% 87%;
+    --card: 228 6% 23%;
+    --card-foreground: 220 13% 87%;
+    --secondary: 225 6% 27%;
+    --secondary-foreground: 220 13% 87%;
+    --muted: 225 6% 27%;
+    --muted-foreground: 218 8% 58%;
+    --accent: 225 6% 30%;
+    --accent-foreground: 0 0% 100%;
+    --border: 228 6% 18%;
+    --input: 228 8% 15%;
+
+    /* Discord 표면 (dark) */
+    --d-bg: 49 51 56;
+    --d-sidebar: 43 45 49;
+    --d-rail: 30 31 34;
+    --d-card: 56 58 64;
+    --d-text: 219 222 225;
+    --d-muted: 148 155 164;
+    --d-accent: 88 101 242;
+    --d-green: 35 165 90;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    @apply bg-discord-bg text-discord-text;
+    font-family:
+      "gg sans", "Segoe UI", "Malgun Gothic", system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+  }
+  /* Discord-like 얇은 스크롤바 (Monaco 외 영역) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-discord-rail;
+    border-radius: 4px;
+  }
+}

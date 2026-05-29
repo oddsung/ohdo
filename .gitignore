@@ -104,3 +104,13 @@ packages/web/out/
 packages/web/next-env.d.ts
 packages/web/.env.local
 packages/web/tsconfig.tsbuildinfo
+
+# desktop_v3 (Electron + React + TS UI, handoff §37) — node 빌드 산출물.
+# package-lock.json (lockfile) 만 커밋, node_modules / out / dist 는 제외.
+desktop_v3/node_modules/
+desktop_v3/out/
+desktop_v3/dist/
+desktop_v3/.vite/
+# electron-vite 가 dev/build 시 생성하는 임시 config 파일 (timestamp suffix).
+desktop_v3/electron.vite.config.*.mjs
+desktop_v3/*.timestamp-*.mjs

@@ -11740,6 +11740,329 @@ if __name__ == "__main__":
             "[§36] _PROTOCOL_FIELDS 에 'use_stdin' + 'use_pty' 등록",
         )
 
+    def test_206_desktop_v3_bridge_and_v2_regression(self):
+        """[2026-05-29 handoff §38] desktop_v3 FastAPI 브리지 + PySide6 v2 회귀 가드.
+
+        TS UI v3 트랙(Electron+React)을 추가하면서 기존 launcher 가 깨지지 않았는지 보장.
+        - api_server.create_app 이 /health + /sessions 라우트를 노출하는지
+        - 토큰 인증이 app.state 에 반영되는지
+        - api_server import 가 PySide6 를 끌어오지 않는지 (core/UI 격리)
+        - main.py 의 ``--ui v2`` 분기 + ui_v2.MainWindowV2 경로가 그대로인지
+        """
+        import importlib
+        import subprocess
+
+        self.step("(1) api_server.create_app import + 호출 (QApplication 불필요)")
+        api_server = importlib.import_module("api_server")
+        self.assert_not_none(api_server.create_app, "api_server.create_app 존재")
+
+        app = api_server.create_app(token="secret-206", data_dir=str(PROJECT_ROOT / "data"))
+
+        self.step("(2) /health + /sessions 라우트 노출")
+        paths = {getattr(r, "path", None) for r in app.routes}
+        self.assert_true("/health" in paths, "/health 라우트 노출")
+        self.assert_true("/sessions" in paths, "/sessions 라우트 노출")
+
+        self.step("(3) 토큰이 app.state 에 반영 (인증 활성)")
+        self.assert_equal(app.state.api_token, "secret-206", "토큰이 app.state 에 저장됨")
+
+        self.step("(4) 격리 가드 - api_server import 가 PySide6 비의존 (서브프로세스)")
+        probe = (
+            "import sys, api_server; "
+            "assert 'PySide6' not in sys.modules, 'api_server import 가 PySide6 를 끌어옴'; "
+            "print('ISOLATED_OK')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assert_true(
+            "ISOLATED_OK" in result.stdout,
+            f"api_server import 가 PySide6 비의존 (stderr={result.stderr.strip()[:200]})",
+        )
+
+        self.step("(5) main.py launcher 의 --ui v2 분기 회귀 가드 (소스 sentinel)")
+        main_src = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+        self.assert_true("--ui" in main_src, "main.py 에 --ui 인수 분기 유지")
+        self.assert_true("MainWindowV2" in main_src, "main.py 에 v2 윈도우 import 유지")
+
+        self.step("(6) ui_v2.MainWindowV2 export 유지 (import 경로 회귀 가드)")
+        ui_v2 = importlib.import_module("ui_v2")
+        self.assert_not_none(getattr(ui_v2, "MainWindowV2", None), "ui_v2.MainWindowV2 export 유지")
+
+    def test_207_desktop_v3_phase_b_endpoints(self):
+        """[2026-05-29 handoff §39] desktop_v3 Phase B 브리지 엔드포인트 가드.
+
+        AI 생성 루프 화면을 위한 신규 라우트 + 세션 상세 직렬화를 검증한다.
+        실제 AI(agy CLI) 는 호출하지 않는다 (외부 의존 + 느림) — 라우트 노출 +
+        세션 상세 직렬화 + create 흐름만 in-process 로 검증.
+        """
+        import importlib
+
+        api_server = importlib.import_module("api_server")
+        app = api_server.create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+
+        self.step("(1) Phase B 라우트 노출 (detail / create / generate)")
+        paths = {getattr(r, "path", None) for r in app.routes}
+        self.assert_true("/sessions/{session_id}" in paths, "GET /sessions/{id} 라우트 노출")
+        self.assert_true(
+            "/sessions/{session_id}/generate" in paths, "POST /sessions/{id}/generate 라우트 노출"
+        )
+
+        self.step("(2) /sessions + /sessions/{id} 메서드 확인")
+        methods_by_path: dict = {}
+        for r in app.routes:
+            p = getattr(r, "path", None)
+            if p:
+                methods_by_path.setdefault(p, set()).update(getattr(r, "methods", set()) or set())
+        self.assert_true(
+            "POST" in methods_by_path.get("/sessions", set()),
+            "POST /sessions (create) 노출",
+        )
+
+        self.step("(3) TestClient 로 세션 상세 직렬화 (steps 포함) 검증")
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 사용 불가 (httpx 미설치) — 라우트 노출 가드까지만")
+            return
+
+        client = TestClient(app)
+        listed = client.get("/sessions").json()
+        self.assert_true(listed["count"] >= 1, "테스트 데이터에 세션 1개 이상 존재")
+        sid = listed["sessions"][0]["session_id"]
+
+        detail = client.get(f"/sessions/{sid}").json()
+        self.assert_true("session" in detail, "상세 응답에 session 키")
+        self.assert_true("steps" in detail["session"], "세션 상세에 steps 직렬화 포함")
+
+        self.step("(4) 존재하지 않는 세션 → 404")
+        missing = client.get("/sessions/__no_such_session__")
+        self.assert_equal(missing.status_code, 404, "없는 세션 GET → 404")
+
+        self.step("(5) create → delete round-trip (테스트 데이터 비오염)")
+        created = client.post("/sessions", json={"title": "__t207_tmp__"}).json()
+        new_id = created["session"]["session_id"]
+        self.assert_equal(created["session"]["title"], "__t207_tmp__", "생성 세션 제목 일치")
+        # 정리 — 테스트 세션 디렉터리 제거
+        import shutil
+
+        shutil.rmtree(PROJECT_ROOT / "data" / "sessions" / new_id, ignore_errors=True)
+
+    def test_208_desktop_v3_exec_ws_and_step_edit(self):
+        """[2026-05-29 handoff §40] desktop_v3 #1 실행 WS + #2 step 코드 편집 가드.
+
+        - WS /ws/execute 라우트 노출 + 없는 세션 연결 시 error 메시지 반환 (실제
+          코드 실행은 kernel 서브프로세스 + 외부 앱 launch 가능 → 테스트 안 함).
+        - PUT /sessions/{id}/steps/{step_id} (update_step) 라우트 + create→edit→reload
+          round-trip 으로 코드 저장 검증.
+        """
+        import importlib
+
+        api_server = importlib.import_module("api_server")
+        app = api_server.create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+
+        self.step("(1) WS /ws/execute + PUT step 라우트 노출")
+        paths = {getattr(r, "path", None) for r in app.routes}
+        self.assert_true("/ws/execute" in paths, "/ws/execute WebSocket 라우트 노출")
+        self.assert_true(
+            "/sessions/{session_id}/steps/{step_id}" in paths,
+            "PUT /sessions/{id}/steps/{step} 라우트 노출",
+        )
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 사용 불가 (httpx 미설치) — 라우트 노출 가드까지만")
+            return
+
+        client = TestClient(app)
+
+        self.step("(2) WS 없는 세션 연결 → error 메시지 (kernel 실행 안 함)")
+        with client.websocket_connect("/ws/execute?session_id=__no__&mode=all") as ws:
+            msg = ws.receive_json()
+            self.assert_equal(msg.get("type"), "error", "없는 세션 → type=error")
+
+        self.step("(3) create → step 추가(수동) → PUT 편집 → reload 검증")
+        created = client.post("/sessions", json={"title": "__t208_tmp__"}).json()
+        sid = created["session"]["session_id"]
+        try:
+            # AppService 로 직접 빈 step 1개 추가 (AI 호출 없이 편집 대상 확보).
+            from core.app_service import Step
+
+            service = app.state.app_service
+            session = service.get_session(sid)
+            service.repo.add_step(session, Step(generated_code="print('before')"))
+            detail = client.get(f"/sessions/{sid}").json()["session"]
+            target_id = detail["steps"][0]["step_id"]
+
+            put = client.put(
+                f"/sessions/{sid}/steps/{target_id}",
+                json={"generated_code": "print('after-edit')"},
+            )
+            self.assert_equal(put.status_code, 200, "PUT step 편집 → 200")
+            edited = put.json()["session"]["steps"][0]
+            self.assert_true(
+                "after-edit" in edited["generated_code"],
+                "편집된 코드가 저장됨 (generated_code)",
+            )
+            self.assert_true(
+                "after-edit" in edited.get("step_code", ""),
+                "편집된 코드가 step_code 에도 반영 (실행 delta)",
+            )
+
+            self.step("(4) 없는 step PUT → 404")
+            miss = client.put(f"/sessions/{sid}/steps/99999", json={"generated_code": "x"})
+            self.assert_equal(miss.status_code, 404, "없는 step → 404")
+        finally:
+            import shutil
+
+            shutil.rmtree(PROJECT_ROOT / "data" / "sessions" / sid, ignore_errors=True)
+
+    def test_209_desktop_v3_element_picker(self):
+        """[2026-05-29 handoff §40] desktop_v3 #3 element picker (카운트다운 캡처) 가드.
+
+        - POST /pick 라우트 노출.
+        - GenerateRequest 스키마가 element_context + is_browser_element 수용.
+        - (Windows 만) /pick 호출 시 200 + 기대 키 (success/x/y).
+        실제 element 캡처 내용은 커서 아래 임의 UI 라 검증 안 함 (라우트/스키마/응답형).
+        """
+        import importlib
+        import sys
+
+        api_server = importlib.import_module("api_server")
+        app = api_server.create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+
+        self.step("(1) /pick 라우트 노출")
+        paths = {getattr(r, "path", None) for r in app.routes}
+        self.assert_true("/pick" in paths, "POST /pick 라우트 노출")
+
+        self.step("(2) GenerateRequest 스키마가 element_context + is_browser_element 수용")
+        from api_server.server import GenerateRequest
+
+        req = GenerateRequest(
+            user_request="클릭해줘",
+            element_context="control_type=Button name=확인",
+            is_browser_element=True,
+        )
+        self.assert_equal(
+            req.element_context, "control_type=Button name=확인", "element_context 필드 보존"
+        )
+        self.assert_equal(req.is_browser_element, True, "is_browser_element 필드 보존")
+        req2 = GenerateRequest(user_request="x")
+        self.assert_true(req2.element_context is None, "element_context 기본 None")
+        self.assert_equal(req2.is_browser_element, False, "is_browser_element 기본 False")
+
+        if sys.platform != "win32":
+            self.step("non-Windows — /pick 라이브 호출 skip (501 경로)")
+            return
+
+        self.step("(3) Windows — /pick 호출 200 + 기대 키")
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트/스키마 가드까지만")
+            return
+        client = TestClient(app)
+        r = client.post("/pick")
+        self.assert_equal(r.status_code, 200, "/pick → 200 (Windows)")
+        body = r.json()
+        for key in ("success", "x", "y"):
+            self.assert_true(key in body, f"/pick 응답에 {key} 키")
+
+    def test_210_desktop_v3_recording_endpoints(self):
+        """[2026-05-29 handoff §41] desktop_v3 #3 녹화 lifecycle 엔드포인트 가드.
+
+        실제 입력 훅 설치(start)는 테스트하지 않는다 (글로벌 WH_*_LL 훅 + 사용자
+        머신 간섭). 라우트 노출 + idle status + 미녹화 시 409 가드 + 없는 세션 404
+        만 검증. is_recording/recording_event_count 가 @property 라 () 호출하면
+        TypeError 회귀 — status 200 + bool/int 형으로 가드.
+        """
+        import importlib
+
+        api_server = importlib.import_module("api_server")
+        app = api_server.create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+
+        self.step("(1) 녹화 라우트 노출")
+        paths = {getattr(r, "path", None) for r in app.routes}
+        for p in (
+            "/sessions/{session_id}/recording/start",
+            "/recording/status",
+            "/recording/marker",
+            "/sessions/{session_id}/recording/stop_commit",
+            "/recording/cancel",
+        ):
+            self.assert_true(p in paths, f"{p} 라우트 노출")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트 가드까지만")
+            return
+
+        client = TestClient(app)
+
+        self.step("(2) idle status — is_recording False (property () 호출 회귀 가드)")
+        rs = client.get("/recording/status")
+        self.assert_equal(rs.status_code, 200, "/recording/status → 200 (property 호출 OK)")
+        st = rs.json()
+        self.assert_equal(st["is_recording"], False, "idle 상태 is_recording=False")
+        self.assert_equal(st["event_count"], 0, "idle event_count=0")
+
+        self.step("(3) 미녹화 시 marker / stop_commit → 409")
+        self.assert_equal(
+            client.post("/recording/marker", json={"label": "x"}).status_code,
+            409,
+            "녹화 안 함 + marker → 409",
+        )
+        listed = client.get("/sessions").json()
+        sid = listed["sessions"][0]["session_id"]
+        self.assert_equal(
+            client.post(f"/sessions/{sid}/recording/stop_commit", json={}).status_code,
+            409,
+            "녹화 안 함 + stop_commit → 409",
+        )
+
+        self.step("(4) cancel idle → was_recording False / 없는 세션 start → 404")
+        cancel = client.post("/recording/cancel").json()
+        self.assert_equal(cancel["was_recording"], False, "idle cancel → was_recording False")
+        self.assert_equal(
+            client.post("/sessions/__no_such__/recording/start").status_code,
+            404,
+            "없는 세션 녹화 시작 → 404",
+        )
+
+    def test_211_desktop_v3_generate_stream_ws(self):
+        """[2026-05-29 handoff §44] desktop_v3 AI 생성 진행상황 스트리밍 WS 가드.
+
+        WS /ws/generate 라우트 노출 + 없는 세션 연결 시 error 메시지 반환.
+        실제 AI 호출(generate_step)은 외부 의존 + 느려서 테스트 안 함 — 라우트/가드만.
+        """
+        import importlib
+
+        api_server = importlib.import_module("api_server")
+        app = api_server.create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+
+        self.step("(1) /ws/generate 라우트 노출")
+        paths = {getattr(r, "path", None) for r in app.routes}
+        self.assert_true("/ws/generate" in paths, "WS /ws/generate 라우트 노출")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트 가드까지만")
+            return
+
+        client = TestClient(app)
+
+        self.step("(2) 없는 세션 연결 → error (AI 호출 안 함)")
+        with client.websocket_connect("/ws/generate?session_id=__no_such__") as ws:
+            msg = ws.receive_json()
+            self.assert_equal(msg.get("type"), "error", "없는 세션 → type=error")
+
     def test_195_regenerate_inplace_replaces_step_id(self):
         """[PR-19j 2026-05-24] _on_regenerate (D17 일반 재생성) 의
         ``replaces_step_id`` 인자 누락 fix.
