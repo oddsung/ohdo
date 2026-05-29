@@ -95,7 +95,7 @@ export const en: Catalog = {
     runComplete: "Run complete",
   },
   pick: {
-    overlayHint: "Hover the mouse over the UI element to select…",
+    overlayHint: "Click the UI element to select (Esc to cancel)",
     captureFailed: "element capture failed",
   },
   ws: {

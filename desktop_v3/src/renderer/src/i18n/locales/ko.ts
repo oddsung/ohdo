@@ -93,7 +93,7 @@ export const ko = {
     runComplete: "실행 완료",
   },
   pick: {
-    overlayHint: "선택할 UI 요소 위에 마우스를 올려두세요…",
+    overlayHint: "선택할 UI 요소를 클릭하세요 (Esc 취소)",
     captureFailed: "element 캡처 실패",
   },
   ws: {

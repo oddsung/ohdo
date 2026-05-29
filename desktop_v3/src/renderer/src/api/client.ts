@@ -115,6 +115,7 @@ export interface PickResult {
   label?: string;
   is_browser_element?: boolean;
   error?: string;
+  cancelled?: boolean;
 }
 
 export interface PendingElement {
@@ -140,6 +141,16 @@ export function generateStep(
 /** 현재 커서 위치의 element 캡처 (카운트다운 후 호출). */
 export function pickElement(): Promise<PickResult> {
   return apiFetch<PickResult>("/pick", { method: "POST" });
+}
+
+/** 클릭 시 캡처 (§48 절충안) — 다음 좌클릭까지 블록 후 그 위치 element 반환. */
+export function pickElementOnClick(): Promise<PickResult> {
+  return apiFetch<PickResult>("/pick/click", { method: "POST" });
+}
+
+/** 진행 중인 클릭 캡처 취소. */
+export function cancelPick(): Promise<{ cancelled: boolean }> {
+  return apiFetch("/pick/cancel", { method: "POST" });
 }
 
 export async function updateStepCode(

@@ -68,7 +68,7 @@ export default function App() {
   const { t } = useTranslation();
   const selectedSessionId = useUiStore((st) => st.selectedSessionId);
   const selectSession = useUiStore((st) => st.selectSession);
-  const cancelPick = usePickStore((st) => st.cancel);
+  const cancelPick = usePickStore((st) => st.cancelPick);
 
   // 전역 단축키용 실행 훅 — 세션 미선택 시 빈 문자열(핸들러에서 가드).
   const { run, stop } = useExecution(selectedSessionId ?? "");

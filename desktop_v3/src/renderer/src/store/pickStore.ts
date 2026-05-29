@@ -1,58 +1,46 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// element picker 상태 (handoff §40 #3) — 카운트다운 + 보류 중 element.
+// element picker 상태 (handoff §48, 절충안) — 클릭 시 캡처. 카운트다운/하이라이트 없음.
+// startPick() 가 /pick/click 을 호출하면 사용자가 대상을 클릭할 때까지 백엔드가 블록한다.
 import { create } from "zustand";
-import { pickElement, type PendingElement } from "@/api/client";
+import { pickElementOnClick, cancelPick, type PendingElement } from "@/api/client";
 import i18n from "@/i18n";
 
 interface PickState {
   picking: boolean;
-  countdown: number;
   pending: PendingElement | null;
   error: string | null;
-  _run: number; // 진행 중 카운트다운 토큰 — cancel 시 무효화.
-  startPick: (seconds?: number) => void;
-  cancel: () => void;
+  startPick: () => void;
+  cancelPick: () => void;
   clearPending: () => void;
 }
 
 export const usePickStore = create<PickState>((set, get) => ({
   picking: false,
-  countdown: 0,
   pending: null,
   error: null,
-  _run: 0,
-  startPick: (seconds = 3) => {
+  startPick: async () => {
     if (get().picking) return;
-    const run = get()._run + 1;
-    set({ picking: true, countdown: seconds, error: null, _run: run });
-
-    const tick = () => {
-      if (get()._run !== run) return; // 취소됨
-      const n = get().countdown - 1;
-      if (n > 0) {
-        set({ countdown: n });
-        window.setTimeout(tick, 1000);
-        return;
-      }
-      set({ countdown: 0 });
-      pickElement()
-        .then((res) => {
-          if (get()._run !== run) return; // 캡처 도중 취소됨
-          if (res.success && res.label) {
-            set({
-              pending: { label: res.label, isBrowser: !!res.is_browser_element },
-              picking: false,
-            });
-          } else {
-            set({ picking: false, error: res.error ?? i18n.t("pick.captureFailed") });
-          }
-        })
-        .catch((e: Error) => {
-          if (get()._run === run) set({ picking: false, error: e.message });
+    set({ picking: true, error: null });
+    try {
+      const result = await pickElementOnClick();
+      if (result.success) {
+        set({
+          pending: { label: result.label ?? "", isBrowser: !!result.is_browser_element },
+          picking: false,
         });
-    };
-    window.setTimeout(tick, 1000);
+      } else if (result.cancelled) {
+        set({ picking: false }); // 사용자 취소 — 조용히 종료
+      } else {
+        set({ picking: false, error: result.error ?? i18n.t("pick.captureFailed") });
+      }
+    } catch (e) {
+      set({ picking: false, error: (e as Error).message });
+    }
   },
-  cancel: () => set((st) => ({ picking: false, countdown: 0, _run: st._run + 1 })),
+  cancelPick: () => {
+    if (!get().picking) return;
+    void cancelPick().catch(() => {});
+    set({ picking: false });
+  },
   clearPending: () => set({ pending: null }),
 }));
