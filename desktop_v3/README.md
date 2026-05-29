@@ -99,6 +99,7 @@ desktop_v3/
 | POST | `/pick` | 커서 위치 UI element 즉시 캡처 (Windows) | Bearer |
 | POST | `/pick/click` | 클릭 시 element 캡처 — 다음 좌클릭까지 블록 (§48) | Bearer |
 | POST | `/pick/cancel` | 진행 중 클릭 캡처 취소 (§48) | Bearer |
+| GET | `/pick/hover` | 커서 아래 element rect(실시간 하이라이트, §49) | Bearer |
 | WS | `/ws/execute` | step 실행 + live 로그 스트리밍 | 쿼리 토큰 |
 | WS | `/ws/generate` | AI 코드 생성 진행상황 스트리밍 | 쿼리 토큰 |
 | POST | `/sessions/{id}/recording/start` | 작업 녹화 시작 (Windows) | Bearer |
