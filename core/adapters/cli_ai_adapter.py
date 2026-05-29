@@ -37,22 +37,20 @@ from .base_adapter import AIResponse, BaseAIAdapter
 
 CLI_AI_PRESETS: dict[str, dict] = {
     "agy": {
-        # 2026-05-29 사용자 실제 호출 결과:
-        # - `agy --print` 단독 → "flag needs an argument: -print" 에러
-        #   → Go flag 패키지의 STRING flag 라 다음 인자로 prompt 값을 받음
-        # - 즉 `agy --print "<prompt 텍스트>"` 형태가 유일한 headless 호출
-        # - stdin 으로 prompt 전달 mode 가 `agy --help` 에 노출 안 됨
-        # 한계: Windows CreateProcess 명령어 길이 한계 (32767 chars) 로 인해
-        # 긴 prompt (>~30000) 는 invocation 자체가 불가. 그 경우 사용자에게
-        # OpenAI compat (HTTP — 길이 제한 없음) 사용 권장.
+        # 2026-05-29 사용자 실측으로 확정된 호출 방법:
+        #   echo "<prompt>" | agy -p ""
+        # `-p` (=`--print`) 는 Go flag 패키지의 string flag — 값 필수. 하지만
+        # 빈 문자열 ``""`` 을 값으로 넘기면 agy 가 stdin 에서 prompt 읽음.
+        # → 명령어 길이 한계 우회 (stdin 은 무제한 — 34k+ prompt 처리 가능)
+        # 모델 지정 flag 는 없음 (CLI default 사용).
         "display_name": "Agy CLI (구 Gemini)",
         "command": "agy",
         "model_arg": None,
         "model": "",
-        "prompt_arg": "--print",
+        "prompt_arg": None,  # fallback 불필요 — stdin path 가 항상 작동
         "supports_images": False,
-        "always_args": [],
-        "use_stdin": False,  # stdin path 스킵 — agy 가 stdin prompt 미지원
+        "always_args": ["-p", ""],  # `-p ""` 로 print mode 트리거 + stdin 활성화
+        "use_stdin": True,
     },
     "claude_code": {
         "display_name": "Claude Code (Anthropic)",

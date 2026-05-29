@@ -11549,49 +11549,50 @@ if __name__ == "__main__":
                     f"[§36] preset '{name}' 에 '{field}' 필드 필수. 실제: {preset!r}",
                 )
 
-        self.step("(3) preset='agy' → prompt_arg='--print' + use_stdin=False")
+        self.step("(3) preset='agy' → always_args=['-p', ''] + use_stdin=True (stdin pipe)")
         a = CliAIAdapter({"preset": "agy"})
         self.assert_equal(a.command, "agy", "[§36] agy preset command")
-        # 2026-05-29 사용자 실제 호출 결과: `agy --print` 는 string flag, 다음 인자로
-        # prompt 값 필수 ("flag needs an argument: -print" 에러). stdin path 미지원.
-        # → preset: prompt_arg="--print", use_stdin=False, always_args=[]
+        # 2026-05-29 사용자 실측 확정: `echo "<prompt>" | agy -p ""` 패턴이 작동.
+        # `-p` 는 string flag — 빈 ""을 값으로 넘기면 agy 가 stdin 에서 prompt 읽음.
+        # → 명령어 길이 한계 우회 가능 (stdin 무제한). preset: always_args=["-p", ""]
+        #   + use_stdin=True + prompt_arg=None (fallback 불필요).
         self.assert_true(
             a.model_arg is None,
             f"[§36] agy preset model_arg None (agy 가 model flag 없음). 실제: {a.model_arg!r}",
         )
         self.assert_equal(
-            a.prompt_arg,
-            "--print",
-            f"[§36] agy prompt_arg='--print' (string flag, prompt 인자 모드). "
-            f"실제: {a.prompt_arg!r}",
+            a.always_args,
+            ["-p", ""],
+            f"[§36] agy always_args=['-p', ''] (print mode 트리거 + stdin 활성화). "
+            f"실제: {a.always_args!r}",
         )
         self.assert_equal(
             a.use_stdin,
-            False,
-            f"[§36] agy use_stdin=False (stdin path 스킵). 실제: {a.use_stdin!r}",
+            True,
+            f"[§36] agy use_stdin=True (stdin path 로 prompt 전달). 실제: {a.use_stdin!r}",
         )
-        agy_args = a._build_args("agy.exe", "--print", "test prompt")
+        agy_args = a._build_args("agy.exe")
         self.assert_true(
-            agy_args == ["agy.exe", "--print", "test prompt"],
-            f"[§36] agy _build_args(prompt): [agy.exe, --print, '<prompt>']. 실제: {agy_args!r}",
+            agy_args == ["agy.exe", "-p", ""],
+            f"[§36] agy _build_args: [agy.exe, -p, '']. 실제: {agy_args!r}",
         )
 
-        # 사용자 stale settings.json (구 -m / -p 박혀 있던 케이스) 도 preset 으로 reset
+        # 사용자 stale settings.json (구 -m / --print 박혀 있던 케이스) 도 preset 으로 reset
         a_stale = CliAIAdapter(
             {
                 "preset": "agy",
                 "command": "agy",
                 "model": "agy-3.1-pro",
                 "model_arg": "-m",  # stale
-                "prompt_arg": "-p",  # stale
-                "use_stdin": True,  # stale
+                "prompt_arg": "--print",  # stale
+                "use_stdin": False,  # stale
             }
         )
         self.assert_equal(
-            a_stale.prompt_arg, "--print", "[§36] agy stale config → preset prompt_arg reset"
+            a_stale.always_args, ["-p", ""], "[§36] agy stale config → preset always_args reset"
         )
         self.assert_equal(
-            a_stale.use_stdin, False, "[§36] agy stale config → preset use_stdin=False reset"
+            a_stale.use_stdin, True, "[§36] agy stale config → preset use_stdin=True reset"
         )
 
         self.step("(4) preset='claude_code' → command='claude' + model='claude-...'")
@@ -11678,63 +11679,71 @@ if __name__ == "__main__":
             )
 
     def test_205_cli_ai_long_prompt_guard(self):
-        """[handoff §36 2026-05-29 hotfix] use_stdin=False preset (예: agy) 에서
+        """[handoff §36 2026-05-29] use_stdin=False + prompt_arg-only custom CLI 의
         Windows CreateProcess 명령어 인자 길이 한계 (~32767) 초과 prompt 차단 가드.
 
-        agy CLI 는 stdin 으로 prompt 전달 미지원 + `--print "<prompt>"` 인자 모드만
-        지원. Windows 에서 30000 chars 초과 prompt 는 invocation 자체 불가 → 사전
-        AIResponse(error) 로 차단 + 사용자에게 OpenAI compat 전환 권장 메시지.
+        agy CLI 자체는 ``-p ""`` + stdin pipe 패턴으로 길이 무관 동작 (handoff §36
+        hotfix 2 — use_stdin=True). 본 가드는 향후 사용자가 custom preset 으로
+        use_stdin=False + prompt_arg 만 지원하는 가상의 CLI 등록 시 invocation 실패
+        대신 명확한 에러로 차단하기 위함.
 
         가드:
-        1. agy 어댑터 + 35000 chars prompt → success=False + error 메시지에 길이
-           한계 / OpenAI compat 권장 문구 포함
-        2. agy 어댑터 + 1000 chars prompt → 길이 한계 통과 (실 invoke 는 agy 미설치면
-           "command 찾을 수 없음" 다른 에러로 떨어짐 — 길이 가드 통과만 확인)
-        3. use_stdin=True preset (claude_code) 은 긴 prompt 도 길이 가드 안 걸림
+        1. custom CLI (use_stdin=False, prompt_arg="-x") + 35000 chars → success=False
+           + error 메시지에 길이 한계 / OpenAI compat 권장 포함
+        2. agy 어댑터 (use_stdin=True) 는 긴 prompt 도 가드 안 걸림 — stdin 으로 전달
+        3. _PROTOCOL_FIELDS 에 'use_stdin' 등록
         """
         import asyncio
+        import shutil as _shutil
 
-        from core.adapters.cli_ai_adapter import CliAIAdapter
+        from core.adapters.cli_ai_adapter import _PROTOCOL_FIELDS, CliAIAdapter
 
         async def _gen(adapter, prompt):
             return await adapter.generate(prompt)
 
-        self.step("(1) agy + 35000 chars → 명확한 길이 한계 에러")
-        a = CliAIAdapter({"preset": "agy"})
+        self.step("(1) custom use_stdin=False + 35000 chars → 명확한 길이 한계 에러")
+        # 가상의 use_stdin=False CLI — agy 가 아니라 custom preset 으로 시뮬레이션.
+        custom = CliAIAdapter(
+            {
+                "preset": "custom",
+                "command": "fake_cli",
+                "prompt_arg": "-x",
+                "use_stdin": False,
+            }
+        )
+        self.assert_equal(custom.use_stdin, False, "[§36] custom use_stdin=False")
         long_prompt = "x" * 35000
-        # agy 가 PATH 에 없을 때도 길이 가드는 'command 찾을 수 없음' 보다 먼저 트리거됨
-        # … 아니, 코드 순서상 'cli_exec = shutil.which' 가 먼저 — 미설치 시 그 에러 우선.
-        # PATH 에 agy 있어야 길이 가드 검증 가능. 테스트는 monkey-patch 로 우회.
-        import shutil as _shutil
 
         orig_which = _shutil.which
         try:
-            _shutil.which = lambda cmd: f"fake/{cmd}.exe" if cmd == "agy" else orig_which(cmd)
-            resp = asyncio.run(_gen(a, long_prompt))
+            _shutil.which = lambda cmd: f"fake/{cmd}.exe" if cmd == "fake_cli" else orig_which(cmd)
+            resp = asyncio.run(_gen(custom, long_prompt))
         finally:
             _shutil.which = orig_which
 
         self.assert_true(
             not resp.success,
-            f"[§36 hotfix] 긴 prompt → success=False. 실제: success={resp.success}",
+            f"[§36] 긴 prompt + use_stdin=False → success=False. 실제: {resp.success}",
         )
         self.assert_true(
             resp.error and ("길이 한계" in resp.error or "32" in resp.error),
-            f"[§36 hotfix] error 메시지에 길이 한계 명시. 실제: {resp.error!r}",
+            f"[§36] error 메시지에 길이 한계 명시. 실제: {resp.error!r}",
         )
         self.assert_true(
-            resp.error and ("OpenAI" in resp.error or "openai" in resp.error.lower()),
-            f"[§36 hotfix] error 에 OpenAI compat 전환 권장. 실제: {resp.error!r}",
+            resp.error and "OpenAI" in resp.error,
+            f"[§36] error 에 OpenAI compat 전환 권장. 실제: {resp.error!r}",
         )
 
-        self.step("(3) use_stdin=True preset 은 긴 prompt 도 길이 가드 통과")
-        c = CliAIAdapter({"preset": "claude_code"})
-        self.assert_equal(c.use_stdin, True, "[§36] claude_code use_stdin=True")
-        # generate() 직접 호출 안 함 (실 binary 미설치 + stdin path) — 가드 로직 검증만.
-        # 가드 조건: `not self.use_stdin and self.prompt_arg and len > 30000`
-        # claude_code 는 use_stdin=True → 가드 통과 (False).
-        from core.adapters.cli_ai_adapter import _PROTOCOL_FIELDS
+        self.step("(2) agy (use_stdin=True) 는 긴 prompt 가드 안 걸림")
+        a = CliAIAdapter({"preset": "agy"})
+        self.assert_equal(a.use_stdin, True, "[§36 hotfix2] agy use_stdin=True (stdin pipe)")
+        self.assert_equal(
+            a.always_args,
+            ["-p", ""],
+            "[§36 hotfix2] agy always_args=['-p', ''] (print + stdin 트리거)",
+        )
 
+        self.step("(3) _PROTOCOL_FIELDS 에 use_stdin 등록")
         self.assert_true(
             "use_stdin" in _PROTOCOL_FIELDS,
             "[§36] _PROTOCOL_FIELDS 에 'use_stdin' 등록 — preset 가 사용자 stale 값 무력화",
