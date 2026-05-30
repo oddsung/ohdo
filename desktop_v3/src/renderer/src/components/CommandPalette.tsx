@@ -8,6 +8,7 @@ import {
   Activity,
   Circle,
   Copy,
+  Download,
   Hash,
   Languages,
   Moon,
@@ -17,8 +18,15 @@ import {
   Settings,
   Square,
   Sun,
+  Upload,
 } from "lucide-react";
-import { createSession, duplicateSession, fetchSessions } from "@/api/client";
+import {
+  createSession,
+  duplicateSession,
+  exportSession,
+  fetchSessions,
+  importSession,
+} from "@/api/client";
 import { useUiStore } from "@/store/uiStore";
 import { usePickStore } from "@/store/pickStore";
 import { useRecordStore } from "@/store/recordStore";
@@ -145,7 +153,40 @@ export function CommandPalette() {
           })
           .catch((e) => toast.error(t("session.duplicateFailed", { message: (e as Error).message }))),
     });
+    commands.push({
+      id: "export",
+      label: t("palette.exportSession"),
+      icon: <Download className="h-4 w-4" />,
+      run: async () => {
+        const dir = await window.ohdo.pickDirectory();
+        if (!dir) return;
+        try {
+          const path = await exportSession(selectedSessionId, dir);
+          toast.success(t("session.exported"));
+          void window.ohdo.revealPath(path).catch(() => {});
+        } catch (e) {
+          toast.error(t("session.exportFailed", { message: (e as Error).message }));
+        }
+      },
+    });
   }
+  commands.push({
+    id: "import",
+    label: t("palette.importProject"),
+    icon: <Upload className="h-4 w-4" />,
+    run: async () => {
+      const dir = await window.ohdo.pickDirectory();
+      if (!dir) return;
+      try {
+        const s = await importSession(dir);
+        qc.invalidateQueries({ queryKey: ["sessions"] });
+        selectSession(s.session_id);
+        toast.success(t("session.imported"));
+      } catch (e) {
+        toast.error(t("session.importFailed", { message: (e as Error).message }));
+      }
+    },
+  });
   commands.push({
     id: "environment",
     label: t("palette.environment"),

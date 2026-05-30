@@ -267,6 +267,26 @@ export function regenerateStep(sessionId: string, stepId: number): Promise<Gener
   });
 }
 
+// ── 프로젝트 내보내기/가져오기 (§47 #15) ─────────────
+
+/** 세션을 output_dir(부모) 아래 독립 프로젝트 폴더로 내보내기. 생성 경로 반환. */
+export async function exportSession(sessionId: string, outputDir: string): Promise<string> {
+  const data = await apiFetch<{ success: boolean; path: string }>(
+    `/sessions/${sessionId}/export`,
+    { method: "POST", body: JSON.stringify({ output_dir: outputDir }) },
+  );
+  return data.path;
+}
+
+/** export 폴더(session.json 포함)에서 세션 가져오기. 새 세션 반환. */
+export async function importSession(sourceDir: string): Promise<SessionDetail> {
+  const data = await apiFetch<{ success: boolean; session: SessionDetail }>("/sessions/import", {
+    method: "POST",
+    body: JSON.stringify({ source_dir: sourceDir }),
+  });
+  return data.session;
+}
+
 // ── AI 엔진 퀵스위치 (§47 #14) ───────────────────────
 
 export interface AiEngine {

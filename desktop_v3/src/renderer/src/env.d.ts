@@ -18,6 +18,9 @@ export interface OhdoBridge {
   restoreFromRecord: () => Promise<void>;
   // 코드 실행 완료 후 메인 윈도우를 앞으로 (§49).
   focusMainWindow: () => Promise<void>;
+  // 프로젝트 내보내기/가져오기 (§47 #15).
+  pickDirectory: () => Promise<string | null>;
+  revealPath: (p: string) => Promise<void>;
 }
 
 declare global {

@@ -6,17 +6,29 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api_server.deps import (
+    CONFIG_DIR,
     CreateSessionRequest,
     DuplicateSessionRequest,
+    ExportRequest,
     GenerateRequest,
+    ImportRequest,
     RenameSessionRequest,
     drop_kernel,
     get_app_service,
+    load_json,
     require_token,
     to_dict,
 )
 
 router = APIRouter()
+
+
+def _safe_dirname(name: str, fallback: str) -> str:
+    """파일명에 못 쓰는 문자를 제거해 안전한 폴더 이름으로. 비면 fallback."""
+    import re
+
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name or "").strip().strip(".")
+    return cleaned or fallback
 
 
 def _copy_session_assets(service, src_id: str, dst_id: str) -> None:
@@ -145,6 +157,75 @@ def duplicate_session(
     _copy_session_assets(service, src.session_id, dup.session_id)
 
     return {"session": to_dict(service.get_session(dup.session_id))}
+
+
+@router.post("/sessions/{session_id}/export")
+def export_session(
+    session_id: str,
+    body: ExportRequest,
+    request: Request,
+    _: None = Depends(require_token),
+) -> dict:
+    """세션을 독립 프로젝트 폴더로 내보내기 (handoff §47 백로그 #15) — export_workflow 위임.
+
+    ``output_dir`` 아래에 세션 제목 하위폴더를 만들어 export(main.py/requirements/README/
+    run.bat/session.json/captures/scripts). settings.json 의 output_project 설정 적용. core 0줄.
+    없는 세션 404, output_dir 가 없거나 폴더가 아니면 400.
+    """
+    from pathlib import Path
+
+    service = get_app_service(request.app)
+    try:
+        session = service.get_session(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+
+    parent = Path(body.output_dir or "")
+    if not parent.is_dir():
+        raise HTTPException(status_code=400, detail=f"출력 폴더가 없습니다: {body.output_dir}")
+
+    base = _safe_dirname(session.title, session_id)
+    target = parent / base
+    n = 2
+    while target.exists():
+        target = parent / f"{base}_{n}"
+        n += 1
+
+    settings = load_json(CONFIG_DIR / "settings.json")
+    try:
+        path = service.export_workflow(session_id, target, settings=settings)
+    except NotImplementedError:
+        raise HTTPException(
+            status_code=501, detail="이 저장소 백엔드는 내보내기를 지원하지 않습니다."
+        )
+    return {"success": True, "path": str(path)}
+
+
+@router.post("/sessions/import")
+def import_session(body: ImportRequest, request: Request, _: None = Depends(require_token)) -> dict:
+    """export 폴더에서 세션 가져오기 (handoff §47 백로그 #15) — import_workflow 위임.
+
+    ``source_dir`` 에 ``session.json`` 이 있어야 한다. 새 UUID 로 복사돼 기존 세션과 충돌하지 않음.
+    폴더/메타 없으면 400, 백엔드 미지원 시 501. core 0줄.
+    """
+    from pathlib import Path
+
+    service = get_app_service(request.app)
+    src = Path(body.source_dir or "")
+    if not (src / "session.json").exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"session.json 이 없습니다 (export 폴더가 맞나요?): {body.source_dir}",
+        )
+    try:
+        session = service.import_workflow(src, new_title=body.new_title)
+    except NotImplementedError:
+        raise HTTPException(
+            status_code=501, detail="이 저장소 백엔드는 가져오기를 지원하지 않습니다."
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"가져오기 실패: {exc}")
+    return {"success": True, "session": to_dict(session)}
 
 
 @router.get("/sessions/{session_id}/blocks")

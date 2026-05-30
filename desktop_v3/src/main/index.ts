@@ -12,7 +12,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { createServer } from "net";
 import { randomBytes } from "crypto";
 import { join } from "path";
-import { app, BrowserWindow, ipcMain, screen } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
 
 const READY_MARKER = "OHDO_API_READY";
 const PREFERRED_PORT = 8765;
@@ -351,6 +351,15 @@ function registerPickIpc(): void {
     mainWindow.setAlwaysOnTop(true);
     mainWindow.focus();
     mainWindow.setAlwaysOnTop(false);
+  });
+  // 프로젝트 내보내기/가져오기 (§47 #15) — 네이티브 폴더 선택 + Explorer 열기.
+  ipcMain.handle("fs:pick-directory", async () => {
+    if (!mainWindow) return null;
+    const res = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] });
+    return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0];
+  });
+  ipcMain.handle("fs:reveal", (_e, p: string) => {
+    if (p) shell.showItemInFolder(p);
   });
   ipcMain.handle("pick:hover", async () => {
     if (!apiInfo) return { box: null, paused: false };

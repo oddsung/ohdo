@@ -21,6 +21,9 @@ const api = {
   restoreFromRecord: (): Promise<void> => ipcRenderer.invoke("record:restore"),
   // 코드 실행 완료 후 메인 윈도우를 앞으로 (§49).
   focusMainWindow: (): Promise<void> => ipcRenderer.invoke("window:focus"),
+  // 프로젝트 내보내기/가져오기 (§47 #15) — 네이티브 폴더 선택 + Explorer 열기.
+  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("fs:pick-directory"),
+  revealPath: (p: string): Promise<void> => ipcRenderer.invoke("fs:reveal", p),
 };
 
 contextBridge.exposeInMainWorld("ohdo", api);

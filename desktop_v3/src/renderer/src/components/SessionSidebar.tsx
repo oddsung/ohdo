@@ -3,13 +3,27 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Activity, Copy, Languages, Moon, Pencil, Plus, Settings, Sun, Trash2 } from "lucide-react";
+import {
+  Activity,
+  Copy,
+  Download,
+  Languages,
+  Moon,
+  Pencil,
+  Plus,
+  Settings,
+  Sun,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import {
   createSession,
   deleteSession,
   duplicateSession,
+  exportSession,
   fetchHealth,
   fetchSessions,
+  importSession,
   renameSession,
   type SessionSummary,
 } from "@/api/client";
@@ -42,12 +56,14 @@ function SessionRow({
   busy,
   onRename,
   onDuplicate,
+  onExport,
   onDelete,
 }: {
   s: SessionSummary;
   busy: boolean;
   onRename: () => void;
   onDuplicate: () => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
@@ -94,6 +110,19 @@ function SessionRow({
             }}
           >
             <Copy className="h-3 w-3" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-5 w-5 text-discord-muted hover:text-white"
+            title={t("session.export")}
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              onExport();
+            }}
+          >
+            <Download className="h-3 w-3" />
           </Button>
           <Button
             size="icon"
@@ -186,6 +215,32 @@ export function SessionSidebar() {
     },
     onError: (e: Error) => toast.error(t("session.duplicateFailed", { message: e.message })),
   });
+  // ── 내보내기 / 가져오기 (§47 #15) — 네이티브 폴더 선택 후 브리지 호출 ──
+  const exportMut = useMutation({
+    mutationFn: (vars: { id: string; dir: string }) => exportSession(vars.id, vars.dir),
+    onSuccess: (path) => {
+      toast.success(t("session.exported"));
+      void window.ohdo.revealPath(path).catch(() => {});
+    },
+    onError: (e: Error) => toast.error(t("session.exportFailed", { message: e.message })),
+  });
+  const importMut = useMutation({
+    mutationFn: (dir: string) => importSession(dir),
+    onSuccess: (session) => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      select(session.session_id);
+      toast.success(t("session.imported"));
+    },
+    onError: (e: Error) => toast.error(t("session.importFailed", { message: e.message })),
+  });
+  const onExportSession = async (s: SessionSummary) => {
+    const dir = await window.ohdo.pickDirectory();
+    if (dir) exportMut.mutate({ id: s.session_id, dir });
+  };
+  const onImport = async () => {
+    const dir = await window.ohdo.pickDirectory();
+    if (dir) importMut.mutate(dir);
+  };
   const onRenameSession = (s: SessionSummary) => {
     const next = window.prompt(t("session.renamePrompt"), s.title || "");
     const title = (next ?? "").trim();
@@ -202,25 +257,39 @@ export function SessionSidebar() {
       ? deleteMut.variables
       : duplicateMut.isPending
         ? duplicateMut.variables?.session_id
-        : null;
+        : exportMut.isPending
+          ? exportMut.variables?.id
+          : null;
 
   return (
     <aside className="flex h-full w-60 flex-col bg-discord-sidebar">
       <header className="flex h-12 items-center justify-between border-b border-black/20 px-4 shadow-sm">
         <span className="font-semibold">{t("sidebar.sessions")}</span>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-7 w-7 text-discord-muted hover:text-white"
-          title={t("sidebar.newSession")}
-          disabled={creating || createMut.isPending}
-          onClick={() => {
-            setCreating(true);
-            createMut.mutate();
-          }}
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-discord-muted hover:text-white"
+            title={t("session.import")}
+            disabled={importMut.isPending}
+            onClick={onImport}
+          >
+            <Upload className="h-4 w-4" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-discord-muted hover:text-white"
+            title={t("sidebar.newSession")}
+            disabled={creating || createMut.isPending}
+            onClick={() => {
+              setCreating(true);
+              createMut.mutate();
+            }}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
       </header>
       <ScrollArea className="flex-1">
         <div className="space-y-1 p-2">
@@ -242,6 +311,7 @@ export function SessionSidebar() {
               busy={busyId === s.session_id}
               onRename={() => onRenameSession(s)}
               onDuplicate={() => duplicateMut.mutate(s)}
+              onExport={() => onExportSession(s)}
               onDelete={() => onDeleteSession(s)}
             />
           ))}

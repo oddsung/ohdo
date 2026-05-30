@@ -126,6 +126,25 @@ class SwitchEngineRequest(BaseModel):
     name: str
 
 
+class ExportRequest(BaseModel):
+    """프로젝트 내보내기 (handoff §47 백로그 #15 — export_workflow 위임).
+
+    output_dir = 사용자가 고른 부모 폴더. 서버가 그 아래 세션 제목 하위폴더를 만든다.
+    """
+
+    output_dir: str
+
+
+class ImportRequest(BaseModel):
+    """프로젝트 가져오기 (handoff §47 백로그 #15 — import_workflow 위임).
+
+    source_dir = ``session.json`` 이 들어있는 export 폴더 경로.
+    """
+
+    source_dir: str
+    new_title: str | None = None
+
+
 def save_json(path: Path, data: dict) -> None:
     """dict 를 들여쓰기 JSON(UTF-8)으로 저장 — config/settings.json 쓰기용."""
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

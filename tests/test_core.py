@@ -12735,6 +12735,76 @@ if __name__ == "__main__":
         self.assert_true(isinstance(info, dict) and "os" in info, "system_info 에 os 키")
         self.assert_true("python_version" in info, "system_info 에 python_version 키")
 
+    def test_224_api_server_export_import_roundtrip(self):
+        """[api_server §47] 프로젝트 내보내기/가져오기 라우트 (백로그 #15) — export/import_workflow.
+
+        export(폴더 + session.json/main.py 생성) → import(새 세션 복원, steps 보존) 라운드트립.
+        core 메서드 이미 존재 — 엔드포인트만 신설(core 0줄). 격리 tempfile 사용.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from api_server.server import create_app
+
+        self.step("(1) export/import 라우트 노출")
+        app = create_app(token="", data_dir=tempfile.mkdtemp(prefix="ohdo_exp_"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(
+            ("/sessions/{session_id}/export", "POST") in pairs, "POST export 라우트 필수"
+        )
+        self.assert_true(("/sessions/import", "POST") in pairs, "POST /sessions/import 라우트 필수")
+
+        self.step("(2) AppService 위임 메서드 존재")
+        from core.app_service import AppService
+
+        for name in ("export_workflow", "import_workflow"):
+            self.assert_true(hasattr(AppService, name), f"AppService.{name} 필수")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 - 라우트/메서드 가드까지만")
+            return
+
+        from api_server.deps import get_app_service
+        from core.session_manager import Step
+
+        service = get_app_service(app)
+        src = service.create_session(title="exp-src", project_type="desktop")
+        service.add_step(src.session_id, Step(user_request="r1", generated_code="print('hello')"))
+
+        client = TestClient(app)
+        out_parent = tempfile.mkdtemp(prefix="ohdo_out_")
+
+        self.step("(3) export -> 폴더 + session.json/main.py 생성")
+        res = client.post(f"/sessions/{src.session_id}/export", json={"output_dir": out_parent})
+        self.assert_equal(res.status_code, 200, "export 200")
+        exported_path = res.json()["path"]
+        self.assert_true(
+            (Path(exported_path) / "session.json").exists(), "export 폴더에 session.json"
+        )
+        self.assert_true((Path(exported_path) / "main.py").exists(), "export 폴더에 main.py")
+
+        self.step("(4) import -> 새 세션 + steps 보존")
+        res2 = client.post("/sessions/import", json={"source_dir": exported_path})
+        self.assert_equal(res2.status_code, 200, "import 200")
+        imported = res2.json()["session"]
+        self.assert_true(imported["session_id"] != src.session_id, "import 은 새 session_id")
+        self.assert_equal(len(imported["steps"]), 1, "import 후 steps 보존")
+
+        self.step("(5) 에러 경로 - 없는 출력폴더 400 / session.json 없는 import 400")
+        res3 = client.post(
+            f"/sessions/{src.session_id}/export",
+            json={"output_dir": str(Path(out_parent) / "__no_such__")},
+        )
+        self.assert_equal(res3.status_code, 400, "없는 output_dir 400")
+        res4 = client.post("/sessions/import", json={"source_dir": out_parent})
+        self.assert_equal(res4.status_code, 400, "session.json 없는 폴더 import 400")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
