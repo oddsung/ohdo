@@ -162,6 +162,9 @@ export const en: Catalog = {
     pickOrCreate: "Select a session on the left or create one with +.",
     hint: "Open a session and describe a task; AI will generate Python automation code.",
   },
+  tab: {
+    close: "Close tab",
+  },
   engine: {
     label: "AI engine",
     switched: "Switched to {{name}}",

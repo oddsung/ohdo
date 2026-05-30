@@ -17,6 +17,7 @@ import { CodeViewer } from "./components/CodeViewer";
 import { LogConsole } from "./components/LogConsole";
 import { PickOverlay } from "./components/PickOverlay";
 import { CommandPalette } from "./components/CommandPalette";
+import { TabBar } from "./components/TabBar";
 import { Toaster } from "./components/Toaster";
 
 function ServerRail() {
@@ -120,14 +121,17 @@ export default function App() {
     <div className="flex h-screen w-screen overflow-hidden">
       <ServerRail />
       <SessionSidebar />
-      {selectedSessionId ? (
-        <>
-          <ChatPanel sessionId={selectedSessionId} />
-          <CodePane sessionId={selectedSessionId} />
-        </>
-      ) : (
-        <EmptyState />
-      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TabBar />
+        {selectedSessionId ? (
+          <div className="flex min-h-0 flex-1">
+            <ChatPanel sessionId={selectedSessionId} />
+            <CodePane sessionId={selectedSessionId} />
+          </div>
+        ) : (
+          <EmptyState />
+        )}
+      </div>
       <PickOverlay />
       <CommandPalette />
       <Toaster />

@@ -154,7 +154,7 @@ export function SessionSidebar() {
   const qc = useQueryClient();
   const { t, i18n } = useTranslation();
   const select = useUiStore((st) => st.selectSession);
-  const selectedSessionId = useUiStore((st) => st.selectedSessionId);
+  const closeTab = useUiStore((st) => st.closeTab);
   const settingsOpen = useUiStore((st) => st.settingsOpen);
   const setSettingsOpen = useUiStore((st) => st.setSettingsOpen);
   const envOpen = useUiStore((st) => st.envOpen);
@@ -197,7 +197,7 @@ export function SessionSidebar() {
     mutationFn: (id: string) => deleteSession(id),
     onSuccess: (_d, id) => {
       qc.invalidateQueries({ queryKey: ["sessions"] });
-      if (selectedSessionId === id) select(null);
+      closeTab(id); // 탭에서 제거 + 활성 탭이었으면 인접 탭으로 전환
       toast.success(t("session.deleted"));
     },
     onError: (e: Error) => toast.error(t("session.deleteFailed", { message: e.message })),

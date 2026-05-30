@@ -160,6 +160,9 @@ export const ko = {
     pickOrCreate: "왼쪽에서 세션을 선택하거나 + 로 새로 만드세요.",
     hint: "세션을 열고 자연어로 작업을 요청하면 AI 가 Python 자동화 코드를 생성합니다.",
   },
+  tab: {
+    close: "탭 닫기",
+  },
   engine: {
     label: "AI 엔진",
     switched: "{{name}} (으)로 전환됨",
