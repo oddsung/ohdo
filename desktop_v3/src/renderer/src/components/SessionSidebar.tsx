@@ -7,6 +7,7 @@ import {
   Activity,
   Copy,
   Download,
+  HelpCircle,
   Languages,
   Moon,
   Pencil,
@@ -159,6 +160,7 @@ export function SessionSidebar() {
   const setSettingsOpen = useUiStore((st) => st.setSettingsOpen);
   const envOpen = useUiStore((st) => st.envOpen);
   const setEnvOpen = useUiStore((st) => st.setEnvOpen);
+  const setOnboardingOpen = useUiStore((st) => st.setOnboardingOpen);
   const [creating, setCreating] = useState(false);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["sessions"],
@@ -320,6 +322,15 @@ export function SessionSidebar() {
       <footer className="flex items-center justify-between border-t border-black/20 px-4 py-2">
         <HealthDot />
         <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 text-discord-muted hover:text-white"
+            title={t("sidebar.help")}
+            onClick={() => setOnboardingOpen(true)}
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+          </Button>
           <Button
             size="icon"
             variant="ghost"

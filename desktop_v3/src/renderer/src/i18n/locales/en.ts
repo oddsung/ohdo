@@ -27,6 +27,7 @@ export const en: Catalog = {
     toDarkTheme: "Switch to dark theme",
     toKorean: "Switch to Korean",
     toEnglish: "Switch to English",
+    help: "Show the getting-started guide",
   },
   chat: {
     title: "ohdo desktop v3",
@@ -189,6 +190,28 @@ export const en: Catalog = {
     allRequiredOk: "All required installed",
     someRequiredMissing: "Some required missing",
   },
+  onboarding: {
+    title: "Get started with ohdo",
+    step: "Step {{n}} / {{total}}",
+    back: "Back",
+    next: "Next",
+    skip: "Skip",
+    finish: "Get started",
+    welcomeTitle: "Welcome to ohdo 👋",
+    welcomeBody:
+      "ohdo helps you build and run Windows desktop & web automation step by step, by chatting with an AI. A quick tour and you're ready to go.",
+    chooseLang: "Language",
+    envTitle: "Environment check",
+    envBody:
+      "Running automations needs Python and a few packages. Review your current setup below. You can continue even if something is missing — revisit it anytime from Environment check.",
+    engineTitle: "Choose an AI engine",
+    engineBody: "Pick the AI engine that will generate code. You can change it anytime from the header or settings.",
+    noEngines: "No AI engines configured. Set up the ai section in settings, then try again.",
+    finishTitle: "You're all set!",
+    finishBody:
+      "Create a session and describe a task in natural language — the AI will generate code. Press Ctrl+K anytime to open the command palette.",
+    createFirst: "Create your first session",
+  },
   palette: {
     placeholder: "Type a command…",
     empty: "No matching commands",
@@ -202,6 +225,7 @@ export const en: Catalog = {
     exportSession: "Export current session",
     importProject: "Import project",
     environment: "Environment check",
+    onboarding: "Show getting-started guide",
     settings: "Open settings",
     toggleTheme: "Toggle theme",
     toggleLanguage: "Toggle language (KO/EN)",

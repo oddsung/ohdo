@@ -13,6 +13,7 @@ interface UiState {
   paletteOpen: boolean; // 커맨드 팔레트 (Ctrl+K, §51)
   settingsOpen: boolean; // 설정 다이얼로그 (사이드바 기어 + 팔레트 공용)
   envOpen: boolean; // 환경 점검 다이얼로그 (§53, 사이드바 + 팔레트 공용)
+  onboardingOpen: boolean; // 온보딩 위저드 (§58, 사이드바 + 팔레트 + 첫 실행 자동)
   selectSession: (id: string | null) => void;
   selectStep: (id: number | null) => void;
   selectBlock: (b: SelectedBlock) => void;
@@ -21,6 +22,7 @@ interface UiState {
   togglePalette: () => void;
   setSettingsOpen: (v: boolean) => void;
   setEnvOpen: (v: boolean) => void;
+  setOnboardingOpen: (v: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -31,6 +33,7 @@ export const useUiStore = create<UiState>((set) => ({
   paletteOpen: false,
   settingsOpen: false,
   envOpen: false,
+  onboardingOpen: false,
   // 세션 선택 시 탭에 없으면 추가(끝에) + 활성화. null 이면 활성만 해제(탭 유지).
   selectSession: (id) =>
     set((st) => {
@@ -56,4 +59,5 @@ export const useUiStore = create<UiState>((set) => ({
   togglePalette: () => set((st) => ({ paletteOpen: !st.paletteOpen })),
   setSettingsOpen: (v) => set({ settingsOpen: v }),
   setEnvOpen: (v) => set({ envOpen: v }),
+  setOnboardingOpen: (v) => set({ onboardingOpen: v }),
 }));

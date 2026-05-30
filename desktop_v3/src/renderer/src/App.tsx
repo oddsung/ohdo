@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Discord-like 3-column 셸: 서버 레일 + 세션 사이드바 + 채팅/스텝 + Monaco 코드 뷰어 + 콘솔.
 // 전역: 단축키(useShortcuts) + 요소 선택 오버레이(PickOverlay) + 토스트(Toaster).
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { createSession, fetchSession, fetchBlocks } from "./api/client";
@@ -17,6 +18,7 @@ import { CodeViewer } from "./components/CodeViewer";
 import { LogConsole } from "./components/LogConsole";
 import { PickOverlay } from "./components/PickOverlay";
 import { CommandPalette } from "./components/CommandPalette";
+import { OnboardingWizard, shouldShowOnboarding } from "./components/OnboardingWizard";
 import { TabBar } from "./components/TabBar";
 import { Toaster } from "./components/Toaster";
 
@@ -88,7 +90,14 @@ export default function App() {
   const selectedSessionId = useUiStore((st) => st.selectedSessionId);
   const selectSession = useUiStore((st) => st.selectSession);
   const togglePalette = useUiStore((st) => st.togglePalette);
+  const onboardingOpen = useUiStore((st) => st.onboardingOpen);
+  const setOnboardingOpen = useUiStore((st) => st.setOnboardingOpen);
   const cancelPick = usePickStore((st) => st.cancelPick);
+
+  // 첫 실행이면 온보딩 위저드 자동 오픈 (localStorage 플래그로 1회만).
+  useEffect(() => {
+    if (shouldShowOnboarding()) setOnboardingOpen(true);
+  }, [setOnboardingOpen]);
 
   // 전역 단축키용 실행 훅 — 세션 미선택 시 빈 문자열(핸들러에서 가드).
   const { run, stop } = useExecution(selectedSessionId ?? "");
@@ -134,6 +143,7 @@ export default function App() {
       </div>
       <PickOverlay />
       <CommandPalette />
+      {onboardingOpen && <OnboardingWizard onClose={() => setOnboardingOpen(false)} />}
       <Toaster />
     </div>
   );

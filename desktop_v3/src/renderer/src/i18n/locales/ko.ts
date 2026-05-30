@@ -25,6 +25,7 @@ export const ko = {
     toDarkTheme: "다크 테마로",
     toKorean: "한국어로",
     toEnglish: "English 로",
+    help: "시작 안내 다시 보기",
   },
   chat: {
     title: "ohdo desktop v3",
@@ -187,6 +188,28 @@ export const ko = {
     allRequiredOk: "필수 모두 설치됨",
     someRequiredMissing: "일부 필수 누락",
   },
+  onboarding: {
+    title: "ohdo 시작하기",
+    step: "{{n}} / {{total}} 단계",
+    back: "이전",
+    next: "다음",
+    skip: "건너뛰기",
+    finish: "시작하기",
+    welcomeTitle: "ohdo 에 오신 것을 환영합니다 👋",
+    welcomeBody:
+      "ohdo 는 AI 와 대화하며 Windows 데스크톱·웹 자동화 코드를 단계별로 만들고 실행하는 도구입니다. 몇 단계만 둘러보면 바로 시작할 수 있어요.",
+    chooseLang: "언어",
+    envTitle: "환경 점검",
+    envBody:
+      "자동화를 실행하려면 Python 과 몇 가지 패키지가 필요합니다. 아래에서 현재 환경 상태를 확인하세요. 누락된 항목이 있어도 지금 진행할 수 있고, 나중에 환경 점검에서 다시 볼 수 있습니다.",
+    engineTitle: "AI 엔진 선택",
+    engineBody: "코드를 생성할 AI 엔진을 고르세요. 나중에 헤더나 설정에서 언제든 바꿀 수 있습니다.",
+    noEngines: "등록된 AI 엔진이 없습니다. 설정에서 ai 섹션을 구성한 뒤 다시 시도하세요.",
+    finishTitle: "준비 완료!",
+    finishBody:
+      "이제 세션을 만들고 자연어로 작업을 요청하면 AI 가 코드를 생성합니다. Ctrl+K 로 커맨드 팔레트를 열어 빠르게 이동할 수 있습니다.",
+    createFirst: "첫 세션 만들기",
+  },
   palette: {
     placeholder: "명령을 입력하세요…",
     empty: "일치하는 명령이 없습니다",
@@ -200,6 +223,7 @@ export const ko = {
     exportSession: "현재 세션 내보내기",
     importProject: "프로젝트 가져오기",
     environment: "환경 점검",
+    onboarding: "시작 안내 보기",
     settings: "설정 열기",
     toggleTheme: "테마 전환",
     toggleLanguage: "언어 전환 (KO/EN)",
