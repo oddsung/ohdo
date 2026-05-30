@@ -3,20 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import {
-  Activity,
-  Copy,
-  Download,
-  HelpCircle,
-  Languages,
-  Moon,
-  Pencil,
-  Plus,
-  Settings,
-  Sun,
-  Trash2,
-  Upload,
-} from "lucide-react";
+import { Copy, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import {
   createSession,
   deleteSession,
@@ -31,9 +18,7 @@ import {
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { EnvironmentDialog } from "@/components/EnvironmentDialog";
 import { useUiStore } from "@/store/uiStore";
-import { useThemeStore } from "@/store/themeStore";
 import { toast } from "@/store/toastStore";
-import { currentLang, setLang } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -153,23 +138,18 @@ function SessionRow({
 
 export function SessionSidebar() {
   const qc = useQueryClient();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const select = useUiStore((st) => st.selectSession);
   const closeTab = useUiStore((st) => st.closeTab);
   const settingsOpen = useUiStore((st) => st.settingsOpen);
   const setSettingsOpen = useUiStore((st) => st.setSettingsOpen);
   const envOpen = useUiStore((st) => st.envOpen);
   const setEnvOpen = useUiStore((st) => st.setEnvOpen);
-  const setOnboardingOpen = useUiStore((st) => st.setOnboardingOpen);
   const [creating, setCreating] = useState(false);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["sessions"],
     queryFn: fetchSessions,
   });
-
-  const theme = useThemeStore((st) => st.theme);
-  const toggleTheme = useThemeStore((st) => st.toggle);
-  const lang = (i18n.language || currentLang()).startsWith("ko") ? "ko" : "en";
 
   const createMut = useMutation({
     mutationFn: () => {
@@ -319,55 +299,9 @@ export function SessionSidebar() {
           ))}
         </div>
       </ScrollArea>
-      <footer className="flex items-center justify-between border-t border-black/20 px-4 py-2">
+      <footer className="flex items-center border-t border-black/20 px-4 py-2">
+        {/* 전역 유틸(도움말/환경/설정/언어/테마)은 ServerRail 로 이동(§59). 여기는 브리지 상태만. */}
         <HealthDot />
-        <div className="flex items-center gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 text-discord-muted hover:text-white"
-            title={t("sidebar.help")}
-            onClick={() => setOnboardingOpen(true)}
-          >
-            <HelpCircle className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 text-discord-muted hover:text-white"
-            title={t("env.title")}
-            onClick={() => setEnvOpen(true)}
-          >
-            <Activity className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 text-discord-muted hover:text-white"
-            title={t("settings.title")}
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 text-discord-muted hover:text-white"
-            title={lang === "ko" ? t("sidebar.toEnglish") : t("sidebar.toKorean")}
-            onClick={() => setLang(lang === "ko" ? "en" : "ko")}
-          >
-            <Languages className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 text-discord-muted hover:text-white"
-            title={theme === "dark" ? t("sidebar.toLightTheme") : t("sidebar.toDarkTheme")}
-            onClick={toggleTheme}
-          >
-            {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
       </footer>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {envOpen && <EnvironmentDialog onClose={() => setEnvOpen(false)} />}

@@ -26,6 +26,7 @@ export const ko = {
     toKorean: "한국어로",
     toEnglish: "English 로",
     help: "시작 안내 다시 보기",
+    home: "홈 (선택 해제)",
   },
   chat: {
     title: "ohdo desktop v3",

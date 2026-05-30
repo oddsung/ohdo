@@ -19,18 +19,9 @@ import { LogConsole } from "./components/LogConsole";
 import { PickOverlay } from "./components/PickOverlay";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingWizard, shouldShowOnboarding } from "./components/OnboardingWizard";
+import { ServerRail } from "./components/ServerRail";
 import { TabBar } from "./components/TabBar";
 import { Toaster } from "./components/Toaster";
-
-function ServerRail() {
-  return (
-    <div className="flex h-full w-[72px] flex-col items-center gap-2 bg-discord-rail py-3">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-discord-accent text-lg font-bold text-white">
-        oh
-      </div>
-    </div>
-  );
-}
 
 function CodePane({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();

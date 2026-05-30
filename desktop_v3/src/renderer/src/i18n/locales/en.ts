@@ -28,6 +28,7 @@ export const en: Catalog = {
     toKorean: "Switch to Korean",
     toEnglish: "Switch to English",
     help: "Show the getting-started guide",
+    home: "Home (clear selection)",
   },
   chat: {
     title: "ohdo desktop v3",
