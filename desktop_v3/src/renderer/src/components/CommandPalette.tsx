@@ -70,7 +70,7 @@ export function CommandPalette() {
   const { running, run, stop } = useExecution(selectedSessionId ?? "");
   const recording = useRecordStore((s) => s.recording);
   const startRec = useRecordStore((s) => s.start);
-  const stopRec = useRecordStore((s) => s.stopCommit);
+  const stopRec = useRecordStore((s) => s.stopReview);
   const startPick = usePickStore((s) => s.startPick);
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
@@ -123,10 +123,7 @@ export function CommandPalette() {
             id: "stop-rec",
             label: t("palette.stopRecording"),
             icon: <Square className="h-4 w-4" />,
-            run: () =>
-              stopRec(selectedSessionId, () =>
-                qc.invalidateQueries({ queryKey: ["session", selectedSessionId] }),
-              ),
+            run: () => stopRec(selectedSessionId),
           }
         : { id: "start-rec", label: t("palette.startRecording"), icon: <Circle className="h-4 w-4" />, run: () => startRec(selectedSessionId) },
     );

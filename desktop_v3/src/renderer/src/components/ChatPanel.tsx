@@ -428,11 +428,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 variant="secondary"
                 className="h-7"
                 disabled={recBusy}
-                onClick={() =>
-                  stopRec(sessionId, () =>
-                    qc.invalidateQueries({ queryKey: ["session", sessionId] }),
-                  )
-                }
+                onClick={() => stopRec(sessionId)}
                 title={t("chat.recordStopTitle")}
               >
                 {recBusy ? (

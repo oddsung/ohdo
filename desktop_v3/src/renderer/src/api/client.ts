@@ -227,6 +227,25 @@ export function recordingCancel(): Promise<{ success: boolean; was_recording: bo
   return apiFetch("/recording/cancel", { method: "POST" });
 }
 
+/** 녹화 종료 + 변환된 step 을 commit 없이 반환 (handoff §63, 백로그 #22 review). */
+export function recordingStopPreview(sessionId: string): Promise<{ steps: Step[] }> {
+  return apiFetch(`/sessions/${sessionId}/recording/stop_preview`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+/** review 후 확정 step 을 세션에 커밋 (handoff §63). 빈 목록이면 모두 버림. */
+export function recordingCommit(
+  sessionId: string,
+  steps: Step[],
+): Promise<{ step_count: number; session: SessionDetail }> {
+  return apiFetch(`/sessions/${sessionId}/recording/commit`, {
+    method: "POST",
+    body: JSON.stringify({ steps }),
+  });
+}
+
 // ── v3 패리티 (A)유형 세션/step 변경 (§47) ───────────
 
 export async function renameSession(sessionId: string, title: string): Promise<SessionDetail> {

@@ -65,8 +65,8 @@ class RecordingController:
         self._stopped_event = threading.Event()
 
         self._session_id: Optional[str] = None
-        self._mode: str = "commit"  # "commit" | "cancel"
-        self._steps = None  # stop_recording 결과 (list[Step]) — commit 모드
+        self._mode: str = "commit"  # "commit" | "preview" | "cancel"
+        self._steps = None  # stop_recording 결과 (list[Step]) — commit/preview 모드
         self._start_error: Optional[BaseException] = None
         self._stop_error: Optional[BaseException] = None
 
@@ -100,7 +100,8 @@ class RecordingController:
         """녹화 종료 신호 → 펌프 스레드가 같은 스레드에서 stop_recording.
 
         Returns:
-            ``mode="commit"`` 이면 변환된 step 리스트, ``cancel`` 이면 None.
+            ``mode in ("commit", "preview")`` 이면 변환된 step 리스트, ``cancel`` 이면 None.
+            "preview"(handoff §63)는 커밋하지 않고 step 만 돌려준다 — review 후 commit_steps.
         """
         if not self.is_active():
             return None
@@ -111,6 +112,16 @@ class RecordingController:
         if self._stop_error is not None:
             raise self._stop_error
         return self._steps
+
+    def commit_steps(self, session_id: str, steps: list):
+        """녹화 review 후 확정 step 을 세션에 커밋 (handoff §63, 백로그 #22).
+
+        ``commit_recording`` 은 순수 데이터(세션 append + save)라 LL 후크/펌프 스레드와
+        무관 — 호출(요청) 스레드에서 직접 실행해도 안전(stop("preview") 로 펌프 종료 후).
+        """
+        return self._get_service().commit_recording(  # type: ignore[attr-defined]
+            edited_steps=steps, target_session_id=session_id
+        )
 
     # ── 펌프 스레드 본체 ──────────────────────────────
 
@@ -152,7 +163,9 @@ class RecordingController:
         finally:
             # stop_recording / 훅 해제는 반드시 같은 스레드에서 (UnhookWindowsHookEx 제약).
             try:
-                if self._mode == "commit":
+                if self._mode in ("commit", "preview"):
+                    # commit/preview 둘 다 변환된 step 을 _steps 에 보존. preview(handoff §63)
+                    # 는 커밋하지 않고 review 후 commit_steps 로 별도 커밋.
                     self._steps = service.stop_recording(  # type: ignore[attr-defined]
                         self_window_titles=["ohdo"]
                     )

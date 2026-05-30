@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// 작업 녹화 상태 (handoff §41 #3). recorder 는 서버(브리지)에서 글로벌 입력 훅으로
-// 이벤트를 누적하므로, 프런트는 status 를 polling 해서 event_count 만 표시한다.
+// 작업 녹화 상태 (handoff §41 + §63 review) — start/marker/cancel + 이벤트 수 polling.
+// 종료(stop)는 §63 부터 **즉시 commit 하지 않고** review 다이얼로그로: stop_preview 로
+// 변환된 step 을 받아 사용자가 검토/편집/삭제 후 commit. Windows LL 후크 캡처는 Python
+// 브리지(api_server)가 수행 — 여기선 호출 + 상태만.
 import { create } from "zustand";
 import {
-  recordingCancel,
-  recordingMarker,
   recordingStart,
   recordingStatus,
-  recordingStopCommit,
+  recordingMarker,
+  recordingStopPreview,
+  recordingCommit,
+  recordingCancel,
+  type Step,
 } from "@/api/client";
 import { toast } from "@/store/toastStore";
 import i18n from "@/i18n";
@@ -15,44 +19,46 @@ import i18n from "@/i18n";
 interface RecordState {
   recording: boolean;
   eventCount: number;
-  busy: boolean; // start/stop 처리 중
-  _poll: number | null;
+  busy: boolean;
+  // ── review (§63) ──
+  reviewOpen: boolean;
+  reviewSessionId: string | null;
+  previewSteps: Step[];
   start: (sessionId: string) => Promise<void>;
   marker: () => Promise<void>;
-  stopCommit: (sessionId: string, onCommitted?: () => void) => Promise<void>;
+  stopReview: (sessionId: string) => Promise<void>;
+  commitReview: (steps: Step[], onDone?: () => void) => Promise<void>;
+  discardReview: () => void;
   cancel: () => Promise<void>;
+  _poll: ReturnType<typeof setInterval> | null;
 }
 
 export const useRecordStore = create<RecordState>((set, get) => ({
   recording: false,
   eventCount: 0,
   busy: false,
+  reviewOpen: false,
+  reviewSessionId: null,
+  previewSteps: [],
   _poll: null,
 
   start: async (sessionId) => {
-    if (get().recording || get().busy) return;
     set({ busy: true });
     try {
       await recordingStart(sessionId);
-      set({ recording: true, eventCount: 0 });
-      // 녹화 중 대상 앱 조작을 가리지 않도록 메인 윈도우 최소화 (element picker 와 동일 UX, §49).
       await window.ohdo.minimizeForRecord().catch(() => {});
-      toast.success(i18n.t("record.started"));
-      const poll = window.setInterval(async () => {
+      set({ recording: true, eventCount: 0 });
+      const poll = setInterval(async () => {
         try {
           const st = await recordingStatus();
-          set({ eventCount: st.event_count, recording: st.is_recording });
-          if (!st.is_recording) {
-            const id = get()._poll;
-            if (id) window.clearInterval(id);
-            set({ _poll: null });
-          }
+          set({ eventCount: st.event_count });
         } catch {
-          /* 일시 오류 무시 */
+          /* ignore */
         }
       }, 1000);
       set({ _poll: poll });
     } catch (e) {
+      set({ recording: false });
       toast.error(i18n.t("record.startFailed", { message: (e as Error).message }));
     } finally {
       set({ busy: false });
@@ -62,26 +68,36 @@ export const useRecordStore = create<RecordState>((set, get) => ({
   marker: async () => {
     try {
       await recordingMarker();
-      toast.info(i18n.t("record.markerAdded"));
+      toast.success(i18n.t("record.markerAdded"));
     } catch (e) {
       toast.error(i18n.t("record.markerFailed", { message: (e as Error).message }));
     }
   },
 
-  stopCommit: async (sessionId, onCommitted) => {
-    if (!get().recording || get().busy) return;
+  // 종료 → 변환된 step 을 commit 없이 받아 review 다이얼로그 오픈 (§63).
+  stopReview: async (sessionId) => {
+    const poll = get()._poll;
+    if (poll) clearInterval(poll);
     set({ busy: true });
-    const id = get()._poll;
-    if (id) window.clearInterval(id);
-    set({ _poll: null });
     try {
-      const res = await recordingStopCommit(sessionId);
-      set({ recording: false, eventCount: 0 });
+      const r = await recordingStopPreview(sessionId);
+      // 메인 윈도우 복원 — 사용자가 review 다이얼로그를 조작해야 함.
       await window.ohdo.restoreFromRecord().catch(() => {});
-      toast.success(i18n.t("record.complete", { count: res.step_count }));
-      onCommitted?.();
+      if (r.steps.length === 0) {
+        set({ recording: false, eventCount: 0, _poll: null, previewSteps: [], reviewOpen: false });
+        toast.info(i18n.t("review.empty"));
+        return;
+      }
+      set({
+        recording: false,
+        eventCount: 0,
+        _poll: null,
+        previewSteps: r.steps,
+        reviewSessionId: sessionId,
+        reviewOpen: true,
+      });
     } catch (e) {
-      set({ recording: false });
+      set({ recording: false, _poll: null });
       await window.ohdo.restoreFromRecord().catch(() => {});
       toast.error(i18n.t("record.saveFailed", { message: (e as Error).message }));
     } finally {
@@ -89,17 +105,42 @@ export const useRecordStore = create<RecordState>((set, get) => ({
     }
   },
 
+  // review 확정 → 편집된 step 커밋 (§63).
+  commitReview: async (steps, onDone) => {
+    const sessionId = get().reviewSessionId;
+    if (!sessionId) return;
+    set({ busy: true });
+    try {
+      const r = await recordingCommit(sessionId, steps);
+      set({ reviewOpen: false, reviewSessionId: null, previewSteps: [] });
+      toast.success(i18n.t("record.complete", { count: r.step_count }));
+      onDone?.();
+    } catch (e) {
+      toast.error(i18n.t("record.saveFailed", { message: (e as Error).message }));
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  // review 취소 → 커밋 없이 버림 (녹화는 이미 stop_preview 로 종료됨).
+  discardReview: () => {
+    set({ reviewOpen: false, reviewSessionId: null, previewSteps: [] });
+    toast.info(i18n.t("review.discarded"));
+  },
+
   cancel: async () => {
-    const id = get()._poll;
-    if (id) window.clearInterval(id);
-    set({ _poll: null });
+    set({ busy: true });
     try {
       await recordingCancel();
-    } catch {
-      /* best-effort */
+      const poll = get()._poll;
+      if (poll) clearInterval(poll);
+      await window.ohdo.restoreFromRecord().catch(() => {});
+      set({ recording: false, eventCount: 0, _poll: null });
+      toast.success(i18n.t("record.canceled"));
+    } catch (e) {
+      toast.error(i18n.t("record.cancelFailed", { message: (e as Error).message }));
+    } finally {
+      set({ busy: false });
     }
-    await window.ohdo.restoreFromRecord().catch(() => {});
-    set({ recording: false, eventCount: 0, busy: false });
-    toast.info(i18n.t("record.canceled"));
   },
 }));

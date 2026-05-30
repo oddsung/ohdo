@@ -19,6 +19,7 @@ import { LogConsole } from "./components/LogConsole";
 import { PickOverlay } from "./components/PickOverlay";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingWizard, shouldShowOnboarding } from "./components/OnboardingWizard";
+import { RecordingReviewDialog } from "./components/RecordingReviewDialog";
 import { ServerRail } from "./components/ServerRail";
 import { TabBar } from "./components/TabBar";
 import { Toaster } from "./components/Toaster";
@@ -135,6 +136,7 @@ export default function App() {
       <PickOverlay />
       <CommandPalette />
       {onboardingOpen && <OnboardingWizard onClose={() => setOnboardingOpen(false)} />}
+      <RecordingReviewDialog />
       <Toaster />
     </div>
   );

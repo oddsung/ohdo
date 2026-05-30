@@ -12943,6 +12943,70 @@ if __name__ == "__main__":
         empty = client.post("/secrets/scan", json={"text": "안녕하세요 평범한 문장입니다"})
         self.assert_equal(empty.status_code, 200, "scan(평문 없음) 200")
 
+    def test_227_api_server_recording_review_routes(self):
+        """[handoff §63 #22] 녹화 review — stop_preview(커밋 X) + commit(편집 step) 라우트.
+
+        core 0줄: AppService.stop_recording/get_recorded_steps/commit_recording 의 기존
+        분리를 RecordingController 가 조합(preview 모드=stop+변환, commit_steps=commit).
+        실제 녹화는 LL 후크라 테스트 불가 — 라우트/컨트롤러 메서드/Step 재구성/가드만 검증.
+        """
+        import tempfile
+
+        from api_server.server import create_app
+
+        self.step("(1) stop_preview/commit 라우트 등록")
+        app = create_app(token="", data_dir=tempfile.mkdtemp(prefix="ohdo_rev_"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(
+            ("/sessions/{session_id}/recording/stop_preview", "POST") in pairs,
+            "POST stop_preview 라우트 필수",
+        )
+        self.assert_true(
+            ("/sessions/{session_id}/recording/commit", "POST") in pairs,
+            "POST recording/commit 라우트 필수",
+        )
+
+        self.step("(2) RecordingController 메서드 + core 분리 API (core 0줄 가드)")
+        from api_server.recording_pump import RecordingController
+        from core.app_service import AppService
+
+        for name in ("stop", "commit_steps"):
+            self.assert_true(hasattr(RecordingController, name), f"RecordingController.{name} 필수")
+        # core 분리 — stop_recording 이 변환된 step 반환, commit_recording 이 세션 커밋(2분리).
+        for name in ("stop_recording", "commit_recording"):
+            self.assert_true(hasattr(AppService, name), f"AppService.{name} 필수(core 분리)")
+
+        self.step("(3) Step 재구성 — 미지 키 무시 + 메타 round-trip")
+        from core.session_manager import Step
+
+        fields = Step.__dataclass_fields__
+        d = {
+            "user_request": "r1",
+            "generated_code": "print(1)",
+            "element_meta": {"control_type": "Button"},
+            "_ui_only": "x",
+        }
+        s = Step(**{k: v for k, v in d.items() if k in fields})
+        self.assert_equal(s.generated_code, "print(1)", "generated_code 보존")
+        self.assert_true(s.element_meta == {"control_type": "Button"}, "element_meta round-trip")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트/메서드 가드까지만")
+            return
+
+        client = TestClient(app)
+        self.step("(4) 가드 — 없는 세션 commit 404 / 녹화 중 아님 stop_preview 409")
+        c404 = client.post("/sessions/nope/recording/commit", json={"steps": []})
+        self.assert_equal(c404.status_code, 404, "없는 세션 commit 404")
+        p409 = client.post("/sessions/any/recording/stop_preview")
+        self.assert_equal(p409.status_code, 409, "녹화 중 아님 stop_preview 409")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
