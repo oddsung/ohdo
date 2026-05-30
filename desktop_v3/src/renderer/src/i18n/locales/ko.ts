@@ -153,6 +153,7 @@ export const ko = {
     engineConfig: "{{engine}} 설정",
     noEngines: "등록된 AI 엔진이 없습니다 (config/settings.json 의 ai 섹션 확인).",
     secretHint: "api_key 등 비밀값은 마스킹됩니다. 이 설정은 v2(PySide6)와 공유됩니다.",
+    advanced: "고급 (전체 섹션)",
   },
   app: {
     welcome: "👋 ohdo desktop_v3",

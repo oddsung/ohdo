@@ -155,6 +155,7 @@ export const en: Catalog = {
     engineConfig: "{{engine}} config",
     noEngines: "No AI engines configured (check the ai section in config/settings.json).",
     secretHint: "Secrets like api_key are masked. These settings are shared with v2 (PySide6).",
+    advanced: "Advanced (all sections)",
   },
   app: {
     welcome: "👋 ohdo desktop_v3",

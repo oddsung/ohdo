@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Loader2, X } from "lucide-react";
+import { ChevronDown, Loader2, X } from "lucide-react";
 import { fetchSettings, saveSettings, type AppSettings } from "@/api/client";
 import { toast } from "@/store/toastStore";
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,104 @@ function Field({
   );
 }
 
+/** 문자열 배열 필드 — 쉼표로 편집 (예: recognition.preferred_methods). 비-문자열 배열은 읽기전용. */
+function ArrayField({
+  k,
+  value,
+  onChange,
+}: {
+  k: string;
+  value: unknown[];
+  onChange: (v: unknown) => void;
+}) {
+  const id = `set-${k}`;
+  const allStrings = value.every((x) => typeof x === "string");
+  if (!allStrings) {
+    return (
+      <div className="py-1">
+        <label className="mb-0.5 block font-mono text-xs text-zinc-400">{k}</label>
+        <div className="font-mono text-[11px] text-zinc-500">{JSON.stringify(value)}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="py-1">
+      <label htmlFor={id} className="mb-0.5 block font-mono text-xs text-zinc-400">
+        {k}
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={(value as string[]).join(", ")}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          )
+        }
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+      />
+    </div>
+  );
+}
+
+/** 섹션(dict) 내부 필드들을 타입별로 렌더 — path 기반 onChange 로 중첩 갱신. */
+function GenericFields({
+  obj,
+  path,
+  onChange,
+}: {
+  obj: Dict;
+  path: string[];
+  onChange: (p: string[], v: unknown) => void;
+}) {
+  return (
+    <>
+      {Object.entries(obj).map(([k, v]) => {
+        const p = [...path, k];
+        if (Array.isArray(v)) {
+          return <ArrayField key={k} k={k} value={v} onChange={(nv) => onChange(p, nv)} />;
+        }
+        if (v && typeof v === "object") {
+          return (
+            <div key={k} className="mt-1">
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500">{k}</div>
+              <div className="border-l border-zinc-800 pl-2">
+                <GenericFields obj={v as Dict} path={p} onChange={onChange} />
+              </div>
+            </div>
+          );
+        }
+        return <Field key={k} k={k} value={v} onChange={(nv) => onChange(p, nv)} />;
+      })}
+    </>
+  );
+}
+
+/** 접이식 설정 섹션 (기본 접힘). */
+function ConfigSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between py-1 text-left"
+      >
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{title}</h3>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-zinc-500 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">{children}</div>
+      )}
+    </section>
+  );
+}
+
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -106,6 +204,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       nengines[selected] = { ...nengines[selected], [key]: v };
       return next as AppSettings;
     });
+
+  // 일반 섹션(ai 외)의 path 기반 갱신 — 중첩 dict 도 안전하게 set.
+  const setByPath = (path: string[], v: unknown) =>
+    setDraft((d) => {
+      if (!d) return d;
+      const next = structuredClone(d) as Dict;
+      let cur = next;
+      for (let i = 0; i < path.length - 1; i++) cur = cur[path[i]] as Dict;
+      cur[path[path.length - 1]] = v;
+      return next as AppSettings;
+    });
+
+  // ai 를 제외한 모든 top-level dict 섹션 (image/recognition/execution/ui/...).
+  const otherSections = draft
+    ? Object.entries(draft).filter(
+        ([k, v]) => k !== "ai" && v != null && typeof v === "object" && !Array.isArray(v),
+      )
+    : [];
 
   return (
     <div
@@ -174,6 +290,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   </div>
                   <p className="mt-1 text-[11px] text-zinc-500">{t("settings.secretHint")}</p>
                 </section>
+              )}
+
+              {otherSections.length > 0 && (
+                <div className="space-y-1">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    {t("settings.advanced")}
+                  </h3>
+                  {otherSections.map(([k, v]) => (
+                    <ConfigSection key={k} title={k}>
+                      <GenericFields obj={v as Dict} path={[k]} onChange={setByPath} />
+                    </ConfigSection>
+                  ))}
+                </div>
               )}
             </>
           )}
