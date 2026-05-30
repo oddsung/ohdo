@@ -28,6 +28,7 @@ let pyProc: ChildProcessWithoutNullStreams | null = null;
 let apiInfo: ApiInfo | null = null;
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
+let overlayTopmostTimer: ReturnType<typeof setInterval> | null = null;
 
 /** 프로젝트 루트 = desktop_v3/ 의 부모. dev 에서 .venv 와 api_server 가 여기에 있다. */
 function projectRoot(): string {
@@ -261,6 +262,14 @@ function createPickOverlay(): void {
   // 마우스 이동 이벤트는 받아 cursor 표시 유지.
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  // Windows 작업표시줄도 topmost — topmost 창끼리는 "마지막에 최상단으로 올린 창"이
+  // 이긴다(v2 element_picker._force_topmost 타이머 패턴과 동일 원리). 작업표시줄이 z-order
+  // 를 되찾아 붉은 박스를 가리지 않도록 주기적으로 재적용한다(focusable:false 라 포커스 X).
+  overlayTopmostTimer = setInterval(() => {
+    if (!overlayWindow) return;
+    overlayWindow.setAlwaysOnTop(true, "screen-saver");
+    overlayWindow.moveTop();
+  }, 250);
 
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) {
@@ -276,6 +285,10 @@ function createPickOverlay(): void {
 }
 
 function closePickOverlay(): void {
+  if (overlayTopmostTimer) {
+    clearInterval(overlayTopmostTimer);
+    overlayTopmostTimer = null;
+  }
   if (overlayWindow) {
     overlayWindow.destroy();
     overlayWindow = null;
