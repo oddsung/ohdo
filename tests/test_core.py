@@ -12599,6 +12599,61 @@ if __name__ == "__main__":
         res = client.get("/sessions/__nonexistent__/blocks")
         self.assert_equal(res.status_code, 404, "없는 세션 blocks 404")
 
+    def test_221_api_server_session_duplicate_route(self):
+        """[api_server §47] 세션 복제 라우트 (백로그 #12) — create_session + steps 깊은 복사.
+
+        core 에 duplicate 메서드가 없어 api_server 가 공개 API 조합으로 구현(core 0줄).
+        원본 steps/generated_code 보존 + 새 session_id + 복제본의 원본 독립성. 없는 세션 404.
+        """
+        import tempfile
+
+        from api_server.server import create_app
+
+        self.step("(1) duplicate 라우트 노출")
+        app = create_app(token="", data_dir=tempfile.mkdtemp(prefix="ohdo_dup_"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(
+            ("/sessions/{session_id}/duplicate", "POST") in pairs,
+            "POST /sessions/{session_id}/duplicate 라우트 필수",
+        )
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 - 라우트 가드까지만")
+            return
+
+        from api_server.deps import get_app_service
+        from core.session_manager import Step
+
+        self.step("(2) 원본 세션 + step 준비")
+        service = get_app_service(app)
+        src = service.create_session(title="dup-src", project_type="desktop")
+        service.add_step(src.session_id, Step(user_request="r1", generated_code="print('x')"))
+
+        self.step("(3) POST duplicate -> 새 세션 + steps 보존")
+        client = TestClient(app)
+        res = client.post(f"/sessions/{src.session_id}/duplicate", json={})
+        self.assert_equal(res.status_code, 200, "duplicate 200")
+        dup = res.json()["session"]
+        self.assert_true(dup["session_id"] != src.session_id, "복제본은 새 session_id")
+        self.assert_equal(dup["title"], "dup-src (copy)", "title 미지정 시 '(copy)' fallback")
+        self.assert_equal(len(dup["steps"]), 1, "steps 1개 복사")
+        self.assert_equal(dup["steps"][0]["generated_code"], "print('x')", "generated_code 보존")
+
+        self.step("(4) 독립성 - 원본 step 추가가 복제본에 영향 없음")
+        service.add_step(src.session_id, Step(user_request="r2", generated_code="print('y')"))
+        dup_fresh = service.get_session(dup["session_id"])
+        self.assert_equal(len(dup_fresh.steps), 1, "복제본 steps 는 원본 변경과 독립")
+
+        self.step("(5) 없는 세션 404")
+        res2 = client.post("/sessions/__nope__/duplicate", json={})
+        self.assert_equal(res2.status_code, 404, "없는 세션 duplicate 404")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

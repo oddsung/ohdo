@@ -221,6 +221,15 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await apiFetch(`/sessions/${sessionId}`, { method: "DELETE" });
 }
 
+/** 세션 복제 (§47 #12) — steps/코드 포함 새 세션 생성. title 은 locale 별로 프론트가 전달. */
+export async function duplicateSession(sessionId: string, title?: string): Promise<SessionDetail> {
+  const data = await apiFetch<{ session: SessionDetail }>(`/sessions/${sessionId}/duplicate`, {
+    method: "POST",
+    body: JSON.stringify({ title: title ?? null }),
+  });
+  return data.session;
+}
+
 export async function deleteStep(sessionId: string, stepId: number): Promise<SessionDetail> {
   const data = await apiFetch<{ session: SessionDetail }>(
     `/sessions/${sessionId}/steps/${stepId}`,

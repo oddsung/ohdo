@@ -80,6 +80,16 @@ class RenameSessionRequest(BaseModel):
     title: str
 
 
+class DuplicateSessionRequest(BaseModel):
+    """세션 복제 (handoff §47 백로그 #12). title 미지정 시 서버가 '<원본> (copy)' fallback.
+
+    core 에 duplicate 메서드가 없어 api_server 가 공개 API 조합으로 구현 (core 0줄).
+    프론트가 locale 별 제목을 넘기도록 optional.
+    """
+
+    title: str | None = None
+
+
 class MoveStepRequest(BaseModel):
     """step 이동 (handoff §47 백로그 #5 — move_step 위임)."""
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api_server.deps import (
     CreateSessionRequest,
+    DuplicateSessionRequest,
     GenerateRequest,
     RenameSessionRequest,
     drop_kernel,
@@ -16,6 +17,27 @@ from api_server.deps import (
 )
 
 router = APIRouter()
+
+
+def _copy_session_assets(service, src_id: str, dst_id: str) -> None:
+    """캡처/스크립트 파일 best-effort 복사 (저장소가 파일 기반일 때만, 실패 무시).
+
+    데이터(steps/metadata)는 save_session 으로 이미 복제됨 — 이 함수는 첨부 이미지 등
+    파일 자산이 원본 폴더에만 남아 원본 삭제 시 깨지는 것을 막기 위한 보강.
+    """
+    import shutil
+
+    try:
+        manager = getattr(getattr(service, "_repo", None), "manager", None)
+        sessions_dir = getattr(manager, "sessions_dir", None)
+        if sessions_dir is None:
+            return
+        for sub in ("captures", "scripts"):
+            src = sessions_dir / src_id / sub
+            if src.exists():
+                shutil.copytree(src, sessions_dir / dst_id / sub, dirs_exist_ok=True)
+    except Exception:
+        pass
 
 
 @router.get("/sessions")
@@ -87,6 +109,42 @@ def delete_session(session_id: str, request: Request, _: None = Depends(require_
     service.delete_session(session_id)
     drop_kernel(app, session_id)
     return {"success": True, "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/duplicate")
+def duplicate_session(
+    session_id: str,
+    body: DuplicateSessionRequest,
+    request: Request,
+    _: None = Depends(require_token),
+) -> dict:
+    """세션 복제 (handoff §47 백로그 #12) — core 에 duplicate 메서드가 없어 api_server 가
+    공개 API 조합으로 구현 (core 0줄).
+
+    create_session 으로 새 세션을 만든 뒤 원본의 steps/workflow_metadata 를 깊은 복사로
+    이식하고 save_session. 캡처/스크립트 파일은 best-effort 폴더 복사. 없는 세션은 404.
+    """
+    import copy
+
+    service = get_app_service(request.app)
+    try:
+        src = service.get_session(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+
+    title = (body.title or "").strip() or f"{src.title} (copy)"
+    dup = service.create_session(
+        title=title,
+        project_type=src.project_type,
+        description=src.description,
+    )
+    dup.steps = copy.deepcopy(src.steps)
+    dup.workflow_metadata = copy.deepcopy(getattr(src, "workflow_metadata", {}) or {})
+    service.save_session(dup)
+
+    _copy_session_assets(service, src.session_id, dup.session_id)
+
+    return {"session": to_dict(service.get_session(dup.session_id))}
 
 
 @router.get("/sessions/{session_id}/blocks")

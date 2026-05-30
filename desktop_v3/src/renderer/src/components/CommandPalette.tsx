@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   Circle,
+  Copy,
   Hash,
   Languages,
   Moon,
@@ -16,7 +17,7 @@ import {
   Square,
   Sun,
 } from "lucide-react";
-import { createSession, fetchSessions } from "@/api/client";
+import { createSession, duplicateSession, fetchSessions } from "@/api/client";
 import { useUiStore } from "@/store/uiStore";
 import { usePickStore } from "@/store/pickStore";
 import { useRecordStore } from "@/store/recordStore";
@@ -122,6 +123,25 @@ export function CommandPalette() {
       label: t("palette.pickElement"),
       icon: <MousePointerClick className="h-4 w-4" />,
       run: () => startPick(),
+    });
+  }
+  if (selectedSessionId) {
+    const cur = (sessions ?? []).find((x) => x.session_id === selectedSessionId);
+    commands.push({
+      id: "duplicate",
+      label: t("palette.duplicateSession"),
+      icon: <Copy className="h-4 w-4" />,
+      run: () =>
+        duplicateSession(
+          selectedSessionId,
+          `${cur?.title || t("chat.untitled")} ${t("session.copySuffix")}`,
+        )
+          .then((s) => {
+            qc.invalidateQueries({ queryKey: ["sessions"] });
+            selectSession(s.session_id);
+            toast.success(t("session.duplicated"));
+          })
+          .catch((e) => toast.error(t("session.duplicateFailed", { message: (e as Error).message }))),
     });
   }
   commands.push({

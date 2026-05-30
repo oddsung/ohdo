@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Languages, Moon, Pencil, Plus, Settings, Sun, Trash2 } from "lucide-react";
+import { Copy, Languages, Moon, Pencil, Plus, Settings, Sun, Trash2 } from "lucide-react";
 import {
   createSession,
   deleteSession,
+  duplicateSession,
   fetchHealth,
   fetchSessions,
   renameSession,
@@ -39,11 +40,13 @@ function SessionRow({
   s,
   busy,
   onRename,
+  onDuplicate,
   onDelete,
 }: {
   s: SessionSummary;
   busy: boolean;
   onRename: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
@@ -77,6 +80,19 @@ function SessionRow({
             }}
           >
             <Pencil className="h-3 w-3" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-5 w-5 text-discord-muted hover:text-white"
+            title={t("session.duplicate")}
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuplicate();
+            }}
+          >
+            <Copy className="h-3 w-3" />
           </Button>
           <Button
             size="icon"
@@ -154,6 +170,19 @@ export function SessionSidebar() {
     },
     onError: (e: Error) => toast.error(t("session.deleteFailed", { message: e.message })),
   });
+  const duplicateMut = useMutation({
+    mutationFn: (s: SessionSummary) =>
+      duplicateSession(
+        s.session_id,
+        `${s.title || t("chat.untitled")} ${t("session.copySuffix")}`,
+      ),
+    onSuccess: (session) => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      select(session.session_id);
+      toast.success(t("session.duplicated"));
+    },
+    onError: (e: Error) => toast.error(t("session.duplicateFailed", { message: e.message })),
+  });
   const onRenameSession = (s: SessionSummary) => {
     const next = window.prompt(t("session.renamePrompt"), s.title || "");
     const title = (next ?? "").trim();
@@ -168,7 +197,9 @@ export function SessionSidebar() {
     ? renameMut.variables?.id
     : deleteMut.isPending
       ? deleteMut.variables
-      : null;
+      : duplicateMut.isPending
+        ? duplicateMut.variables?.session_id
+        : null;
 
   return (
     <aside className="flex h-full w-60 flex-col bg-discord-sidebar">
@@ -207,6 +238,7 @@ export function SessionSidebar() {
               s={s}
               busy={busyId === s.session_id}
               onRename={() => onRenameSession(s)}
+              onDuplicate={() => duplicateMut.mutate(s)}
               onDelete={() => onDeleteSession(s)}
             />
           ))}
