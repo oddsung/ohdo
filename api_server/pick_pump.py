@@ -161,7 +161,18 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
                 try:
                     user32.GetCursorPos(ctypes.byref(pt))
                     el = capture_element_at(int(pt.x), int(pt.y))
-                    _hover_rect = el.get("rect") if el else None
+                    # capture_element_at 의 rect 는 [left, top, right, bottom] 리스트 →
+                    # 프런트(main physicalRectToOverlayCss)가 키로 접근하므로 dict 로 정규화.
+                    r = el.get("rect") if el else None
+                    if r and len(r) == 4:
+                        _hover_rect = {
+                            "left": r[0],
+                            "top": r[1],
+                            "right": r[2],
+                            "bottom": r[3],
+                        }
+                    else:
+                        _hover_rect = None
                 except Exception:
                     _hover_rect = None
             time.sleep(0.005)
