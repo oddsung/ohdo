@@ -38,6 +38,8 @@ export function useExecution(sessionId: string) {
             toast.error(i18n.t("console.runError", { message: m }));
             setRunning(false);
             qc.invalidateQueries({ queryKey: ["session", sessionId] });
+            // 실행된 코드가 띄운 대상 앱이 포커스를 가져갔으므로 ohdo 창을 앞으로 (§49).
+            void window.ohdo.focusMainWindow().catch(() => {});
           },
           onDone: () => {
             if (useExecStore.getState().running) {
@@ -47,6 +49,8 @@ export function useExecution(sessionId: string) {
             setRunning(false);
             qc.invalidateQueries({ queryKey: ["session", sessionId] });
             qc.invalidateQueries({ queryKey: ["sessions"] });
+            // 실행된 코드가 띄운 대상 앱이 포커스를 가져갔으므로 ohdo 창을 앞으로 (§49).
+            void window.ohdo.focusMainWindow().catch(() => {});
           },
         });
       } catch (e) {
