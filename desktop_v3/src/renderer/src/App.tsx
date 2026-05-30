@@ -16,6 +16,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { CodeViewer } from "./components/CodeViewer";
 import { LogConsole } from "./components/LogConsole";
 import { PickOverlay } from "./components/PickOverlay";
+import { CommandPalette } from "./components/CommandPalette";
 import { Toaster } from "./components/Toaster";
 
 function ServerRail() {
@@ -85,6 +86,7 @@ export default function App() {
   const { t } = useTranslation();
   const selectedSessionId = useUiStore((st) => st.selectedSessionId);
   const selectSession = useUiStore((st) => st.selectSession);
+  const togglePalette = useUiStore((st) => st.togglePalette);
   const cancelPick = usePickStore((st) => st.cancelPick);
 
   // 전역 단축키용 실행 훅 — 세션 미선택 시 빈 문자열(핸들러에서 가드).
@@ -111,6 +113,7 @@ export default function App() {
     },
     onNewSession: () => newSessionMut.mutate(),
     onEscape: () => cancelPick(),
+    onCommandPalette: () => togglePalette(),
   });
 
   return (
@@ -126,6 +129,7 @@ export default function App() {
         <EmptyState />
       )}
       <PickOverlay />
+      <CommandPalette />
       <Toaster />
     </div>
   );

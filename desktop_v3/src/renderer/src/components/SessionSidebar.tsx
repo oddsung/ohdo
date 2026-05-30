@@ -109,8 +109,9 @@ export function SessionSidebar() {
   const { t, i18n } = useTranslation();
   const select = useUiStore((st) => st.selectSession);
   const selectedSessionId = useUiStore((st) => st.selectedSessionId);
+  const settingsOpen = useUiStore((st) => st.settingsOpen);
+  const setSettingsOpen = useUiStore((st) => st.setSettingsOpen);
   const [creating, setCreating] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["sessions"],
     queryFn: fetchSessions,

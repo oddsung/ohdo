@@ -149,6 +149,20 @@ export const ko = {
     pickOrCreate: "왼쪽에서 세션을 선택하거나 + 로 새로 만드세요.",
     hint: "세션을 열고 자연어로 작업을 요청하면 AI 가 Python 자동화 코드를 생성합니다.",
   },
+  palette: {
+    placeholder: "명령을 입력하세요…",
+    empty: "일치하는 명령이 없습니다",
+    newSession: "새 세션",
+    runAll: "전체 step 실행",
+    stop: "실행 중단",
+    startRecording: "녹화 시작",
+    stopRecording: "녹화 중단 후 저장",
+    pickElement: "요소 선택",
+    settings: "설정 열기",
+    toggleTheme: "테마 전환",
+    toggleLanguage: "언어 전환 (KO/EN)",
+    goToSession: "이동: {{title}}",
+  },
 };
 
 export type Catalog = typeof ko;

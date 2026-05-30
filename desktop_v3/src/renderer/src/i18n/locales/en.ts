@@ -151,4 +151,18 @@ export const en: Catalog = {
     pickOrCreate: "Select a session on the left or create one with +.",
     hint: "Open a session and describe a task; AI will generate Python automation code.",
   },
+  palette: {
+    placeholder: "Type a command…",
+    empty: "No matching commands",
+    newSession: "New session",
+    runAll: "Run all steps",
+    stop: "Stop execution",
+    startRecording: "Start recording",
+    stopRecording: "Stop recording & save",
+    pickElement: "Pick element",
+    settings: "Open settings",
+    toggleTheme: "Toggle theme",
+    toggleLanguage: "Toggle language (KO/EN)",
+    goToSession: "Go to: {{title}}",
+  },
 };
