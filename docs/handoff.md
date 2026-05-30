@@ -2691,6 +2691,7 @@ Electron Main (Node)  ──subprocess──>  python -m api_server  (자식 lif
 - **fix4 (b5abb1c) — 녹화 시 메인 최소화**: record:minimize/restore IPC + preload minimizeForRecord/restoreFromRecord + recordStore start 시 최소화 / stopCommit·cancel 시 복원 (picker 와 동일 UX). 사용자 요청.
 - **fix6 (627d1e7) — picker 마우스 끊김 + F3 일시정지**: (1) 마우스 느려짐 1차 진단 = LL 후크 스레드에서 UIA EFP 를 직접 호출 → UIA 를 별도 워커 스레드로 분리(§42/PR-17 drain 패턴), 후크 스레드는 펌프만. (2) F3 일시정지(v2 동등) — paused 중 클릭 통과(메뉴 펼침)+하이라이트 끔, /pick/hover 가 paused 반환→오버레이 배너 전환. is_paused().
 - **fix7 (79e57c8) — picker 마우스 완전 정지(GIL) 해결**: fix6 워커 분리 후 사용자 실측 = 포인터 **전혀** 안 움직임. 진짜 원인: 워커가 EFP(COM)를 50ms 간격 거의 연속 호출 → **EFP 가 GIL 점유** → LL 마우스 후크 콜백(Python)이 GIL 굶음 → 시스템 전역 마우스 멈춤(키보드는 빈도 낮아 정상). 해결: **hover EFP 디바운스** — 커서 이동 중엔 EFP 스킵(sleep 으로 GIL 양보→후크 부드러움), 멈춘 새 위치에서만 1회 EFP→박스. **핵심 교훈: LL 후크 활성 중엔 어느 스레드든 UIA/COM 을 고빈도로 돌리면 GIL 경쟁으로 마우스 멈춤. 디바운스(정지 시 1회)가 정석.**
+- **fix8 (8f3a1c2) — 마우스 완전 정지 회귀 해결(단일 스레드 복귀)**: fix6 의 워커 스레드가 진짜 원인. WH_MOUSE_LL 후크 콜백이 후크 스레드에서 GIL 을 얻어야 하는데 워커가 EFP(COM)로 GIL 점유 → 후크 굶음 → 마우스 완전 정지. 워커 제거하고 7c134a2 의 단일 스레드 구조(후크+펌프+EFP 한 스레드)로 복귀 + 이동 중 EFP 스킵 디바운스 유지. **GIL 교훈 확정: 같은 프로세스 안에서 LL 후크와 UIA/COM 을 다른 스레드로 나눠도 GIL 때문에 소용없음 — 단일 스레드 + 디바운스가 정답.** core 214/214.
 - **fix5 (bc9be03 + ec7ca6d) — 코드 실행 후 메인 윈도우 앞으로**: 실행된 코드가 대상 앱(메모장 등)을 띄워 포커스를 가져가므로 useExecution onDone/onError 에서 window:focus IPC 호출 → 메인 복원·focus(alwaysOnTop 잠깐 토글로 Windows foreground 제약 우회). bc9be03 은 IPC/preload/타입만, ec7ca6d 가 호출부 연결(anchor 불일치로 1차 누락).
 
 ## 48. 2026-05-30 element picker 절충안 — 클릭 시 캡처 (LL 후크, 하이라이트 없음)
