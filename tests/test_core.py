@@ -12861,6 +12861,74 @@ if __name__ == "__main__":
         res2 = client.post("/capture/region", json={"session_id": "x"})
         self.assert_equal(res2.status_code, 422, "필드 누락 422")
 
+    def test_226_api_server_secrets_routes(self):
+        """[handoff §61 #21] 시크릿 볼트 CRUD 라우트 — AppService.secrets_vault 위임.
+
+        GET/POST/DELETE /secrets. core 0줄(공개 vault API set/get/delete/list 위임).
+        **값은 절대 응답에 포함 안 됨**(label 만). keyring 미가용 환경에서도 graceful
+        (available=False). 격리된 tempfile data_dir — 가용일 때만 라운드트립.
+        """
+        import tempfile
+
+        from api_server.server import create_app
+
+        self.step("(1) /secrets 라우트 등록 (GET/POST/DELETE)")
+        app = create_app(token="", data_dir=tempfile.mkdtemp(prefix="ohdo_sct_"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(("/secrets", "GET") in pairs, "GET /secrets 라우트 필수")
+        self.assert_true(("/secrets", "POST") in pairs, "POST /secrets 라우트 필수")
+        self.assert_true(("/secrets/{label}", "DELETE") in pairs, "DELETE /secrets/{label} 라우트 필수")
+
+        self.step("(2) AppService.secrets_vault 속성 + SecretLabel 패턴 (core 0줄 가드)")
+        from core.app_service import AppService
+        from core.secrets import SecretLabel
+
+        self.assert_true(hasattr(AppService, "secrets_vault"), "AppService.secrets_vault 속성 필수")
+        try:
+            SecretLabel(label="BAD LABEL", namespace="secret")
+            raised = False
+        except ValueError:
+            raised = True
+        self.assert_true(raised, "잘못된 label 패턴은 ValueError")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트/스키마 가드까지만")
+            return
+
+        client = TestClient(app)
+        self.step("(3) GET /secrets — available + labels(값 X)")
+        res = client.get("/secrets")
+        self.assert_equal(res.status_code, 200, "GET /secrets 200")
+        body = res.json()
+        self.assert_true("available" in body and "labels" in body, "available/labels 키 필수")
+        self.assert_true(isinstance(body["labels"], list), "labels 는 리스트")
+
+        self.step("(4) 잘못된 label POST — 400(가용) 또는 503(미가용)")
+        bad = client.post("/secrets", json={"label": "BAD LABEL", "value": "x"})
+        self.assert_true(bad.status_code in (400, 503), "잘못된 label → 400 또는 503")
+
+        if body["available"]:
+            self.step("(5) 가용 시 라운드트립 — set→list→delete (값 미노출 확인)")
+            ok = client.post("/secrets", json={"label": "ohdo_test_tmp", "value": "s3cr3t"})
+            self.assert_equal(ok.status_code, 200, "set 200")
+            self.assert_true("s3cr3t" not in ok.text, "응답에 시크릿 값이 절대 포함되면 안 됨")
+            lst = client.get("/secrets").json()["labels"]
+            self.assert_true("ohdo_test_tmp" in lst, "list 에 등록 label 노출")
+            dele = client.delete("/secrets/ohdo_test_tmp")
+            self.assert_equal(dele.status_code, 200, "delete 200")
+            lst2 = client.get("/secrets").json()["labels"]
+            self.assert_true("ohdo_test_tmp" not in lst2, "삭제 후 목록에서 제거")
+        else:
+            self.step("(5) keyring 미가용 — POST 503 가드")
+            r503 = client.post("/secrets", json={"label": "ok", "value": "x"})
+            self.assert_equal(r503.status_code, 503, "미가용 시 503")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

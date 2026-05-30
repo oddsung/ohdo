@@ -11,6 +11,7 @@ import {
   Download,
   Hash,
   HelpCircle,
+  KeyRound,
   Languages,
   Moon,
   MousePointerClick,
@@ -52,6 +53,7 @@ export function CommandPalette() {
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const setEnvOpen = useUiStore((s) => s.setEnvOpen);
   const setOnboardingOpen = useUiStore((s) => s.setOnboardingOpen);
+  const setSecretsOpen = useUiStore((s) => s.setSecretsOpen);
   const selectedSessionId = useUiStore((s) => s.selectedSessionId);
   const selectSession = useUiStore((s) => s.selectSession);
 
@@ -194,6 +196,12 @@ export function CommandPalette() {
     label: t("palette.environment"),
     icon: <Activity className="h-4 w-4" />,
     run: () => setEnvOpen(true),
+  });
+  commands.push({
+    id: "secrets",
+    label: t("palette.secrets"),
+    icon: <KeyRound className="h-4 w-4" />,
+    run: () => setSecretsOpen(true),
   });
   commands.push({
     id: "onboarding",

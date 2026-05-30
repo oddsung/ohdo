@@ -378,6 +378,29 @@ export function fetchEnvironment(): Promise<EnvironmentInfo> {
   return apiFetch<EnvironmentInfo>("/environment");
 }
 
+// ── 시크릿 볼트 (handoff §61, 백로그 #21) ─────────────
+
+export interface SecretsListResponse {
+  available: boolean; // keyring 사용 가능 여부 (false면 등록/삭제 불가)
+  labels: string[]; // 등록된 시크릿 label 목록 (값은 절대 노출 안 됨)
+  error?: string;
+}
+
+/** 등록된 시크릿 label 목록 (값 X). 코드에서 get_secret('label') 로 참조. */
+export function fetchSecrets(): Promise<SecretsListResponse> {
+  return apiFetch<SecretsListResponse>("/secrets");
+}
+
+/** 시크릿 등록/덮어쓰기. label 은 [a-z0-9_]{1,32}. 값은 keyring 에만 저장. */
+export function setSecret(label: string, value: string): Promise<{ success: boolean; label: string }> {
+  return apiFetch("/secrets", { method: "POST", body: JSON.stringify({ label, value }) });
+}
+
+/** 시크릿 삭제. */
+export function deleteSecret(label: string): Promise<{ success: boolean; label: string }> {
+  return apiFetch(`/secrets/${encodeURIComponent(label)}`, { method: "DELETE" });
+}
+
 // ── 설정 (§47 #20) ──────────────────────────────────
 
 export type AppSettings = Record<string, unknown>;

@@ -7,7 +7,7 @@
 // 전환기)로 승격할 예정 — 그래서 레일을 없애지 않고 Discord 레이아웃을 유지한다.
 // 백엔드 무관(core/api_server 0줄): 기존 uiStore 플래그/themeStore/i18n 만 사용.
 import { useTranslation } from "react-i18next";
-import { Activity, HelpCircle, Languages, Moon, Settings, Sun } from "lucide-react";
+import { Activity, HelpCircle, KeyRound, Languages, Moon, Settings, Sun } from "lucide-react";
 import { useUiStore } from "@/store/uiStore";
 import { useThemeStore } from "@/store/themeStore";
 import { currentLang, setLang } from "@/i18n";
@@ -39,6 +39,7 @@ export function ServerRail() {
   const setSettingsOpen = useUiStore((st) => st.setSettingsOpen);
   const setEnvOpen = useUiStore((st) => st.setEnvOpen);
   const setOnboardingOpen = useUiStore((st) => st.setOnboardingOpen);
+  const setSecretsOpen = useUiStore((st) => st.setSecretsOpen);
   const theme = useThemeStore((st) => st.theme);
   const toggleTheme = useThemeStore((st) => st.toggle);
   const lang = (i18n.language || currentLang()).startsWith("ko") ? "ko" : "en";
@@ -64,6 +65,9 @@ export function ServerRail() {
         </RailButton>
         <RailButton title={t("env.title")} onClick={() => setEnvOpen(true)}>
           <Activity className="h-5 w-5" />
+        </RailButton>
+        <RailButton title={t("secrets.title")} onClick={() => setSecretsOpen(true)}>
+          <KeyRound className="h-5 w-5" />
         </RailButton>
         <RailButton title={t("settings.title")} onClick={() => setSettingsOpen(true)}>
           <Settings className="h-5 w-5" />

@@ -48,6 +48,7 @@ from api_server.routes import (
     health,
     pick,
     recording,
+    secrets,
     sessions,
     settings,
     steps,
@@ -111,5 +112,6 @@ def create_app(token: str = "", data_dir: "str | Path | None" = None) -> FastAPI
     app.include_router(ai.router)
     app.include_router(environment.router)
     app.include_router(capture.router)
+    app.include_router(secrets.router)
 
     return app

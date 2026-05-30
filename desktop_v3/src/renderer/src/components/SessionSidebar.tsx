@@ -17,6 +17,7 @@ import {
 } from "@/api/client";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { EnvironmentDialog } from "@/components/EnvironmentDialog";
+import { SecretsDialog } from "@/components/SecretsDialog";
 import { useUiStore } from "@/store/uiStore";
 import { toast } from "@/store/toastStore";
 import { Button } from "@/components/ui/button";
@@ -145,6 +146,8 @@ export function SessionSidebar() {
   const setSettingsOpen = useUiStore((st) => st.setSettingsOpen);
   const envOpen = useUiStore((st) => st.envOpen);
   const setEnvOpen = useUiStore((st) => st.setEnvOpen);
+  const secretsOpen = useUiStore((st) => st.secretsOpen);
+  const setSecretsOpen = useUiStore((st) => st.setSecretsOpen);
   const [creating, setCreating] = useState(false);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["sessions"],
@@ -305,6 +308,7 @@ export function SessionSidebar() {
       </footer>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {envOpen && <EnvironmentDialog onClose={() => setEnvOpen(false)} />}
+      {secretsOpen && <SecretsDialog onClose={() => setSecretsOpen(false)} />}
     </aside>
   );
 }
