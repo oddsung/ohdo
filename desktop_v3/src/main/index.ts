@@ -340,6 +340,18 @@ function registerPickIpc(): void {
   ipcMain.handle("record:restore", () => {
     if (mainWindow?.isMinimized()) mainWindow.restore();
   });
+
+  // 코드 실행 완료 후 메인 윈도우를 앞으로 (사용자 요청, §49). 실행된 코드가 메모장/계산기
+  // 등 대상 앱을 띄워 포커스를 가져가므로, 결과를 바로 보도록 ohdo 창을 복원·최상단으로.
+  ipcMain.handle("window:focus", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    // Windows foreground 가로채기 제약 우회 — 잠깐 alwaysOnTop 켰다 끄면서 앞으로.
+    mainWindow.setAlwaysOnTop(true);
+    mainWindow.focus();
+    mainWindow.setAlwaysOnTop(false);
+  });
   ipcMain.handle("pick:hover", async () => {
     if (!apiInfo) return null;
     try {

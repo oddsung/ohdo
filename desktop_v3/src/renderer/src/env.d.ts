@@ -16,6 +16,8 @@ export interface OhdoBridge {
   // 작업 녹화 시 메인 윈도우 최소화/복원 (§49).
   minimizeForRecord: () => Promise<void>;
   restoreFromRecord: () => Promise<void>;
+  // 코드 실행 완료 후 메인 윈도우를 앞으로 (§49).
+  focusMainWindow: () => Promise<void>;
 }
 
 declare global {
