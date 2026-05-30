@@ -12552,11 +12552,12 @@ if __name__ == "__main__":
         self.step("(2) pick_pump import 안전 + 초기 상태")
         import api_server.pick_pump as pp
 
-        for fn in ("pick_on_click", "cancel_pick", "is_active", "get_hover_rect"):
+        for fn in ("pick_on_click", "cancel_pick", "is_active", "get_hover_rect", "is_paused"):
             self.assert_true(hasattr(pp, fn), f"pick_pump.{fn} 필수")
         self.assert_true(not pp.is_active(), "초기 상태는 비활성")
         self.assert_true(pp.cancel_pick() is False, "비활성 시 cancel_pick False")
         self.assert_true(pp.get_hover_rect() is None, "비활성 시 hover rect None")
+        self.assert_true(pp.is_paused() is False, "초기 상태는 일시정지 아님 (§49 fix6)")
 
 
 if __name__ == "__main__":

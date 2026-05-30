@@ -7,6 +7,10 @@
 // rect 는 main 이 물리픽셀→DIP(오버레이 로컬 CSS px)로 변환해서 내려준다.
 
 const hl = document.getElementById("hl") as HTMLDivElement;
+const hint = document.getElementById("hint") as HTMLDivElement;
+
+const HINT_NORMAL = "선택할 UI 요소를 클릭하세요 · F3 일시정지 · Esc 취소";
+const HINT_PAUSED = "⏸ 일시정지 — 메뉴 등을 펼친 뒤 F3 로 재개";
 
 interface HoverBox {
   x: number;
@@ -15,9 +19,14 @@ interface HoverBox {
   h: number;
 }
 
+interface HoverResult {
+  box: HoverBox | null;
+  paused: boolean;
+}
+
 declare global {
   interface Window {
-    ohdoPick?: { hover: () => Promise<HoverBox | null> };
+    ohdoPick?: { hover: () => Promise<HoverResult | null> };
   }
 }
 
@@ -28,7 +37,8 @@ let stopped = false;
 async function tick(): Promise<void> {
   if (stopped) return;
   try {
-    const box = await window.ohdoPick?.hover();
+    const res = await window.ohdoPick?.hover();
+    const box = res?.box ?? null;
     if (box && box.w > 0 && box.h > 0) {
       hl.style.display = "block";
       hl.style.left = `${box.x}px`;
@@ -37,6 +47,14 @@ async function tick(): Promise<void> {
       hl.style.height = `${box.h}px`;
     } else {
       hl.style.display = "none";
+    }
+    // 일시정지 상태 안내 + 배너 색 전환.
+    if (res?.paused) {
+      hint.textContent = HINT_PAUSED;
+      hint.style.borderColor = "rgba(250, 204, 21, 0.7)";
+    } else {
+      hint.textContent = HINT_NORMAL;
+      hint.style.borderColor = "rgba(239, 68, 68, 0.6)";
     }
   } catch {
     hl.style.display = "none";

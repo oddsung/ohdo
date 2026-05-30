@@ -353,17 +353,21 @@ function registerPickIpc(): void {
     mainWindow.setAlwaysOnTop(false);
   });
   ipcMain.handle("pick:hover", async () => {
-    if (!apiInfo) return null;
+    if (!apiInfo) return { box: null, paused: false };
     try {
       const res = await fetch(`${apiInfo.baseUrl}/pick/hover`, {
         headers: { Authorization: `Bearer ${apiInfo.token}` },
       });
       const data = (await res.json()) as {
         rect?: { left: number; top: number; right: number; bottom: number } | null;
+        paused?: boolean;
       };
-      return data?.rect ? physicalRectToOverlayCss(data.rect) : null;
+      return {
+        box: data?.rect ? physicalRectToOverlayCss(data.rect) : null,
+        paused: !!data?.paused,
+      };
     } catch {
-      return null;
+      return { box: null, paused: false };
     }
   });
 }
