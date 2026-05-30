@@ -112,6 +112,21 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
         lresult, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
     )
 
+    # CallNextHookEx argtypes 명시 — **이게 마우스 정지의 진짜 원인이었음** (handoff §49 fix9).
+    # lParam 은 MSLLHOOKSTRUCT 포인터 주소(x64 = 64-bit). argtypes 미지정 시 ctypes 가 4번째
+    # 인자를 C int(32-bit)로 좁혀 변환하려다 OverflowError → _mouse_proc 이 매 이동마다 죽고
+    # 다음 후크로 이벤트가 전달 안 됨 → 포인터 완전 정지. LPARAM/WPARAM 은 64-bit 안전 타입.
+    try:
+        user32.CallNextHookEx.argtypes = [
+            ctypes.wintypes.HHOOK,
+            ctypes.c_int,
+            ctypes.wintypes.WPARAM,
+            ctypes.wintypes.LPARAM,
+        ]
+        user32.CallNextHookEx.restype = lresult
+    except Exception:
+        pass
+
     # SetWindowPos argtypes 명시 — 미지정 시 ctypes 가 포인터/HWND 를 32-bit int 로
     # 취급해 x64 에서 HWND_TOPMOST 호출이 조용히 실패한다(v2 _ensure_user32_argtypes 와
     # 동일 — 작업표시줄 위 z-order 강제의 핵심). (handoff §49 fix3)
