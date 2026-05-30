@@ -155,6 +155,12 @@ export const en: Catalog = {
     pickOrCreate: "Select a session on the left or create one with +.",
     hint: "Open a session and describe a task; AI will generate Python automation code.",
   },
+  engine: {
+    label: "AI engine",
+    switched: "Switched to {{name}}",
+    switchFailed: "Failed to switch engine: {{message}}",
+    unavailable: "unavailable",
+  },
   palette: {
     placeholder: "Type a command…",
     empty: "No matching commands",

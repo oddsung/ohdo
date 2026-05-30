@@ -42,6 +42,7 @@ import { useExecution } from "@/hooks/useExecution";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { EngineSwitcher } from "@/components/EngineSwitcher";
 
 interface StepCardProps {
   step: Step;
@@ -371,6 +372,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       <header className="flex h-12 items-center justify-between border-b border-black/20 px-4 shadow-sm">
         <span className="truncate font-semibold">{session ? session.title : "…"}</span>
         <div className="flex items-center gap-1">
+          {/* AI 엔진 퀵스위치 — 녹화 중엔 헤더 혼잡 줄이려 숨김. */}
+          {!recording && <EngineSwitcher />}
           {/* 녹화 컨트롤 — step 수와 무관하게 항상 노출 (녹화로 step 생성). */}
           {recording ? (
             <>

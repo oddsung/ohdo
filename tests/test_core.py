@@ -12654,6 +12654,58 @@ if __name__ == "__main__":
         res2 = client.post("/sessions/__nope__/duplicate", json={})
         self.assert_equal(res2.status_code, 404, "없는 세션 duplicate 404")
 
+    def test_222_api_server_ai_engine_routes(self):
+        """[api_server §47] AI 엔진 퀵스위치 라우트 (백로그 #14) — list/switch 위임.
+
+        GET /ai/engines (read-only) + POST /ai/engine. core 메서드(list_ai_engines/
+        switch_ai_engine/get_ai_engine_name)는 이미 존재 — 엔드포인트만 신설(core 0줄).
+        주의: POST 성공은 실제 config/settings.json 을 변조하므로 테스트하지 않고,
+        persist 이전 단계에서 실패하는 경로(빈 이름 400 / 알 수 없는 엔진 400|503)만 검증한다.
+        """
+        from api_server.server import create_app
+
+        self.step("(1) ai 라우트 노출")
+        app = create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(("/ai/engines", "GET") in pairs, "GET /ai/engines 라우트 필수")
+        self.assert_true(("/ai/engine", "POST") in pairs, "POST /ai/engine 라우트 필수")
+
+        self.step("(2) AppService 위임 메서드 존재")
+        from core.app_service import AppService
+
+        for name in ("list_ai_engines", "switch_ai_engine", "get_ai_engine_name"):
+            self.assert_true(hasattr(AppService, name), f"AppService.{name} 메서드 필수")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 - 라우트/메서드 가드까지만")
+            return
+
+        client = TestClient(app)
+
+        self.step("(3) GET /ai/engines (read-only)")
+        res = client.get("/ai/engines")
+        self.assert_equal(res.status_code, 200, "GET /ai/engines 200")
+        body = res.json()
+        self.assert_true(isinstance(body.get("engines"), list), "engines 는 리스트")
+        self.assert_true("current" in body, "응답에 current 키")
+
+        self.step("(4) POST /ai/engine 빈 이름 -> 400 (persist 이전 실패)")
+        res2 = client.post("/ai/engine", json={"name": ""})
+        self.assert_equal(res2.status_code, 400, "빈 엔진 이름 400")
+
+        self.step("(5) POST /ai/engine 알 수 없는 엔진 -> 400/503 (persist 안 함)")
+        res3 = client.post("/ai/engine", json={"name": "__nonexistent_engine__"})
+        self.assert_true(
+            res3.status_code in (400, 503),
+            f"알 수 없는 엔진은 400(미존재)/503(AI 미구성) (got {res3.status_code})",
+        )
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

@@ -120,6 +120,12 @@ class SaveSettingsRequest(BaseModel):
     settings: dict
 
 
+class SwitchEngineRequest(BaseModel):
+    """AI 엔진 퀵스위치 (handoff §47 백로그 #14 — switch_ai_engine + settings.json 영속)."""
+
+    name: str
+
+
 def save_json(path: Path, data: dict) -> None:
     """dict 를 들여쓰기 JSON(UTF-8)으로 저장 — config/settings.json 쓰기용."""
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

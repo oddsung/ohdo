@@ -267,6 +267,30 @@ export function regenerateStep(sessionId: string, stepId: number): Promise<Gener
   });
 }
 
+// ── AI 엔진 퀵스위치 (§47 #14) ───────────────────────
+
+export interface AiEngine {
+  name: string;
+  display_name: string;
+  available: boolean;
+  is_current: boolean;
+}
+
+export interface AiEnginesResponse {
+  engines: AiEngine[];
+  current: string | null;
+}
+
+export function fetchAiEngines(): Promise<AiEnginesResponse> {
+  return apiFetch<AiEnginesResponse>("/ai/engines");
+}
+
+export function switchAiEngine(
+  name: string,
+): Promise<{ success: boolean; current: string | null }> {
+  return apiFetch("/ai/engine", { method: "POST", body: JSON.stringify({ name }) });
+}
+
 // ── 설정 (§47 #20) ──────────────────────────────────
 
 export type AppSettings = Record<string, unknown>;
