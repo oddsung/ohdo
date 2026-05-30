@@ -45,6 +45,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const activeRef = useRef<HTMLButtonElement>(null);
 
   const { data: sessions } = useQuery({
     queryKey: ["sessions"],
@@ -151,11 +152,16 @@ export function CommandPalette() {
     });
   }
 
-  if (!open) return null;
-
   const q = query.trim().toLowerCase();
   const filtered = q ? commands.filter((c) => c.label.toLowerCase().includes(q)) : commands;
   const activeIdx = Math.min(active, Math.max(filtered.length - 1, 0));
+
+  // 활성 항목이 보이는 영역 밖(특히 아래쪽)으로 가면 스크롤로 따라가게.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx]);
+
+  if (!open) return null;
 
   const execute = (cmd?: Command) => {
     if (!cmd) return;
@@ -205,6 +211,7 @@ export function CommandPalette() {
             <li key={c.id}>
               <button
                 type="button"
+                ref={i === activeIdx ? activeRef : null}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => execute(c)}
                 className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm ${
