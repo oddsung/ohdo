@@ -2684,6 +2684,13 @@ Electron Main (Node)  ──subprocess──>  python -m api_server  (자식 lif
 - tsc+build 그린(overlay.html 엔트리 out/renderer/ 확인). test_219 에 /pick/hover + get_hover_rect 가드. core 214/214, ruff. core/PySide6 0줄.
 - **사용자 실측 필요**: WS_EX_TRANSPARENT 로 EFP 가 오버레이를 실제로 건너뛰는지, DPI 변환 정확도, 멀티모니터, 하이라이트 부드러움(throttle ~50ms 캡처+30fps 폴링). 문제 시 fallback: EFP 직전 오버레이 hide 토글 또는 폴링 주기 조정.
 
+### 후속 fix (사용자 실측 루프, 2026-05-30)
+- **fix1 (7c134a2) — hover 박스 미표시**: `capture_element_at` 의 rect 는 `[l,t,r,b]` **리스트**인데 main physicalRectToOverlayCss 가 `rect.left` 키로 접근 → NaN → 미표시. 펌프 루프에서 `{left,top,right,bottom}` dict 로 정규화. **결과: 일반 창에서 붉은 박스 정상 표시 (사용자 확인).**
+- **fix2 (7d11d76) + fix3 (b5abb1c) — 작업표시줄 위 z-order**: Electron setAlwaysOnTop/moveTop 은 작업표시줄(Shell_TrayWnd) 특수 topmost 못 이김 → Python ctypes `SetWindowPos(HWND_TOPMOST)` 로 전환(오버레이 HWND 를 POST /pick/overlay 로 등록 → pick_pump 펌프 루프가 200ms 재적용). fix3 에서 SetWindowPos.argtypes/restype 명시(미지정 시 x64 HWND 32-bit 절단으로 조용히 실패 — v2 _ensure_user32_argtypes 와 동일). Electron moveTop 타이머 제거.
+  - **⚠️ 미해결**: fix3(argtypes 보강)으로 v2 와 동일 호출이 됐는데도 **사용자 실측상 작업표시줄 위 element 의 붉은 박스가 여전히 작업표시줄 뒤로 가려짐**. 일반 창은 OK. 사용자 지시로 **보류**. 다음 후보: (a) 오버레이를 작업표시줄 영역만 별도 layered child 로, (b) hover rect 가 작업표시줄 영역과 겹칠 때 박스를 별도 topmost 미니 창으로, (c) Shell_TrayWnd 위 z-order 는 OS 정책상 일반 앱 불가 가능성 → DPI/좌표 문제인지 재확인(작업표시줄 자체가 고정 위치라 rect 변환 오차 의심).
+- **fix4 (b5abb1c) — 녹화 시 메인 최소화**: record:minimize/restore IPC + preload minimizeForRecord/restoreFromRecord + recordStore start 시 최소화 / stopCommit·cancel 시 복원 (picker 와 동일 UX). 사용자 요청.
+- **fix5 (bc9be03 + ec7ca6d) — 코드 실행 후 메인 윈도우 앞으로**: 실행된 코드가 대상 앱(메모장 등)을 띄워 포커스를 가져가므로 useExecution onDone/onError 에서 window:focus IPC 호출 → 메인 복원·focus(alwaysOnTop 잠깐 토글로 Windows foreground 제약 우회). bc9be03 은 IPC/preload/타입만, ec7ca6d 가 호출부 연결(anchor 불일치로 1차 누락).
+
 ## 48. 2026-05-30 element picker 절충안 — 클릭 시 캡처 (LL 후크, 하이라이트 없음)
 
 **컨텍스트**: 사용자 질문 "v2 의 오버레이+붉은박스+클릭선택 picker 가 왜 v3 에서 3초 카운트다운으로 바뀌었나". 조사 결과: v2 picker 는 PySide6 QWidget(2321줄, 전체화면 투명 오버레이 + 실시간 EFP 하이라이트 + LL 클릭후크)이라 headless 브리지/Electron 으로 그대로 이식 불가 → Phase B(§40)에서 사용자가 "카운트다운 캡처"를 선택했던 것. 사용자 결정: **절충안(클릭 시 캡처, LL 후크만, 하이라이트 없음)으로 최소 개선 후 결과 보고 재결정**.
