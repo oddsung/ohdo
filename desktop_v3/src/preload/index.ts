@@ -16,6 +16,9 @@ const api = {
   // element picker 투명 오버레이 제어 (handoff §49) — 메인 윈도우에서 호출.
   startPickOverlay: (): Promise<void> => ipcRenderer.invoke("pick:start"),
   stopPickOverlay: (): Promise<void> => ipcRenderer.invoke("pick:stop"),
+  // 작업 녹화 시 메인 윈도우 최소화/복원 (§49).
+  minimizeForRecord: (): Promise<void> => ipcRenderer.invoke("record:minimize"),
+  restoreFromRecord: (): Promise<void> => ipcRenderer.invoke("record:restore"),
 };
 
 contextBridge.exposeInMainWorld("ohdo", api);

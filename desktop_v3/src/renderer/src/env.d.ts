@@ -13,6 +13,9 @@ export interface OhdoBridge {
   // element picker 투명 오버레이 제어 (handoff §49).
   startPickOverlay: () => Promise<void>;
   stopPickOverlay: () => Promise<void>;
+  // 작업 녹화 시 메인 윈도우 최소화/복원 (§49).
+  minimizeForRecord: () => Promise<void>;
+  restoreFromRecord: () => Promise<void>;
 }
 
 declare global {

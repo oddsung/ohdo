@@ -35,6 +35,8 @@ export const useRecordStore = create<RecordState>((set, get) => ({
     try {
       await recordingStart(sessionId);
       set({ recording: true, eventCount: 0 });
+      // 녹화 중 대상 앱 조작을 가리지 않도록 메인 윈도우 최소화 (element picker 와 동일 UX, §49).
+      await window.ohdo.minimizeForRecord().catch(() => {});
       toast.success(i18n.t("record.started"));
       const poll = window.setInterval(async () => {
         try {
@@ -75,10 +77,12 @@ export const useRecordStore = create<RecordState>((set, get) => ({
     try {
       const res = await recordingStopCommit(sessionId);
       set({ recording: false, eventCount: 0 });
+      await window.ohdo.restoreFromRecord().catch(() => {});
       toast.success(i18n.t("record.complete", { count: res.step_count }));
       onCommitted?.();
     } catch (e) {
       set({ recording: false });
+      await window.ohdo.restoreFromRecord().catch(() => {});
       toast.error(i18n.t("record.saveFailed", { message: (e as Error).message }));
     } finally {
       set({ busy: false });
@@ -94,6 +98,7 @@ export const useRecordStore = create<RecordState>((set, get) => ({
     } catch {
       /* best-effort */
     }
+    await window.ohdo.restoreFromRecord().catch(() => {});
     set({ recording: false, eventCount: 0, busy: false });
     toast.info(i18n.t("record.canceled"));
   },

@@ -102,6 +102,23 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
         lresult, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
     )
 
+    # SetWindowPos argtypes 명시 — 미지정 시 ctypes 가 포인터/HWND 를 32-bit int 로
+    # 취급해 x64 에서 HWND_TOPMOST 호출이 조용히 실패한다(v2 _ensure_user32_argtypes 와
+    # 동일 — 작업표시줄 위 z-order 강제의 핵심). (handoff §49 fix3)
+    try:
+        user32.SetWindowPos.argtypes = [
+            ctypes.wintypes.HWND,
+            ctypes.wintypes.HWND,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        user32.SetWindowPos.restype = ctypes.wintypes.BOOL
+    except Exception:
+        pass
+
     class _MSLLHOOKSTRUCT(ctypes.Structure):
         _fields_ = [
             ("pt", ctypes.wintypes.POINT),
@@ -182,9 +199,10 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
             if _overlay_hwnd and now - last_topmost >= _TOPMOST_INTERVAL_S:
                 last_topmost = now
                 try:
+                    # argtypes 가 위에서 설정됨 — plain int 로 전달(v2 _force_topmost 동일).
                     user32.SetWindowPos(
-                        ctypes.wintypes.HWND(_overlay_hwnd),
-                        ctypes.wintypes.HWND(_HWND_TOPMOST),
+                        _overlay_hwnd,
+                        _HWND_TOPMOST,
                         0,
                         0,
                         0,
