@@ -12929,6 +12929,20 @@ if __name__ == "__main__":
             r503 = client.post("/secrets", json={"label": "ok", "value": "x"})
             self.assert_equal(r503.status_code, 503, "미가용 시 503")
 
+        self.step("(6) /secrets/scan — 평문 감지 + 값 미노출 (#21b)")
+        self.assert_true(("/secrets/scan", "POST") in pairs, "POST /secrets/scan 라우트 필수")
+        leak = "sk-ant-abc123def456ghi789jklmno"
+        sc = client.post("/secrets/scan", json={"text": f"use token {leak} now"})
+        self.assert_equal(sc.status_code, 200, "scan 200")
+        sdata = sc.json()
+        self.assert_true(len(sdata["matches"]) >= 1, "평문 시크릿 1건 이상 감지")
+        self.assert_true(leak not in sc.text, "scan 응답에 원본 시크릿 값 노출 금지")
+        for m in sdata["matches"]:
+            self.assert_true("value" not in m, "match 에 value 필드 없어야 함")
+            self.assert_true("suggested_label" in m and "kind" in m, "match 에 kind/suggested_label")
+        empty = client.post("/secrets/scan", json={"text": "안녕하세요 평범한 문장입니다"})
+        self.assert_equal(empty.status_code, 200, "scan(평문 없음) 200")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

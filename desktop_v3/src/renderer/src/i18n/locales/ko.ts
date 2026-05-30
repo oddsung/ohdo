@@ -233,6 +233,8 @@ export const ko = {
     deleted: "시크릿 삭제됨",
     deleteFailed: "시크릿 삭제 실패: {{message}}",
     confirmDelete: "시크릿 '{{label}}' 을(를) 삭제할까요?",
+    plaintextWarn:
+      "입력에 평문 비밀로 보이는 값이 {{count}}건 감지되었습니다 ({{kinds}}). 그대로 보내면 AI/로그에 노출될 수 있습니다.\n\n@라벨 로 시크릿을 등록해 {{secret:라벨}} 로 바꾸는 것을 권장합니다.\n\n그래도 이대로 전송할까요?",
   },
   palette: {
     placeholder: "명령을 입력하세요…",

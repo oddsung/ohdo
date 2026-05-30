@@ -32,6 +32,7 @@ import {
   moveStep,
   insertStep,
   regenerateStep,
+  scanSecrets,
   type GenerateResult,
   type Step,
 } from "@/api/client";
@@ -43,9 +44,9 @@ import { useRecordStore } from "@/store/recordStore";
 import { toast } from "@/store/toastStore";
 import { useExecution } from "@/hooks/useExecution";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EngineSwitcher } from "@/components/EngineSwitcher";
+import { SecretAutocomplete } from "@/components/SecretAutocomplete";
 
 interface StepCardProps {
   step: Step;
@@ -375,13 +376,27 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   }, [session?.steps.length]);
 
   const busy = genMut.isPending;
-  const submit = () => {
+  const send = (req: string) => {
+    genMut.mutate(req);
+    if (pending) clearPending(); // 한 요청에 한 번만 첨부
+    if (pendingImages.length) clearImages(); // 첨부 이미지도 한 요청에 한 번만
+  };
+  // 전송 — 평문 시크릿 감지(#21b) 후 발견되면 마스킹 권고 confirm. 이미 placeholder
+  // ({{secret:...}})로 바꾼 부분은 detect 가 잡지 않으므로 자동완성 사용 시 경고 없음.
+  const submit = async () => {
     const req = input.trim();
-    if (req && !busy) {
-      genMut.mutate(req);
-      if (pending) clearPending(); // 한 요청에 한 번만 첨부
-      if (pendingImages.length) clearImages(); // 첨부 이미지도 한 요청에 한 번만
+    if (!req || busy) return;
+    try {
+      const { matches } = await scanSecrets(req);
+      if (matches.length > 0) {
+        const kinds = [...new Set(matches.map((m) => m.kind))].join(", ");
+        const proceed = window.confirm(t("secrets.plaintextWarn", { count: matches.length, kinds }));
+        if (!proceed) return; // 사용자가 취소 → @자동완성으로 시크릿 등록 권장
+      }
+    } catch {
+      /* 감지 실패는 무시하고 전송(감지는 보조 안전장치) */
     }
+    send(req);
   };
 
   return (
@@ -593,18 +608,12 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           >
             {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
           </Button>
-          <Textarea
+          <SecretAutocomplete
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder={t("chat.placeholder")}
+            onChange={setInput}
+            onSubmit={submit}
             disabled={busy}
-            rows={2}
+            placeholder={t("chat.placeholder")}
           />
           <Button
             onClick={submit}

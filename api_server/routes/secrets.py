@@ -29,6 +29,12 @@ class SetSecretRequest(BaseModel):
     value: str
 
 
+class ScanTextRequest(BaseModel):
+    """전송 전 평문 시크릿 감지 (handoff §62, 백로그 #21b)."""
+
+    text: str
+
+
 def _vault(request: Request):
     """현재 AppService 의 secrets_vault (없으면 None)."""
     return get_app_service(request.app).secrets_vault
@@ -76,6 +82,41 @@ def set_secret(
     except Exception as exc:  # noqa: BLE001 — keyring set 실패
         raise HTTPException(status_code=500, detail=f"시크릿 저장 실패: {exc}")
     return {"success": True, "label": body.label}
+
+
+@router.post("/secrets/scan")
+def scan_text(body: ScanTextRequest, _: None = Depends(require_token)) -> dict:
+    """텍스트에서 평문 시크릿 후보 감지 (handoff §62, 백로그 #21b).
+
+    core ``secrets_detector.detect`` 위임 (core 0줄). **매치 값(value)은 응답에 포함하지
+    않는다** — span/kind/confidence/suggested_label + 미리보기(앞 2자 + 마스킹)만. 프런트가
+    전송 전 "평문 대신 시크릿 등록" 권고에 사용. vault 무관(감지는 항상 가능).
+
+    ``{"matches": [{"start","end","kind","confidence","suggested_label","preview"}, ...]}``.
+    """
+    from core.secrets_detector import detect
+
+    try:
+        found = detect(body.text or "")
+    except Exception as exc:  # noqa: BLE001 — 감지 실패는 빈 결과로 graceful
+        return {"matches": [], "error": str(exc)}
+
+    matches = []
+    for m in found:
+        val = m.value or ""
+        # 값 자체는 절대 노출하지 않음 — 길이 힌트 + 앞 2자만 미리보기.
+        preview = (val[:2] + "•" * max(0, len(val) - 2)) if val else ""
+        matches.append(
+            {
+                "start": m.span[0],
+                "end": m.span[1],
+                "kind": m.kind,
+                "confidence": round(float(m.confidence), 3),
+                "suggested_label": m.suggested_label,
+                "preview": preview[:32],
+            }
+        )
+    return {"matches": matches}
 
 
 @router.delete("/secrets/{label}")

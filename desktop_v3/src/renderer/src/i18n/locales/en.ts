@@ -235,6 +235,8 @@ export const en: Catalog = {
     deleted: "Secret deleted",
     deleteFailed: "Failed to delete secret: {{message}}",
     confirmDelete: "Delete secret '{{label}}'?",
+    plaintextWarn:
+      "Detected {{count}} value(s) that look like plaintext secrets ({{kinds}}). Sending as-is may expose them to the AI/logs.\n\nConsider registering a secret with @label and using {{secret:label}} instead.\n\nSend anyway?",
   },
   palette: {
     placeholder: "Type a command…",

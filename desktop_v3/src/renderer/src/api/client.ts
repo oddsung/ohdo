@@ -401,6 +401,20 @@ export function deleteSecret(label: string): Promise<{ success: boolean; label: 
   return apiFetch(`/secrets/${encodeURIComponent(label)}`, { method: "DELETE" });
 }
 
+export interface SecretScanMatch {
+  start: number;
+  end: number;
+  kind: string;
+  confidence: number;
+  suggested_label: string;
+  preview: string; // 앞 2자 + 마스킹 (원값 아님)
+}
+
+/** 전송 전 평문 시크릿 감지 (handoff §62, #21b). 값은 응답에 미포함(미리보기만). */
+export function scanSecrets(text: string): Promise<{ matches: SecretScanMatch[]; error?: string }> {
+  return apiFetch("/secrets/scan", { method: "POST", body: JSON.stringify({ text }) });
+}
+
 // ── 설정 (§47 #20) ──────────────────────────────────
 
 export type AppSettings = Record<string, unknown>;
