@@ -11,12 +11,14 @@ interface UiState {
   selectedBlock: SelectedBlock;
   paletteOpen: boolean; // 커맨드 팔레트 (Ctrl+K, §51)
   settingsOpen: boolean; // 설정 다이얼로그 (사이드바 기어 + 팔레트 공용)
+  envOpen: boolean; // 환경 점검 다이얼로그 (§53, 사이드바 + 팔레트 공용)
   selectSession: (id: string | null) => void;
   selectStep: (id: number | null) => void;
   selectBlock: (b: SelectedBlock) => void;
   setPaletteOpen: (v: boolean) => void;
   togglePalette: () => void;
   setSettingsOpen: (v: boolean) => void;
+  setEnvOpen: (v: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -25,10 +27,12 @@ export const useUiStore = create<UiState>((set) => ({
   selectedBlock: null,
   paletteOpen: false,
   settingsOpen: false,
+  envOpen: false,
   selectSession: (id) => set({ selectedSessionId: id, selectedStepId: null, selectedBlock: null }),
   selectStep: (id) => set({ selectedStepId: id, selectedBlock: null }),
   selectBlock: (b) => set({ selectedBlock: b, selectedStepId: null }),
   setPaletteOpen: (v) => set({ paletteOpen: v }),
   togglePalette: () => set((st) => ({ paletteOpen: !st.paletteOpen })),
   setSettingsOpen: (v) => set({ settingsOpen: v }),
+  setEnvOpen: (v) => set({ envOpen: v }),
 }));

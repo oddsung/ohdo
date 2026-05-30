@@ -12706,6 +12706,35 @@ if __name__ == "__main__":
             f"알 수 없는 엔진은 400(미존재)/503(AI 미구성) (got {res3.status_code})",
         )
 
+    def test_223_api_server_environment_route(self):
+        """[api_server §47] 환경 점검 라우트 (백로그 #18) — EnvironmentScanner.full_scan 위임.
+
+        GET /environment. core 의 공개 get_scanner()/full_scan 사용(core 0줄, AppService 미경유).
+        full_scan 은 subprocess 다수라 테스트에선 호출하지 않고 라우트 노출 + scanner 공개 API +
+        가벼운 get_system_info(subprocess 없음) 만 검증.
+        """
+        from api_server.server import create_app
+
+        self.step("(1) environment 라우트 노출")
+        app = create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(("/environment", "GET") in pairs, "GET /environment 라우트 필수")
+
+        self.step("(2) core EnvironmentScanner 공개 API")
+        from core.environment_scanner import get_scanner
+
+        scanner = get_scanner()
+        self.assert_true(hasattr(scanner, "full_scan"), "EnvironmentScanner.full_scan 필수")
+
+        self.step("(3) get_system_info (가벼운 검증 - subprocess 없음)")
+        info = scanner.get_system_info()
+        self.assert_true(isinstance(info, dict) and "os" in info, "system_info 에 os 키")
+        self.assert_true("python_version" in info, "system_info 에 python_version 키")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

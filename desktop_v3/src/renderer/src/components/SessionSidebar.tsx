@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Copy, Languages, Moon, Pencil, Plus, Settings, Sun, Trash2 } from "lucide-react";
+import { Activity, Copy, Languages, Moon, Pencil, Plus, Settings, Sun, Trash2 } from "lucide-react";
 import {
   createSession,
   deleteSession,
@@ -14,6 +14,7 @@ import {
   type SessionSummary,
 } from "@/api/client";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { EnvironmentDialog } from "@/components/EnvironmentDialog";
 import { useUiStore } from "@/store/uiStore";
 import { useThemeStore } from "@/store/themeStore";
 import { toast } from "@/store/toastStore";
@@ -127,6 +128,8 @@ export function SessionSidebar() {
   const selectedSessionId = useUiStore((st) => st.selectedSessionId);
   const settingsOpen = useUiStore((st) => st.settingsOpen);
   const setSettingsOpen = useUiStore((st) => st.setSettingsOpen);
+  const envOpen = useUiStore((st) => st.envOpen);
+  const setEnvOpen = useUiStore((st) => st.setEnvOpen);
   const [creating, setCreating] = useState(false);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["sessions"],
@@ -251,6 +254,15 @@ export function SessionSidebar() {
             size="icon"
             variant="ghost"
             className="h-6 w-6 text-discord-muted hover:text-white"
+            title={t("env.title")}
+            onClick={() => setEnvOpen(true)}
+          >
+            <Activity className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 text-discord-muted hover:text-white"
             title={t("settings.title")}
             onClick={() => setSettingsOpen(true)}
           >
@@ -277,6 +289,7 @@ export function SessionSidebar() {
         </div>
       </footer>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {envOpen && <EnvironmentDialog onClose={() => setEnvOpen(false)} />}
     </aside>
   );
 }

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
+  Activity,
   Circle,
   Copy,
   Hash,
@@ -40,6 +41,7 @@ export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
   const setOpen = useUiStore((s) => s.setPaletteOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const setEnvOpen = useUiStore((s) => s.setEnvOpen);
   const selectedSessionId = useUiStore((s) => s.selectedSessionId);
   const selectSession = useUiStore((s) => s.selectSession);
 
@@ -144,6 +146,12 @@ export function CommandPalette() {
           .catch((e) => toast.error(t("session.duplicateFailed", { message: (e as Error).message }))),
     });
   }
+  commands.push({
+    id: "environment",
+    label: t("palette.environment"),
+    icon: <Activity className="h-4 w-4" />,
+    run: () => setEnvOpen(true),
+  });
   commands.push({
     id: "settings",
     label: t("palette.settings"),

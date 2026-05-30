@@ -291,6 +291,53 @@ export function switchAiEngine(
   return apiFetch("/ai/engine", { method: "POST", body: JSON.stringify({ name }) });
 }
 
+// ── 환경 점검 (§47 #18) ──────────────────────────────
+
+export interface PackageStatus {
+  package: string;
+  import_name: string;
+  installed: boolean;
+  version: string | null;
+  error: string | null;
+}
+
+export interface CliAiStatus {
+  installed: boolean;
+  command: string;
+  path: string | null;
+  version: string | null;
+  error: string | null;
+  detail: string | null;
+}
+
+export interface EnvironmentInfo {
+  success: boolean;
+  error?: string;
+  system_info?: {
+    os: string;
+    os_version: string;
+    architecture: string;
+    python_version: string;
+    hostname: string;
+    username: string;
+    [k: string]: unknown;
+  };
+  python_path?: string;
+  python_version?: string;
+  packages?: {
+    required: PackageStatus[];
+    optional: PackageStatus[];
+    all_required_installed: boolean;
+  };
+  cli_ai?: CliAiStatus;
+  scan_time?: string;
+}
+
+/** 전체 환경 스캔 (Python/패키지/CLI AI). 수초 걸릴 수 있어 on-demand 호출. */
+export function fetchEnvironment(): Promise<EnvironmentInfo> {
+  return apiFetch<EnvironmentInfo>("/environment");
+}
+
 // ── 설정 (§47 #20) ──────────────────────────────────
 
 export type AppSettings = Record<string, unknown>;
