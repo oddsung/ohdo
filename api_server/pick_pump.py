@@ -174,6 +174,8 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
             from core.element_inspect import capture_element_at
 
             wpt = ctypes.wintypes.POINT()
+            last_pos = None  # 직전 커서 위치 (이동 감지용)
+            last_efp_pos = None  # 마지막으로 EFP 한 위치 (중복 호출 방지)
             while not worker_stop.is_set():
                 # 1) 클릭 확정 → 그 좌표 최종(정밀) 캡처
                 if final["pt"] is not None and not final_done.is_set():
@@ -189,11 +191,33 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
                     _hover_rect = None
                     time.sleep(_HOVER_INTERVAL_S)
                     continue
-                # 3) 실시간 hover 샘플링
+                # 3) 실시간 hover 샘플링 — **디바운스**(handoff §49 fix7).
+                #    마우스가 움직이는 동안엔 EFP 를 호출하지 않는다. UIA EFP(COM)는
+                #    GIL 을 점유해서, 이동 중 매 루프 호출하면 LL 마우스 후크 콜백이
+                #    GIL 을 못 얻어 시스템 마우스 입력 전체가 멈춘다(사용자 실측: 포인터
+                #    정지). 커서가 멈춘 순간에만 1회 EFP → 박스 갱신. 이동 중엔 sleep 만
+                #    돌며 GIL 을 양보하므로 후크가 부드럽게 동작한다.
                 try:
                     user32.GetCursorPos(ctypes.byref(wpt))
-                    el = capture_element_at(int(wpt.x), int(wpt.y))
-                    # rect 는 [l,t,r,b] 리스트 → 프런트가 키 접근하므로 dict 정규화.
+                    cur = (int(wpt.x), int(wpt.y))
+                except Exception:
+                    cur = None
+                if cur is None:
+                    time.sleep(0.02)
+                    continue
+                if cur != last_pos:
+                    # 이동 중 — EFP 스킵(GIL 양보). 박스는 직전 위치 유지.
+                    last_pos = cur
+                    time.sleep(0.015)
+                    continue
+                if cur == last_efp_pos:
+                    # 멈춰 있고 이미 이 위치 EFP 함 — 중복 호출 안 함.
+                    time.sleep(0.03)
+                    continue
+                # 커서 정지 + 새 위치 → EFP 1회.
+                last_efp_pos = cur
+                try:
+                    el = capture_element_at(cur[0], cur[1])
                     r = el.get("rect") if el else None
                     if r and len(r) == 4:
                         _hover_rect = {"left": r[0], "top": r[1], "right": r[2], "bottom": r[3]}
@@ -201,7 +225,7 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
                         _hover_rect = None
                 except Exception:
                     _hover_rect = None
-                time.sleep(_HOVER_INTERVAL_S)
+                time.sleep(0.02)
         finally:
             try:
                 ctypes.windll.ole32.CoUninitialize()
