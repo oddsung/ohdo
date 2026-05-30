@@ -53,6 +53,7 @@ export const ko = {
     stepCreated: "STEP {{id}} 생성 완료",
     pickPrefix: "요소 선택: {{message}}",
     pickElementTitle: "UI 요소 선택 (3초 카운트다운 후 커서 위치 캡처)",
+    captureTitle: "화면 영역 캡처 (드래그해서 이미지 첨부)",
     runFromHere: "여기서부터 실행",
     regenerate: "재생성",
     regenerating: "재생성 중…",
@@ -108,6 +109,10 @@ export const ko = {
   pick: {
     overlayHint: "선택할 UI 요소를 클릭하세요 (Esc 취소)",
     captureFailed: "element 캡처 실패",
+  },
+  capture: {
+    saved: "영역 캡처 첨부됨 ({{w}}×{{h}})",
+    failed: "영역 캡처 실패: {{message}}",
   },
   ws: {
     connError: "WebSocket 연결 오류",

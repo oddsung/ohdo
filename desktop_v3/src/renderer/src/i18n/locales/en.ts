@@ -55,6 +55,7 @@ export const en: Catalog = {
     stepCreated: "STEP {{id}} created",
     pickPrefix: "Element pick: {{message}}",
     pickElementTitle: "Pick a UI element (capture cursor position after a 3s countdown)",
+    captureTitle: "Capture a screen region (drag to attach an image)",
     runFromHere: "Run from here",
     regenerate: "Regenerate",
     regenerating: "Regenerating…",
@@ -110,6 +111,10 @@ export const en: Catalog = {
   pick: {
     overlayHint: "Click the UI element to select (Esc to cancel)",
     captureFailed: "element capture failed",
+  },
+  capture: {
+    saved: "Region captured ({{w}}×{{h}})",
+    failed: "Region capture failed: {{message}}",
   },
   ws: {
     connError: "WebSocket connection error",

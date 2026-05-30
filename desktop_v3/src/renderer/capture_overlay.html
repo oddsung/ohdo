@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- 오버레이는 IPC(preload)로만 통신 — 네트워크 불필요. 최소 CSP (self 스크립트만). -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self';"
+    />
+    <title>ohdo region capture</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        /* 드래그 영역을 받아야 하므로 클릭통과 아님. 살짝 어둡게 깔아 캡처 모드임을 표시. */
+        background: rgba(0, 0, 0, 0.25);
+        cursor: crosshair;
+        user-select: none;
+      }
+      /* 드래그 중 그려지는 선택 사각형. */
+      #sel {
+        position: fixed;
+        border: 2px solid #3b82f6;
+        background: rgba(59, 130, 246, 0.12);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+        pointer-events: none;
+        display: none;
+        z-index: 1;
+      }
+      /* 상단 안내 배너. */
+      #hint {
+        position: fixed;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 18px;
+        border-radius: 9999px;
+        background: rgba(20, 20, 24, 0.92);
+        color: #f4f4f5;
+        font:
+          14px/1.4 "Segoe UI",
+          system-ui,
+          sans-serif;
+        border: 1px solid rgba(59, 130, 246, 0.7);
+        z-index: 2;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sel"></div>
+    <div id="hint">드래그해서 캡처할 영역을 선택하세요 · Esc 취소</div>
+    <script type="module" src="/capture_overlay.ts"></script>
+  </body>
+</html>

@@ -16,6 +16,9 @@ const api = {
   // element picker 투명 오버레이 제어 (handoff §49) — 메인 윈도우에서 호출.
   startPickOverlay: (): Promise<void> => ipcRenderer.invoke("pick:start"),
   stopPickOverlay: (): Promise<void> => ipcRenderer.invoke("pick:stop"),
+  // 스크린 영역 캡처 (handoff §60) — 드래그 오버레이 → 물리 픽셀 사각형 반환(취소 시 null).
+  captureRegion: (): Promise<{ left: number; top: number; width: number; height: number } | null> =>
+    ipcRenderer.invoke("capture:start"),
   // 작업 녹화 시 메인 윈도우 최소화/복원 (§49).
   minimizeForRecord: (): Promise<void> => ipcRenderer.invoke("record:minimize"),
   restoreFromRecord: (): Promise<void> => ipcRenderer.invoke("record:restore"),
@@ -31,6 +34,13 @@ contextBridge.exposeInMainWorld("ohdo", api);
 // 오버레이 창 전용 — hover rect 폴링 (main 이 물리픽셀→오버레이 로컬 CSS px 변환).
 contextBridge.exposeInMainWorld("ohdoPick", {
   hover: () => ipcRenderer.invoke("pick:hover"),
+});
+
+// 캡처 오버레이 전용 — 드래그 결과/취소를 main 으로 (handoff §60).
+contextBridge.exposeInMainWorld("ohdoCapture", {
+  done: (rect: { x: number; y: number; w: number; h: number }) =>
+    ipcRenderer.send("capture:done", rect),
+  cancel: () => ipcRenderer.send("capture:cancel"),
 });
 
 export type OhdoApi = typeof api;

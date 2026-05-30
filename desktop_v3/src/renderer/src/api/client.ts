@@ -153,6 +153,26 @@ export function cancelPick(): Promise<{ cancelled: boolean }> {
   return apiFetch("/pick/cancel", { method: "POST" });
 }
 
+// ── 스크린 영역 캡처 (handoff §60, 백로그 #13) ──────────
+
+export interface CaptureResult {
+  success: boolean;
+  path: string;
+  width: number;
+  height: number;
+}
+
+/** 드래그한 영역(물리 픽셀)을 grab → 세션 captures 에 PNG 저장. 저장 경로 반환. */
+export function captureRegion(
+  sessionId: string,
+  rect: { left: number; top: number; width: number; height: number },
+): Promise<CaptureResult> {
+  return apiFetch<CaptureResult>("/capture/region", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, ...rect }),
+  });
+}
+
 export interface SessionBlocks {
   library_code: string;
   initial_code: string;

@@ -68,6 +68,7 @@ async def ws_generate(ws: WebSocket) -> None:
     user_request = (req or {}).get("user_request", "")
     element_context = (req or {}).get("element_context")
     is_browser_element = bool((req or {}).get("is_browser_element", False))
+    images = (req or {}).get("images") or None  # 첨부 이미지 경로 (handoff §60 #13)
     if not user_request:
         await ws.send_json({"type": "error", "message": "user_request 가 비어 있습니다."})
         await ws.close()
@@ -89,6 +90,7 @@ async def ws_generate(ws: WebSocket) -> None:
                 prompt_builder=service.prompt_builder,
                 element_context=element_context,
                 is_browser_element=is_browser_element,
+                images=images,
                 on_progress=lambda m: _emit({"type": "progress", "message": str(m)}),
             )
             if step is None or not response.success:

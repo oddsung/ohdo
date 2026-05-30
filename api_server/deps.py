@@ -66,6 +66,9 @@ class GenerateRequest(BaseModel):
     # element picker (handoff §40 #3) 로 잡은 element 컨텍스트 — 있으면 AI prompt 에 첨부.
     element_context: Optional[str] = None
     is_browser_element: bool = False
+    # 첨부 이미지 경로 (handoff §60 백로그 #13) — /capture/region 이 저장한 PNG 경로들.
+    # core generate_step(images=[...]) 로 전달 → step.captures + 멀티모달 프롬프트.
+    images: Optional[list[str]] = None
 
 
 class UpdateStepRequest(BaseModel):

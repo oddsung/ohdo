@@ -41,6 +41,7 @@ from api_server.deps import (  # noqa: F401  (CreateSessionRequest/Generate/Upda
 )
 from api_server.routes import (
     ai,
+    capture,
     environment,
     execution,
     generate,
@@ -109,5 +110,6 @@ def create_app(token: str = "", data_dir: "str | Path | None" = None) -> FastAPI
     app.include_router(settings.router)
     app.include_router(ai.router)
     app.include_router(environment.router)
+    app.include_router(capture.router)
 
     return app

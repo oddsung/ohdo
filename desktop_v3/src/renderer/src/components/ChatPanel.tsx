@@ -11,7 +11,9 @@ import {
   ChevronsDown,
   Circle,
   Cog,
+  Camera,
   Flag,
+  ImageIcon,
   Library,
   Loader2,
   MousePointerClick,
@@ -36,6 +38,7 @@ import {
 import { generateStream } from "@/api/ws";
 import { useUiStore } from "@/store/uiStore";
 import { usePickStore } from "@/store/pickStore";
+import { useCaptureStore } from "@/store/captureStore";
 import { useRecordStore } from "@/store/recordStore";
 import { toast } from "@/store/toastStore";
 import { useExecution } from "@/hooks/useExecution";
@@ -259,6 +262,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
   const { picking, pending, error: pickError, startPick, clearPending } = usePickStore();
   const {
+    capturing,
+    images: pendingImages,
+    startCapture,
+    removeImage,
+    clear: clearImages,
+  } = useCaptureStore();
+  const {
     recording,
     eventCount,
     busy: recBusy,
@@ -275,11 +285,17 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     mutationFn: (req: string) =>
       new Promise<GenerateResult>((resolve, reject) => {
         setProgress("");
-        generateStream(sessionId, req, usePickStore.getState().pending, {
-          onProgress: (m) => setProgress(m),
-          onDone: (result) => resolve(result),
-          onError: (msg) => reject(new Error(msg)),
-        }).catch(reject);
+        generateStream(
+          sessionId,
+          req,
+          usePickStore.getState().pending,
+          {
+            onProgress: (m) => setProgress(m),
+            onDone: (result) => resolve(result),
+            onError: (msg) => reject(new Error(msg)),
+          },
+          useCaptureStore.getState().images.map((im) => im.path),
+        ).catch(reject);
       }),
     onSettled: () => setProgress(""),
     onSuccess: (result) => {
@@ -364,6 +380,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     if (req && !busy) {
       genMut.mutate(req);
       if (pending) clearPending(); // 한 요청에 한 번만 첨부
+      if (pendingImages.length) clearImages(); // 첨부 이미지도 한 요청에 한 번만
     }
   };
 
@@ -532,6 +549,28 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
+      {pendingImages.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-black/20 px-3 pt-2">
+          {pendingImages.map((im) => (
+            <span
+              key={im.path}
+              className="flex items-center gap-1 rounded-full bg-blue-500/20 px-2 py-1 text-xs text-discord-text"
+              title={im.path}
+            >
+              <ImageIcon className="h-3 w-3 shrink-0 text-blue-400" />
+              <span className="truncate">{im.width}×{im.height}</span>
+              <button
+                onClick={() => removeImage(im.path)}
+                className="ml-1 shrink-0 hover:text-white"
+                title={t("chat.removeAttach")}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="border-t border-black/20 p-3">
         <div className="flex items-end gap-2">
           <Button
@@ -543,6 +582,16 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             onClick={() => startPick()}
           >
             <MousePointerClick className="h-5 w-5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-[60px] w-10 shrink-0 text-discord-muted hover:text-blue-400"
+            title={t("chat.captureTitle")}
+            disabled={busy || capturing}
+            onClick={() => startCapture(sessionId)}
+          >
+            {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
           </Button>
           <Textarea
             value={input}

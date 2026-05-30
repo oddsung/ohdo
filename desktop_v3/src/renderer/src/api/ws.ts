@@ -99,6 +99,7 @@ export async function generateStream(
   userRequest: string,
   pending: PendingElement | null,
   handlers: GenerateStreamHandlers,
+  images?: string[] | null, // 첨부 이미지 경로 (handoff §60 #13)
 ): Promise<void> {
   const info = await window.ohdo.getApiInfo();
   if (!info) throw new Error(i18n.t("bridge.disconnected"));
@@ -114,6 +115,7 @@ export async function generateStream(
         user_request: userRequest,
         element_context: pending?.label ?? null,
         is_browser_element: pending?.isBrowser ?? false,
+        images: images && images.length ? images : null,
       }),
     );
   };

@@ -12805,6 +12805,62 @@ if __name__ == "__main__":
         res4 = client.post("/sessions/import", json={"source_dir": out_parent})
         self.assert_equal(res4.status_code, 400, "session.json 없는 폴더 import 400")
 
+    def test_225_api_server_capture_region_route(self):
+        """[handoff §60 #13] 스크린 영역 캡처 라우트 + GenerateRequest.images 배선.
+
+        POST /capture/region → capture_pump.capture_region (mss grab) → 세션 captures
+        저장. core 0줄(공개 get_captures_dir + generate_step images 파라미터 재사용).
+        실제 grab 은 디스플레이 의존이라 미호출 — 라우트/가드/빈영역/images 스키마만 검증.
+        """
+        import inspect
+        import tempfile
+
+        from api_server.server import create_app
+
+        self.step("(1) /capture/region 라우트 등록 확인")
+        app = create_app(token="", data_dir=tempfile.mkdtemp(prefix="ohdo_cap_"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(("/capture/region", "POST") in pairs, "POST /capture/region 라우트 필수")
+
+        self.step("(2) GenerateRequest.images 필드 + capture_pump import-safe")
+        from api_server.deps import GenerateRequest
+
+        gr = GenerateRequest(user_request="x", images=["/tmp/a.png"])
+        self.assert_equal(gr.images, ["/tmp/a.png"], "GenerateRequest.images 필드 필수")
+        gr2 = GenerateRequest(user_request="x")
+        self.assert_true(gr2.images is None, "images 기본 None")
+
+        from api_server.capture_pump import capture_region
+
+        empty = capture_region(PROJECT_ROOT / "data", 0, 0, 0, 0)
+        self.assert_true(empty.get("success") is False, "빈 영역(0×0) 거부")
+
+        self.step("(3) core generate_step images 파라미터 시그니처 (core 0줄)")
+        from core.app_service import AppService
+
+        sig = inspect.signature(AppService.generate_step)
+        self.assert_true("images" in sig.parameters, "core generate_step images 파라미터 존재")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트/스키마 가드까지만")
+            return
+
+        client = TestClient(app)
+        self.step("(4) 없는 세션 → 404 / 필드 누락 → 422")
+        res = client.post(
+            "/capture/region",
+            json={"session_id": "nope", "left": 0, "top": 0, "width": 10, "height": 10},
+        )
+        self.assert_equal(res.status_code, 404, "없는 세션 404")
+        res2 = client.post("/capture/region", json={"session_id": "x"})
+        self.assert_equal(res2.status_code, 422, "필드 누락 422")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

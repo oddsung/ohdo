@@ -28,6 +28,7 @@ let pyProc: ChildProcessWithoutNullStreams | null = null;
 let apiInfo: ApiInfo | null = null;
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
+let captureWindow: BrowserWindow | null = null;
 
 /** 프로젝트 루트 = desktop_v3/ 의 부모. dev 에서 .venv 와 api_server 가 여기에 있다. */
 function projectRoot(): string {
@@ -285,6 +286,88 @@ function closePickOverlay(): void {
   }
 }
 
+/** 가상 데스크톱 전체를 덮는 union bounds (DIP). picker/capture 오버레이 공용. */
+function virtualBounds(): { x: number; y: number; width: number; height: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const d of screen.getAllDisplays()) {
+    minX = Math.min(minX, d.bounds.x);
+    minY = Math.min(minY, d.bounds.y);
+    maxX = Math.max(maxX, d.bounds.x + d.bounds.width);
+    maxY = Math.max(maxY, d.bounds.y + d.bounds.height);
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** 스크린 영역 캡처 오버레이 (handoff §60, 백로그 #13).
+ *
+ * picker 오버레이와 달리 **클릭통과 아님** — 드래그로 사각형을 직접 받는다.
+ * 오버레이가 mouseup 시 오버레이-로컬 CSS px 사각형을 IPC(capture:done)로 보내면
+ * main 이 DIP→물리 픽셀로 변환해 resolve 한다(아래 registerCaptureIpc). Esc=취소.
+ */
+function createCaptureOverlay(): void {
+  if (captureWindow) return;
+  const b = virtualBounds();
+  captureWindow = new BrowserWindow({
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    height: b.height,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    enableLargerThanScreen: true,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, "../preload/index.js"),
+      sandbox: false,
+    },
+  });
+  captureWindow.setAlwaysOnTop(true, "screen-saver");
+
+  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  if (devUrl) {
+    captureWindow.loadURL(`${devUrl}/capture_overlay.html`);
+  } else {
+    captureWindow.loadFile(join(__dirname, "../renderer/capture_overlay.html"));
+  }
+  captureWindow.once("ready-to-show", () => captureWindow?.show());
+  captureWindow.on("closed", () => {
+    captureWindow = null;
+  });
+}
+
+function closeCaptureOverlay(): void {
+  if (captureWindow) {
+    captureWindow.destroy();
+    captureWindow = null;
+  }
+}
+
+/** 오버레이-로컬 CSS px(DIP) 사각형 → 물리 픽셀(가상 데스크톱 좌표). 멀티모니터/고DPI 대응. */
+function overlayCssRectToPhysical(rect: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}): { left: number; top: number; width: number; height: number } | null {
+  if (!captureWindow) return null;
+  const b = captureWindow.getBounds();
+  // 오버레이-로컬 CSS px → 스크린 DIP(창 origin 더함) → dipToScreenPoint → 물리 px.
+  const tl = screen.dipToScreenPoint({ x: b.x + rect.x, y: b.y + rect.y });
+  const br = screen.dipToScreenPoint({ x: b.x + rect.x + rect.w, y: b.y + rect.y + rect.h });
+  return { left: tl.x, top: tl.y, width: br.x - tl.x, height: br.y - tl.y };
+}
+
 /** Python 물리픽셀 rect → 오버레이 로컬 CSS px(DIP). 멀티모니터/고DPI 대응. */
 function physicalRectToOverlayCss(rect: {
   left: number;
@@ -330,6 +413,40 @@ function registerPickIpc(): void {
   ipcMain.handle("pick:stop", () => {
     closePickOverlay();
     if (mainWindow?.isMinimized()) mainWindow.restore();
+  });
+
+  // 스크린 영역 캡처 (handoff §60, 백로그 #13). 메인 minimize → 캡처 오버레이로 드래그
+  // → 오버레이가 capture:done/capture:cancel(IPC send) → main 이 DIP→물리 변환해 resolve.
+  // 반환: 물리 픽셀 사각형 {left,top,width,height} 또는 null(취소). 한 번에 하나만.
+  ipcMain.handle("capture:start", () => {
+    return new Promise<{ left: number; top: number; width: number; height: number } | null>(
+      (resolve) => {
+        let settled = false;
+        const cleanup = () => {
+          ipcMain.removeListener("capture:done", onDone);
+          ipcMain.removeListener("capture:cancel", onCancel);
+          closeCaptureOverlay();
+          if (mainWindow?.isMinimized()) mainWindow.restore();
+        };
+        const finish = (value: { left: number; top: number; width: number; height: number } | null) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(value);
+        };
+        const onDone = (_e: unknown, rect: { x: number; y: number; w: number; h: number }) => {
+          finish(overlayCssRectToPhysical(rect));
+        };
+        const onCancel = () => finish(null);
+        ipcMain.once("capture:done", onDone);
+        ipcMain.once("capture:cancel", onCancel);
+
+        mainWindow?.minimize();
+        createCaptureOverlay();
+        // 오버레이 창이 닫히면(예: 외부 요인) 취소로 간주.
+        captureWindow?.on("closed", () => finish(null));
+      },
+    );
   });
 
   // 작업 녹화 시작/종료 시 메인 윈도우 최소화/복원 (사용자 요청, §49).

@@ -13,6 +13,8 @@ export interface OhdoBridge {
   // element picker 투명 오버레이 제어 (handoff §49).
   startPickOverlay: () => Promise<void>;
   stopPickOverlay: () => Promise<void>;
+  // 스크린 영역 캡처 (handoff §60) — 드래그 오버레이 → 물리 픽셀 사각형(취소 시 null).
+  captureRegion: () => Promise<{ left: number; top: number; width: number; height: number } | null>;
   // 작업 녹화 시 메인 윈도우 최소화/복원 (§49).
   minimizeForRecord: () => Promise<void>;
   restoreFromRecord: () => Promise<void>;

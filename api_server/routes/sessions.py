@@ -273,6 +273,7 @@ async def generate(
         prompt_builder=service.prompt_builder,
         element_context=body.element_context,
         is_browser_element=body.is_browser_element,
+        images=body.images or None,
     )
 
     if step is None or not response.success:
