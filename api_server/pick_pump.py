@@ -149,88 +149,19 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
 
     global _hover_rect, _overlay_hwnd
     captured: dict = {"pt": None}
-    # 워커(UIA)와 펌프(후크) 스레드 간 최종 캡처 핸드오프.
-    final: dict = {"pt": None, "element": None}
-    final_done = threading.Event()
-    worker_stop = threading.Event()
     _hover_rect = None
     _cancel.clear()
     _paused.clear()
     _active.set()
 
-    # ── UIA 워커 스레드 (handoff §49 fix6 — 마우스 느려짐 해결) ──
-    # 무거운 UIA EFP(capture_element_at)를 LL 후크 스레드에서 떼어내 별도 스레드로.
-    # 후크 스레드가 EFP 로 블록되면 그동안 PeekMessage 가 안 돌아 Windows 가 전역
-    # 마우스 입력을 후크에 동기 전달하려다 멈칫 → 마우스 끊김. 워커로 분리하면 후크
-    # 스레드는 항상 메시지만 펌프(즉시 반환) → 마우스 부드러움. (§42/PR-17 drain 패턴)
-    # 모든 capture_element_at 호출은 이 워커 한 스레드에서만 → COM apartment 일관성.
-    def _uia_worker() -> None:
-        global _hover_rect
-        try:
-            ctypes.windll.ole32.CoInitializeEx(None, 0x2)  # STA
-        except Exception:
-            pass
-        try:
-            from core.element_inspect import capture_element_at
-
-            wpt = ctypes.wintypes.POINT()
-            last_pos = None  # 직전 커서 위치 (이동 감지용)
-            last_efp_pos = None  # 마지막으로 EFP 한 위치 (중복 호출 방지)
-            while not worker_stop.is_set():
-                # 1) 클릭 확정 → 그 좌표 최종(정밀) 캡처
-                if final["pt"] is not None and not final_done.is_set():
-                    fx, fy = final["pt"]
-                    try:
-                        final["element"] = capture_element_at(fx, fy)
-                    except Exception:
-                        final["element"] = None
-                    final_done.set()
-                    continue
-                # 2) 일시정지 중엔 하이라이트 끔 (클릭은 대상 앱으로 통과)
-                if _paused.is_set():
-                    _hover_rect = None
-                    time.sleep(_HOVER_INTERVAL_S)
-                    continue
-                # 3) 실시간 hover 샘플링 — **디바운스**(handoff §49 fix7).
-                #    마우스가 움직이는 동안엔 EFP 를 호출하지 않는다. UIA EFP(COM)는
-                #    GIL 을 점유해서, 이동 중 매 루프 호출하면 LL 마우스 후크 콜백이
-                #    GIL 을 못 얻어 시스템 마우스 입력 전체가 멈춘다(사용자 실측: 포인터
-                #    정지). 커서가 멈춘 순간에만 1회 EFP → 박스 갱신. 이동 중엔 sleep 만
-                #    돌며 GIL 을 양보하므로 후크가 부드럽게 동작한다.
-                try:
-                    user32.GetCursorPos(ctypes.byref(wpt))
-                    cur = (int(wpt.x), int(wpt.y))
-                except Exception:
-                    cur = None
-                if cur is None:
-                    time.sleep(0.02)
-                    continue
-                if cur != last_pos:
-                    # 이동 중 — EFP 스킵(GIL 양보). 박스는 직전 위치 유지.
-                    last_pos = cur
-                    time.sleep(0.015)
-                    continue
-                if cur == last_efp_pos:
-                    # 멈춰 있고 이미 이 위치 EFP 함 — 중복 호출 안 함.
-                    time.sleep(0.03)
-                    continue
-                # 커서 정지 + 새 위치 → EFP 1회.
-                last_efp_pos = cur
-                try:
-                    el = capture_element_at(cur[0], cur[1])
-                    r = el.get("rect") if el else None
-                    if r and len(r) == 4:
-                        _hover_rect = {"left": r[0], "top": r[1], "right": r[2], "bottom": r[3]}
-                    else:
-                        _hover_rect = None
-                except Exception:
-                    _hover_rect = None
-                time.sleep(0.02)
-        finally:
-            try:
-                ctypes.windll.ole32.CoUninitialize()
-            except Exception:
-                pass
+    # COM(UIA) STA 초기화. **단일 스레드 구조**(handoff §49 fix8): 후크 설치 + 메시지
+    # 펌프 + EFP 가 모두 이 한 스레드에서 돈다. fix6 의 워커 스레드 분리는 EFP(COM)가
+    # GIL 을 점유해 LL 마우스 후크 콜백(다른 스레드)이 GIL 을 굶겨 마우스 전체가 멈추는
+    # 회귀를 만들었음. 단일 스레드는 GIL 경쟁 자체가 없다(7c134a2 동작 검증).
+    try:
+        ctypes.windll.ole32.CoInitializeEx(None, 0x2)
+    except Exception:
+        pass
 
     def _mouse_proc(n_code, w_param, l_param):
         if n_code == _HC_ACTION and w_param == _WM_LBUTTONDOWN and captured["pt"] is None:
@@ -265,35 +196,33 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
     h_mouse = user32.SetWindowsHookExW(_WH_MOUSE_LL, mouse_cb, None, 0)
     h_kbd = user32.SetWindowsHookExW(_WH_KEYBOARD_LL, kbd_cb, None, 0)
 
-    worker = threading.Thread(target=_uia_worker, name="ohdo-pick-uia", daemon=True)
-    worker.start()
-
     try:
         if not h_mouse:
             return {"success": False, "error": "마우스 훅 설치 실패"}
 
         from core.app_service import format_element_label
+        from core.element_inspect import capture_element_at
 
+        pt = ctypes.wintypes.POINT()
         msg = ctypes.wintypes.MSG()
         start = time.monotonic()
         last_topmost = 0.0
-        # ── 후크 스레드: 메시지 펌프만 (UIA 호출 없음 → 항상 즉시 반환, 마우스 비차단) ──
+        last_pos = None  # 직전 커서 위치 (이동 감지)
+        last_efp_pos = None  # 마지막으로 EFP 한 위치 (정지 시 1회만)
         while True:
+            # ── 메시지 펌프 — LL 후크 콜백 발화. 단일 스레드라 GIL 경쟁 없음. ──
             while user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1):  # PM_REMOVE
                 user32.TranslateMessage(ctypes.byref(msg))
                 user32.DispatchMessageW(ctypes.byref(msg))
-            # 클릭 확정 → 워커에 최종 캡처 요청.
-            if captured["pt"] is not None and final["pt"] is None:
-                final["pt"] = captured["pt"]
-            if final_done.is_set():
+            if captured["pt"] is not None:
                 break
             if _cancel.is_set():
                 return {"success": False, "cancelled": True}
             now = time.monotonic()
             if now - start > timeout_s:
                 return {"success": False, "cancelled": True, "error": "시간 초과"}
-            # ── 오버레이를 작업표시줄 위로 강제 (SetWindowPos HWND_TOPMOST 주기 재적용) ──
-            # 빠른 호출이라 후크 비차단. (작업표시줄 z-order 는 §49 미해결 — 보류)
+
+            # ── 오버레이를 작업표시줄 위로 (빠른 호출, 후크 비차단) — §49 미해결분 유지 ──
             if _overlay_hwnd and now - last_topmost >= _TOPMOST_INTERVAL_S:
                 last_topmost = now
                 try:
@@ -308,10 +237,42 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
                     )
                 except Exception:
                     pass
-            time.sleep(0.005)
+
+            # ── hover 하이라이트 — **디바운스**(handoff §49 fix7/8) ──
+            # 이동 중엔 EFP(무거운 UIA)를 건너뛴다 → 매 루프 PeekMessage 가 빠르게 돌아
+            # 후크 콜백이 즉시 dispatch → 마우스 부드러움. 커서가 멈춘 새 위치에서만 1회
+            # EFP → 박스 갱신. (정지 상태의 EFP 는 마우스 안 움직이므로 체감 영향 없음.)
+            if _paused.is_set():
+                _hover_rect = None
+            else:
+                try:
+                    user32.GetCursorPos(ctypes.byref(pt))
+                    cur = (int(pt.x), int(pt.y))
+                except Exception:
+                    cur = None
+                if cur is not None:
+                    if cur != last_pos:
+                        last_pos = cur  # 이동 중 — EFP 스킵(다음 루프로)
+                    elif cur != last_efp_pos:
+                        last_efp_pos = cur  # 정지 + 새 위치 → EFP 1회
+                        try:
+                            el = capture_element_at(cur[0], cur[1])
+                            r = el.get("rect") if el else None
+                            if r and len(r) == 4:
+                                _hover_rect = {
+                                    "left": r[0],
+                                    "top": r[1],
+                                    "right": r[2],
+                                    "bottom": r[3],
+                                }
+                            else:
+                                _hover_rect = None
+                        except Exception:
+                            _hover_rect = None
+            time.sleep(0.01)
 
         x, y = captured["pt"]
-        element = final["element"]
+        element = capture_element_at(x, y)
         if not element:
             return {
                 "success": False,
@@ -329,12 +290,14 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
             "is_browser_element": is_browser,
         }
     finally:
-        worker_stop.set()
-        worker.join(timeout=1.0)
         if h_mouse:
             user32.UnhookWindowsHookEx(h_mouse)
         if h_kbd:
             user32.UnhookWindowsHookEx(h_kbd)
+        try:
+            ctypes.windll.ole32.CoUninitialize()
+        except Exception:
+            pass
         _hover_rect = None
         _overlay_hwnd = None
         _paused.clear()
