@@ -3,7 +3,7 @@
 // 전역: 단축키(useShortcuts) + 요소 선택 오버레이(PickOverlay) + 토스트(Toaster).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { createSession, fetchSession } from "./api/client";
+import { createSession, fetchSession, fetchBlocks } from "./api/client";
 import { useUiStore } from "./store/uiStore";
 import { usePickStore } from "./store/pickStore";
 import { useExecStore } from "./store/execStore";
@@ -29,21 +29,38 @@ function ServerRail() {
 }
 
 function CodePane({ sessionId }: { sessionId: string }) {
+  const { t } = useTranslation();
   const selectedStepId = useUiStore((st) => st.selectedStepId);
+  const selectedBlock = useUiStore((st) => st.selectedBlock);
   const { data: session } = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => fetchSession(sessionId),
   });
+  // 블록 코드는 step 변경 시 함께 바뀌므로 updated_at 을 키에 넣어 자동 갱신.
+  const { data: blocks } = useQuery({
+    queryKey: ["blocks", sessionId, session?.updated_at],
+    queryFn: () => fetchBlocks(sessionId),
+    enabled: !!session,
+  });
   const step = session?.steps.find((s) => s.step_id === selectedStepId);
+
+  // 표시 대상 결정: 블록 선택 > step 선택. 블록은 stepId=null 로 넘겨 read-only 강제.
+  let stepId: number | null = step?.step_id ?? null;
+  let code = step?.generated_code ?? "";
+  let title: string | undefined = step ? `STEP ${step.step_id}` : undefined;
+  if (selectedBlock === "library") {
+    stepId = null;
+    code = blocks?.library_code ?? "";
+    title = t("blocks.libraryTitle");
+  } else if (selectedBlock === "initial") {
+    stepId = null;
+    code = blocks?.initial_code ?? "";
+    title = t("blocks.initialTitle");
+  }
   return (
     <div className="hidden w-[44%] min-w-[360px] flex-col border-l border-black/30 lg:flex">
       <div className="min-h-0 flex-1">
-        <CodeViewer
-          sessionId={sessionId}
-          stepId={step?.step_id ?? null}
-          code={step?.generated_code ?? ""}
-          title={step ? `STEP ${step.step_id}` : undefined}
-        />
+        <CodeViewer sessionId={sessionId} stepId={stepId} code={code} title={title} />
       </div>
       <LogConsole />
     </div>

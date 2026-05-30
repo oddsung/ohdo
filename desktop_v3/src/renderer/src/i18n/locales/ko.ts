@@ -77,6 +77,17 @@ export const ko = {
     saveFailed: "저장 실패: {{message}}",
     saved: "코드 저장됨",
     selectStep: "코드가 있는 step 을 선택하세요.",
+    copy: "코드 복사",
+    copied: "코드를 클립보드에 복사했습니다",
+    copyFailed: "복사 실패: {{message}}",
+  },
+  blocks: {
+    library: "Library 블록",
+    libraryDesc: "imports + 헬퍼 (읽기 전용)",
+    libraryTitle: "LIBRARY",
+    initial: "Initial 블록",
+    initialDesc: "모듈 레벨 setup (읽기 전용)",
+    initialTitle: "INITIAL",
   },
   console: {
     label: "콘솔",

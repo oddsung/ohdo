@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Pencil, Save, X } from "lucide-react";
+import { Copy, Pencil, Save, X } from "lucide-react";
 import { updateStepCode } from "@/api/client";
 import { toast } from "@/store/toastStore";
 import { Button } from "@/components/ui/button";
@@ -42,15 +42,35 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
 
   const canEdit = stepId != null && !!code;
 
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(editing ? draft : code);
+      toast.success(t("code.copied"));
+    } catch (e) {
+      toast.error(t("code.copyFailed", { message: (e as Error).message }));
+    }
+  };
+
   return (
     <div className="flex h-full flex-col bg-discord-rail">
       <header className="flex h-9 items-center justify-between border-b border-black/30 px-3 text-xs text-discord-muted">
         <span>
           {title ?? t("code.title")} · {editing ? t("code.editing") : t("code.readOnly")}
         </span>
-        {canEdit && (
-          <div className="flex items-center gap-1">
-            {editing ? (
+        <div className="flex items-center gap-1">
+          {!!code && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6"
+              title={t("code.copy")}
+              onClick={onCopy}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {canEdit &&
+            (editing ? (
               <>
                 <Button
                   size="sm"
@@ -84,9 +104,8 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
               >
                 <Pencil className="mr-1 h-3 w-3" /> {t("code.edit")}
               </Button>
-            )}
-          </div>
-        )}
+            ))}
+        </div>
       </header>
       {saveMut.isError && (
         <div className="bg-red-950/30 px-3 py-1 text-xs text-red-300">

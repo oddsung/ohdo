@@ -10,7 +10,9 @@ import {
   ArrowUp,
   ChevronsDown,
   Circle,
+  Cog,
   Flag,
+  Library,
   Loader2,
   MousePointerClick,
   Play,
@@ -23,6 +25,7 @@ import {
 } from "lucide-react";
 import {
   fetchSession,
+  fetchBlocks,
   deleteStep,
   moveStep,
   insertStep,
@@ -83,6 +86,28 @@ function CardAction({
     >
       {children}
     </Button>
+  );
+}
+
+/** Library/Initial 파생 블록 카드 (§47 #11) — 선택 시 CodeViewer 에 read-only 표시. */
+function BlockCard({ kind, active, onSelect }: { kind: "library" | "initial"; active: boolean; onSelect: () => void }) {
+  const { t } = useTranslation();
+  const Icon = kind === "library" ? Library : Cog;
+  return (
+    <div
+      onClick={onSelect}
+      className={`flex w-full cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-left transition-colors ${
+        active
+          ? "border-primary/60 bg-discord-card"
+          : "border-transparent bg-discord-card/40 hover:bg-discord-card"
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0 text-discord-muted" />
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-discord-text">{t(`blocks.${kind}`)}</div>
+        <div className="truncate text-xs text-discord-muted">{t(`blocks.${kind}Desc`)}</div>
+      </div>
+    </div>
   );
 }
 
@@ -210,6 +235,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const { t } = useTranslation();
   const selectStep = useUiStore((st) => st.selectStep);
+  const selectBlock = useUiStore((st) => st.selectBlock);
+  const selectedBlock = useUiStore((st) => st.selectedBlock);
   const { running, run, stop } = useExecution(sessionId);
   const [input, setInput] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -221,6 +248,12 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const { data: session, isLoading } = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => fetchSession(sessionId),
+  });
+  // 블록 카드 노출 여부 판단용 (비어있는 블록은 카드 숨김). CodePane 과 동일 키로 dedup.
+  const { data: blocks } = useQuery({
+    queryKey: ["blocks", sessionId, session?.updated_at],
+    queryFn: () => fetchBlocks(sessionId),
+    enabled: !!session,
   });
 
   const { picking, pending, error: pickError, startPick, clearPending } = usePickStore();
@@ -425,6 +458,20 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           {isLoading && <p className="text-sm text-discord-muted">{t("chat.loadingSession")}</p>}
           {session && session.steps.length === 0 && (
             <p className="px-1 py-6 text-center text-sm text-discord-muted">{t("chat.emptyHint")}</p>
+          )}
+          {session && session.steps.length > 0 && blocks?.library_code?.trim() && (
+            <BlockCard
+              kind="library"
+              active={selectedBlock === "library"}
+              onSelect={() => selectBlock("library")}
+            />
+          )}
+          {session && session.steps.length > 0 && blocks?.initial_code?.trim() && (
+            <BlockCard
+              kind="initial"
+              active={selectedBlock === "initial"}
+              onSelect={() => selectBlock("initial")}
+            />
           )}
           {session?.steps.map((s, i) => (
             <StepCard

@@ -153,6 +153,16 @@ export function cancelPick(): Promise<{ cancelled: boolean }> {
   return apiFetch("/pick/cancel", { method: "POST" });
 }
 
+export interface SessionBlocks {
+  library_code: string;
+  initial_code: string;
+}
+
+/** Library/Initial 파생 블록 코드 (§47 #11) — read-only 표시용. */
+export function fetchBlocks(sessionId: string): Promise<SessionBlocks> {
+  return apiFetch<SessionBlocks>(`/sessions/${sessionId}/blocks`);
+}
+
 export async function updateStepCode(
   sessionId: string,
   stepId: number,

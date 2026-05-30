@@ -89,6 +89,25 @@ def delete_session(session_id: str, request: Request, _: None = Depends(require_
     return {"success": True, "session_id": session_id}
 
 
+@router.get("/sessions/{session_id}/blocks")
+def get_session_blocks(session_id: str, request: Request, _: None = Depends(require_token)) -> dict:
+    """Library/Initial 블록 코드 (handoff §47 백로그 #11) — 파생 read-only 코드 반환.
+
+    ``AppService.get_library_block_code`` / ``get_initial_block_code`` 위임.
+    Library = imports + 헬퍼 집계, Initial = 모듈 레벨 변수/setup. v2 의 블록 카드와 동일 추출
+    (core 0줄 — 기존 façade 메서드만 호출).
+    """
+    service = get_app_service(request.app)
+    try:
+        session = service.get_session(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+    return {
+        "library_code": service.get_library_block_code(session),
+        "initial_code": service.get_initial_block_code(session),
+    }
+
+
 @router.post("/sessions/{session_id}/generate")
 async def generate(
     session_id: str, body: GenerateRequest, request: Request, _: None = Depends(require_token)

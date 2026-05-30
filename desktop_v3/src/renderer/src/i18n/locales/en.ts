@@ -79,6 +79,17 @@ export const en: Catalog = {
     saveFailed: "Save failed: {{message}}",
     saved: "Code saved",
     selectStep: "Select a step that has code.",
+    copy: "Copy code",
+    copied: "Code copied to clipboard",
+    copyFailed: "Copy failed: {{message}}",
+  },
+  blocks: {
+    library: "Library block",
+    libraryDesc: "Imports + helpers (read-only)",
+    libraryTitle: "LIBRARY",
+    initial: "Initial block",
+    initialDesc: "Module-level setup (read-only)",
+    initialTitle: "INITIAL",
   },
   console: {
     label: "Console",
