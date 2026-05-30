@@ -29,9 +29,21 @@ _WM_SYSKEYDOWN = 0x0104
 _VK_ESCAPE = 0x1B
 _HC_ACTION = 0
 
+# SetWindowPos — 작업표시줄(Shell_TrayWnd) 위로 z-order 강제 (handoff §49 fix2).
+# Electron setAlwaysOnTop/moveTop 은 Windows 작업표시줄의 특수 topmost 를 못 이김.
+_HWND_TOPMOST = -1
+_SWP_NOSIZE = 0x0001
+_SWP_NOMOVE = 0x0002
+_SWP_NOACTIVATE = 0x0010
+_TOPMOST_INTERVAL_S = 0.2
+
 _lock = threading.Lock()
 _cancel = threading.Event()
 _active = threading.Event()
+
+# Electron 오버레이 창 HWND — main 이 /pick/overlay 로 등록. 펌프 루프가 이 창을
+# SetWindowPos(HWND_TOPMOST) 로 주기적으로 최상단에 박는다 (작업표시줄 가림 회피).
+_overlay_hwnd: int | None = None
 
 # 실시간 hover 하이라이트용 — 펌프 루프가 ~50ms 마다 갱신하는 "커서 아래 element 의
 # rect" (물리 픽셀, {left,top,right,bottom} 또는 None). /pick/hover 가 이 값을 읽어
@@ -48,6 +60,16 @@ def is_active() -> bool:
 def get_hover_rect() -> dict | None:
     """현재 커서 아래 element 의 rect(물리 픽셀) 반환 — 없으면 None. (오버레이 폴링용)"""
     return _hover_rect
+
+
+def set_overlay_hwnd(hwnd: int | None) -> None:
+    """Electron 오버레이 창의 HWND 등록 (handoff §49 fix2).
+
+    펌프 루프가 이 HWND 를 SetWindowPos(HWND_TOPMOST) 로 주기 재적용해 작업표시줄 위
+    z-order 를 강제한다(Electron setAlwaysOnTop 으론 Shell_TrayWnd 못 이김). 0/None=해제.
+    """
+    global _overlay_hwnd
+    _overlay_hwnd = int(hwnd) if hwnd else None
 
 
 def cancel_pick() -> bool:
@@ -98,7 +120,7 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
             ("dwExtraInfo", ulong_ptr),
         ]
 
-    global _hover_rect
+    global _hover_rect, _overlay_hwnd
     captured: dict = {"pt": None}
     _hover_rect = None
     _cancel.clear()
@@ -144,6 +166,7 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
         msg = ctypes.wintypes.MSG()
         start = time.monotonic()
         last_hover = 0.0
+        last_topmost = 0.0
         while True:
             while user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1):  # PM_REMOVE
                 user32.TranslateMessage(ctypes.byref(msg))
@@ -155,6 +178,21 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
             now = time.monotonic()
             if now - start > timeout_s:
                 return {"success": False, "cancelled": True, "error": "시간 초과"}
+            # ── 오버레이를 작업표시줄 위로 강제 (SetWindowPos HWND_TOPMOST 주기 재적용) ──
+            if _overlay_hwnd and now - last_topmost >= _TOPMOST_INTERVAL_S:
+                last_topmost = now
+                try:
+                    user32.SetWindowPos(
+                        ctypes.wintypes.HWND(_overlay_hwnd),
+                        ctypes.wintypes.HWND(_HWND_TOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE,
+                    )
+                except Exception:
+                    pass
             # ── 실시간 hover 샘플링 (후크 proc 아님 — 여기서 무거운 UIA 호출 OK) ──
             if now - last_hover >= _HOVER_INTERVAL_S:
                 last_hover = now
@@ -205,6 +243,7 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
         except Exception:
             pass
         _hover_rect = None
+        _overlay_hwnd = None
         _active.clear()
         _cancel.clear()
         _lock.release()

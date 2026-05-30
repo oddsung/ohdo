@@ -4,10 +4,17 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from api_server.deps import require_token
 
 router = APIRouter()
+
+
+class _OverlayHwndRequest(BaseModel):
+    """Electron 오버레이 창 HWND 등록 (handoff §49 fix2)."""
+
+    hwnd: int
 
 
 @router.post("/pick")
@@ -93,3 +100,18 @@ def pick_hover_route(request: Request, _: None = Depends(require_token)) -> dict
     from api_server.pick_pump import get_hover_rect
 
     return {"rect": get_hover_rect()}
+
+
+@router.post("/pick/overlay")
+def pick_overlay_route(
+    body: _OverlayHwndRequest, request: Request, _: None = Depends(require_token)
+) -> dict:
+    """Electron 오버레이 창 HWND 등록 (handoff §49 fix2).
+
+    펌프 루프가 이 HWND 를 SetWindowPos(HWND_TOPMOST) 로 주기 재적용해 작업표시줄 위로
+    z-order 를 강제한다(Electron setAlwaysOnTop 은 Shell_TrayWnd 를 못 이김).
+    """
+    from api_server.pick_pump import set_overlay_hwnd
+
+    set_overlay_hwnd(body.hwnd)
+    return {"ok": True}

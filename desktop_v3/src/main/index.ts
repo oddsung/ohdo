@@ -313,10 +313,29 @@ function physicalRectToOverlayCss(rect: {
 
 /** 메인 윈도우에서 호출하는 picker IPC 핸들러 등록 (1회). */
 function registerPickIpc(): void {
-  ipcMain.handle("pick:start", () => {
+  ipcMain.handle("pick:start", async () => {
     // v2 처럼 메인 윈도우를 숨겨 대상 앱이 가려지지 않게 한다.
     mainWindow?.minimize();
     createPickOverlay();
+    // 오버레이 HWND 를 Python 에 등록 → 펌프 루프가 SetWindowPos(HWND_TOPMOST) 로
+    // 작업표시줄(Shell_TrayWnd) 위로 z-order 강제 (Electron setAlwaysOnTop 으론 부족).
+    try {
+      if (overlayWindow && apiInfo) {
+        const buf = overlayWindow.getNativeWindowHandle();
+        // Win64: HWND 는 8바이트. 값은 안전정수 범위라 Number 변환 OK.
+        const hwnd = buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : buf.readUInt32LE(0);
+        await fetch(`${apiInfo.baseUrl}/pick/overlay`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiInfo.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ hwnd }),
+        });
+      }
+    } catch {
+      /* best-effort — 등록 실패해도 selection 자체는 동작 */
+    }
   });
   ipcMain.handle("pick:stop", () => {
     closePickOverlay();
