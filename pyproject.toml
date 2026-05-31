@@ -79,6 +79,12 @@ dev = [
 ]
 # 테스트 도구 — 현재 자체 test_runner 사용 (pytest 미사용). 미래 pytest 도입 시 채움
 test = []
+# 배포 freeze 도구 — Phase E (handoff §46). api_server+core 를 PyInstaller onedir 로 freeze 해
+# desktop_v3 설치본에 동봉 (resources/pybridge/ohdo-bridge.exe). Python 미설치 PC 대응.
+# `uv run --extra build pyinstaller desktop_v3/build/ohdo-bridge.spec --noconfirm` (docs/BUILD.md).
+build = [
+    "pyinstaller>=6.0",
+]
 # 5/12 PySide6 메인 전환 후 PyQt6 deprecated 코드 (legacy_pyqt6/) 실행용.
 # `uv sync --extra legacy-pyqt6` 로만 설치. 기본 sync 에는 포함 안 됨.
 legacy-pyqt6 = [

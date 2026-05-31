@@ -123,6 +123,26 @@ Detailed structure: [`CLAUDE.md`](CLAUDE.md) and [`docs/handoff.md`](docs/handof
 
 Test guide: [`CLAUDE.md`](CLAUDE.md) → "테스트 실행" section.
 
+## Build a Windows installer (desktop_v3)
+
+The Electron desktop (`desktop_v3/`) ships with a **frozen Python bridge** (PyInstaller onedir of
+`api_server` + `core`) so it runs on machines without Python installed.
+
+```powershell
+# 1. Freeze the bridge (from repo root). pyinstaller is the `build` extra.
+uv sync --extra build
+uv run --extra build pyinstaller desktop_v3/build/ohdo-bridge.spec --noconfirm   # → dist/ohdo-bridge/
+
+# 2. Stage it for bundling.
+Copy-Item dist\ohdo-bridge\* desktop_v3\build\pybridge\ -Recurse -Force
+
+# 3. Build the installer.
+cd desktop_v3; npm install; npm run dist            # → release/ohdo-<version>-setup.exe
+```
+
+Full runbook, smoke test, and known limitations (code signing, config persistence):
+[`docs/BUILD.md`](docs/BUILD.md).
+
 ## Roadmap
 
 ohdo is being staged for SaaS expansion under an open-core strategy: Phase 0 (infrastructure standardization) → Phase 1 (storage abstraction + UI–core split) → Phase 2+ (backend / agent / web dashboard).

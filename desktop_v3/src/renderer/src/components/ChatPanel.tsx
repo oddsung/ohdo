@@ -275,7 +275,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     busy: recBusy,
     start: startRec,
     marker: addMarker,
-    stopCommit: stopRec,
+    stopReview: stopRec,
     cancel: cancelRec,
   } = useRecordStore();
 

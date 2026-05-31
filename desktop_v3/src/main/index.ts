@@ -41,8 +41,12 @@ function projectRoot(): string {
  *
  * - **packaged** (app.isPackaged): electron-builder extraResources 로 동봉된 **frozen 브리지**
  *   (`resources/pybridge/ohdo-bridge[.exe]`, PyInstaller onedir) 를 직접 실행. Python 런타임
- *   미설치 PC 에서도 동작. 인자는 `--port <p>` 만 (PyInstaller entry 가 api_server.__main__).
- * - **dev**: `..\.venv\Scripts\python.exe -m api_server`.
+ *   미설치 PC 에서도 동작. 인자는 `--port <p>` + `--data-dir <userData>/data`.
+ *   data-dir 를 명시하는 이유: frozen 브리지의 기본 data 경로는 번들 내부
+ *   (`resources/pybridge/_internal/data`) 로 잡혀, 앱 업데이트/재설치 시 세션이 날아가거나
+ *   perMachine 설치 시 쓰기 불가가 된다. userData(`%APPDATA%/ohdo`)로 빼서 영속·쓰기 보장.
+ * - **dev**: `..\.venv\Scripts\python.exe -m api_server` (data-dir 미지정 → 프로젝트 루트 data/,
+ *   PySide6 앱과 공유).
  * - `OHDO_PYTHON` env 가 있으면 dev/packaged 무관하게 그 인터프리터로 `-m api_server` (디버그용).
  */
 function bridgeCommand(port: number): { cmd: string; args: string[]; cwd: string } {
@@ -60,7 +64,13 @@ function bridgeCommand(port: number): { cmd: string; args: string[]; cwd: string
     // extraResources: { from: "build/pybridge", to: "pybridge" } → process.resourcesPath/pybridge/
     const exe = process.platform === "win32" ? "ohdo-bridge.exe" : "ohdo-bridge";
     const frozen = join(process.resourcesPath, "pybridge", exe);
-    return { cmd: frozen, args: ["--port", String(port)], cwd: join(process.resourcesPath, "pybridge") };
+    // 세션 저장소는 번들 밖 userData 로 (업데이트/재설치에도 보존 + 항상 쓰기 가능).
+    const dataDir = join(app.getPath("userData"), "data");
+    return {
+      cmd: frozen,
+      args: ["--port", String(port), "--data-dir", dataDir],
+      cwd: join(process.resourcesPath, "pybridge"),
+    };
   }
 
   // dev: 로컬 .venv 인터프리터.

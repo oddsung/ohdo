@@ -28,7 +28,9 @@ hiddenimports = [
     "pywinauto", "pywinauto.controls.uiawrapper", "pywinauto.uia_defines",
     "pywinauto.uia_element_info", "uiautomation", "comtypes", "comtypes.stream",
     "win32api", "win32con", "win32gui", "win32process", "win32clipboard",
-    "pywinpty", "winpty",
+    # 주의: PyPI 배포명은 ``pywinpty`` 지만 import 모듈명은 ``winpty`` 다
+    # (``pywinpty`` 모듈은 존재하지 않음 → hidden import 로 넣으면 "not found" ERROR).
+    "winpty",
     # 데이터/이미지/기타 core 의존
     "pyautogui", "mss", "PIL", "cv2", "pytesseract", "pandas", "openpyxl",
     "keyring", "keyring.backends", "keyring.backends.Windows",
