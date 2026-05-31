@@ -474,10 +474,15 @@ function registerPickIpc(): void {
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
-    // Windows foreground 가로채기 제약 우회 — 잠깐 alwaysOnTop 켰다 끄면서 앞으로.
+    // Windows foreground 가로채기 제약 우회 — 잠깐 alwaysOnTop 으로 앞으로 가져온 뒤 해제.
+    // §75: 동기 해제(true→focus()→false 한 tick)는 일부 Windows 에서 WS_EX_TOPMOST 가 안 풀려
+    // 메인 창이 계속 최상위에 박히는 버그(다른 창이 앞으로 못 옴, ohdo 재클릭해야 해제)였다 →
+    // foreground 전환이 끝나도록 짧은 지연 후 topmost 해제(창이 닫혔으면 무시).
     mainWindow.setAlwaysOnTop(true);
     mainWindow.focus();
-    mainWindow.setAlwaysOnTop(false);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false);
+    }, 250);
   });
   // 프로젝트 내보내기/가져오기 (§47 #15) — 네이티브 폴더 선택 + Explorer 열기.
   ipcMain.handle("fs:pick-directory", async () => {
