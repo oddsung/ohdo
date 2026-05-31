@@ -13237,6 +13237,19 @@ if __name__ == "__main__":
         self.assert_true('auto_id="CloseButton"' in new, "픽 요소 auto_id 로 셀렉터 교정")
         self.assert_true('"Document"' not in new, "generic Document 셀렉터 제거")
 
+        self.step("(2b) §74: LHS 변수명이 element 가 아니어도(element_click 등) 교정")
+        gc_var = (
+            "# === Step 2: 클릭 (시작) ===\n"
+            'element_click = win.child_window(\n    control_type="Document",\n    found_index=0\n)\n'
+            "# === Step 2: 클릭 (끝) ==="
+        )
+        new_var, changed_var = enforce_picked_selector(gc_var, 2, ctx)
+        self.assert_true(changed_var, "element_click 변수명도 교정 적용(§74)")
+        self.assert_true(
+            'auto_id="CloseButton"' in new_var and "element_click" in new_var,
+            "변수명 보존 + 셀렉터만 픽 요소로 교정",
+        )
+
         self.step("(3) idempotent + guard (이미 타겟/요소호출 없음/식별자 없음 → 무변경)")
         self.assert_true(enforce_picked_selector(new, 2, ctx)[1] is False, "재적용 무변경")
         self.assert_true(

@@ -21,10 +21,11 @@ _AUTO_ID_RE = re.compile(r"Automation ID\*\*:\s*([^\s⚠]+)")
 _NAME_RE = re.compile(r"\*\*이름\*\*:\s*\"([^\"]+)\"")
 _TYPE_RE = re.compile(r"\*\*타입\*\*:\s*([^\s]+)")
 
-# step 본문 내 element 를 찾는 child_window/descendants 호출 (중첩 괄호 없음 가정 — kwargs 만).
-_ELEMENT_CALL_RE = re.compile(
-    r"(element\s*=\s*win\.(?:child_window|descendants)\()([^()]*?)(\))", re.S
-)
+# step 본문 내 element 를 찾는 ``<var> = win.child_window(...)`` / ``descendants(...)`` 호출.
+# §74: LHS 변수명을 ``element`` 로 고정하지 않고 ``\w+`` 로 — AI 가 ``element_click`` 등 다른
+# 이름을 쓰면 §72 교정이 안 먹던 버그(같은 메모장 "x"인데 04:48=element→교정O, 06:52=
+# element_click→교정X). win.child_window 는 항상 picker 가 고른 element 해석이므로 안전.
+_ELEMENT_CALL_RE = re.compile(r"(\w+\s*=\s*win\.(?:child_window|descendants)\()([^()]*?)(\))", re.S)
 
 
 def parse_picked_selector(element_context: str) -> "dict | None":
