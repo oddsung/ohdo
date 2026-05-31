@@ -76,7 +76,19 @@ def _build_element_context(element: dict) -> "str | None":
             left, top, right, bottom = (int(v) for v in r)
             info["rect"] = {"left": left, "top": top, "width": right - left, "height": bottom - top}
         text = WindowInspector().get_element_info_text(info)
-        return text or None
+        if not text:
+            return None
+        # §68: agy/Gemini 가 위 _resolve_element 템플릿(title/auto_id 셀렉터)을 무시하고
+        # 시스템 가이드의 generic 예시(`child_window(control_type='...', found_index=0)`)로
+        # 단순화 → 같은 타입의 첫 요소가 잡혀 오클릭(사용자 실측: 메모장 "+" 대신 다른 Button).
+        # element_context 말미(=프롬프트상 가장 최근, recency)에 강한 anti-pattern 지시 추가.
+        directive = (
+            "\n\n🚨 **위 ## 선택된 UI 요소 의 코드 템플릿(`_resolve_element` 의 title/auto_id 셀렉터)을 "
+            "그대로 사용하세요.** `win.child_window(control_type='...', found_index=0)` 처럼 "
+            "control_type+found_index 만으로 단순화하지 마세요 — 같은 타입(예: Button)의 첫 번째 "
+            "요소가 잡혀 의도와 다른 대상을 클릭합니다. 이 요소의 title/auto_id 를 셀렉터에 반드시 포함하세요."
+        )
+        return text + directive
     except Exception:
         logger.debug("element_context 구성 실패 (무시 — 한 줄 라벨로 폴백)", exc_info=True)
         return None

@@ -95,9 +95,12 @@ function CaptureThumb({ sessionId, path }: { sessionId: string; path: string }) 
     };
   }, [sessionId, path]);
   return (
-    <div className="flex h-20 items-center justify-center overflow-hidden rounded border border-black/20 bg-black/20">
+    // 고정 크기 박스(h-20 × w-28) — 이미지 크기와 무관하게 표시 영역 일정(step 카드 높이 안정).
+    // img 는 박스를 채우되 object-contain 으로 비율 유지(작은 "+"도 업스케일되어 보임). §68 fix:
+    // 이전엔 width 미고정 + img 자연크기라 작은 요소가 좁은 검은 세로줄로 보였다.
+    <div className="flex h-20 w-28 shrink-0 items-center justify-center overflow-hidden rounded border border-black/20 bg-black/30">
       {url ? (
-        <img src={url} alt="" className="max-h-20 max-w-full object-contain" />
+        <img src={url} alt="" className="h-full w-full object-contain p-1" />
       ) : (
         <ImageIcon className="h-5 w-5 text-discord-muted/40" />
       )}

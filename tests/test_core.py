@@ -13126,6 +13126,10 @@ if __name__ == "__main__":
         self.assert_true("Button" in ctx, "control_type 포함")
         self.assert_true("새 탭" in ctx, "name 포함")
         self.assert_true("AddButton" in ctx, "automation_id 포함")
+        # §68: generic control_type+found_index 단순화 방지 지시(말미) 포함
+        self.assert_true(
+            "found_index" in ctx and "단순화하지" in ctx, "anti-pattern 셀렉터 지시 포함"
+        )
 
         self.step("(2) rect-리스트에 crash 안 함 + rect 없는 메타도 OK")
         ctx2 = _build_element_context({"control_type": "Button", "name": "x"})
