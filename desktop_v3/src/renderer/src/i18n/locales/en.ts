@@ -258,4 +258,79 @@ export const en: Catalog = {
     toggleLanguage: "Toggle language (KO/EN)",
     goToSession: "Go to: {{title}}",
   },
+  // Config-key labels (English keys in config/settings.json → human-readable names).
+  // SettingsDialog renders these instead of raw keys (raw key kept as tooltip). Unknown keys fall back to the raw key.
+  settingsKeys: {
+    // sections
+    ai: "AI engine",
+    image: "Image capture",
+    recognition: "Element recognition",
+    execution: "Execution",
+    visual_feedback: "Visual feedback",
+    ui: "Display",
+    output_project: "Project export",
+    logging: "Logging",
+    element_picker: "Element picker",
+    hints: "Hints",
+    available_engines: "Registered engines",
+    // engine names
+    cli_ai: "CLI AI",
+    openai_compat: "OpenAI-compatible",
+    // AI engine fields
+    selected: "Selected engine",
+    preset: "Preset",
+    command: "Command",
+    model: "Model",
+    timeout_seconds: "Timeout (s)",
+    max_retries: "Max retries",
+    base_url: "Base URL",
+    api_key: "API key",
+    api_key_env: "API key env var",
+    max_tokens: "Max tokens",
+    temperature: "Temperature",
+    // image capture
+    capture_quality: "Capture quality",
+    max_width: "Max width",
+    format: "Image format",
+    grayscale_for_ai: "Grayscale for AI",
+    // element recognition
+    preferred_methods: "Preferred methods",
+    ocr_language: "OCR language",
+    image_match_confidence: "Image-match confidence",
+    // execution
+    step_delay_ms: "Step delay (ms)",
+    max_retry_count: "Max retry count",
+    retry_delay_ms: "Retry delay (ms)",
+    screenshot_on_error: "Screenshot on error",
+    sandbox_mode: "Sandbox mode",
+    auto_regenerate_on_warning: "Auto-regenerate on warning",
+    auto_run_on_step_create: "Auto-run on step create",
+    // visual feedback / common
+    enabled: "Enabled",
+    // display (UI)
+    theme: "Theme",
+    console_visible: "Show console",
+    font_size: "Font size",
+    language: "Language",
+    hint_run_shown: "Run hint shown",
+    // project export
+    default_output_dir: "Default output folder",
+    auto_readme: "Auto-generate README",
+    auto_requirements: "Auto-generate requirements",
+    auto_venv_guide: "Auto-generate venv guide",
+    include_run_script: "Include run script",
+    readme_language: "README language",
+    // logging
+    level: "Log level",
+    file_enabled: "File logging",
+    max_log_size_mb: "Max log size (MB)",
+    rotation_days: "Rotation (days)",
+    // element picker
+    uia_max_depth: "UIA max depth",
+    uia_time_budget_ms: "UIA time budget (ms)",
+    post_pause_transition_ms: "Post-pause transition (ms)",
+    cdp_enabled: "CDP (browser) enabled",
+    // hints
+    cdp_browser_hint_dismissed: "CDP browser hint dismissed",
+  },
 };

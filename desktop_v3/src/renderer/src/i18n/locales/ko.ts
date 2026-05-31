@@ -256,6 +256,81 @@ export const ko = {
     toggleLanguage: "언어 전환 (KO/EN)",
     goToSession: "이동: {{title}}",
   },
+  // 설정 키 라벨 (config/settings.json 의 영문 키 → 사람이 읽는 이름).
+  // SettingsDialog 가 원본 키 대신 이 라벨을 렌더(원본 키는 tooltip). 미등록 키는 원본 키로 폴백.
+  settingsKeys: {
+    // 섹션
+    ai: "AI 엔진",
+    image: "이미지 캡처",
+    recognition: "요소 인식",
+    execution: "실행",
+    visual_feedback: "시각 피드백",
+    ui: "화면",
+    output_project: "프로젝트 내보내기",
+    logging: "로깅",
+    element_picker: "요소 선택기",
+    hints: "힌트",
+    available_engines: "등록된 엔진",
+    // 엔진 이름
+    cli_ai: "CLI AI",
+    openai_compat: "OpenAI 호환",
+    // AI 엔진 필드
+    selected: "선택된 엔진",
+    preset: "프리셋",
+    command: "명령어",
+    model: "모델",
+    timeout_seconds: "타임아웃(초)",
+    max_retries: "최대 재시도",
+    base_url: "Base URL",
+    api_key: "API 키",
+    api_key_env: "API 키 환경변수",
+    max_tokens: "최대 토큰",
+    temperature: "Temperature",
+    // 이미지 캡처
+    capture_quality: "캡처 품질",
+    max_width: "최대 너비",
+    format: "이미지 포맷",
+    grayscale_for_ai: "AI 전송용 흑백 변환",
+    // 요소 인식
+    preferred_methods: "선호 인식 방법",
+    ocr_language: "OCR 언어",
+    image_match_confidence: "이미지 매칭 신뢰도",
+    // 실행
+    step_delay_ms: "step 간 지연(ms)",
+    max_retry_count: "최대 재시도 횟수",
+    retry_delay_ms: "재시도 지연(ms)",
+    screenshot_on_error: "오류 시 스크린샷",
+    sandbox_mode: "샌드박스 모드",
+    auto_regenerate_on_warning: "경고 시 자동 재생성",
+    auto_run_on_step_create: "step 생성 시 자동 실행",
+    // 시각 피드백 / 공통
+    enabled: "사용",
+    // 화면(UI)
+    theme: "테마",
+    console_visible: "콘솔 표시",
+    font_size: "글꼴 크기",
+    language: "언어",
+    hint_run_shown: "실행 힌트 표시함",
+    // 프로젝트 내보내기
+    default_output_dir: "기본 출력 폴더",
+    auto_readme: "README 자동 생성",
+    auto_requirements: "requirements 자동 생성",
+    auto_venv_guide: "venv 가이드 자동 생성",
+    include_run_script: "실행 스크립트 포함",
+    readme_language: "README 언어",
+    // 로깅
+    level: "로그 레벨",
+    file_enabled: "파일 로그 사용",
+    max_log_size_mb: "최대 로그 크기(MB)",
+    rotation_days: "로테이션 주기(일)",
+    // 요소 선택기
+    uia_max_depth: "UIA 최대 탐색 깊이",
+    uia_time_budget_ms: "UIA 시간 예산(ms)",
+    post_pause_transition_ms: "일시정지 후 전환 대기(ms)",
+    cdp_enabled: "CDP(브라우저) 사용",
+    // 힌트
+    cdp_browser_hint_dismissed: "CDP 브라우저 힌트 닫음",
+  },
 };
 
 export type Catalog = typeof ko;

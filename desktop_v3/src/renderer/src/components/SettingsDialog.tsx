@@ -16,17 +16,21 @@ function isSecretKey(key: string): boolean {
   return /key|secret|token|password/i.test(key);
 }
 
-/** 단일 설정 값 입력 — 타입(bool/number/string)에 따라 컨트롤 분기. */
+/** 단일 설정 값 입력 — 타입(bool/number/string)에 따라 컨트롤 분기.
+ * `label` 은 사람이 읽는 라벨(i18n), `k` 는 원본 config 키(id/마스킹 판정/tooltip 용). */
 function Field({
   k,
+  label,
   value,
   onChange,
 }: {
   k: string;
+  label?: string;
   value: unknown;
   onChange: (v: unknown) => void;
 }) {
   const id = `set-${k}`;
+  const text = label ?? k;
   if (typeof value === "boolean") {
     return (
       <label htmlFor={id} className="flex items-center gap-2 py-1 text-sm text-zinc-300">
@@ -37,15 +41,17 @@ function Field({
           onChange={(e) => onChange(e.target.checked)}
           className="accent-indigo-500"
         />
-        <span className="font-mono text-xs">{k}</span>
+        <span className="text-xs" title={k}>
+          {text}
+        </span>
       </label>
     );
   }
   const isNum = typeof value === "number";
   return (
     <div className="py-1">
-      <label htmlFor={id} className="block text-xs font-mono text-zinc-400 mb-0.5">
-        {k}
+      <label htmlFor={id} className="block text-xs text-zinc-400 mb-0.5" title={k}>
+        {text}
       </label>
       <input
         id={id}
@@ -63,27 +69,32 @@ function Field({
 /** 문자열 배열 필드 — 쉼표로 편집 (예: recognition.preferred_methods). 비-문자열 배열은 읽기전용. */
 function ArrayField({
   k,
+  label,
   value,
   onChange,
 }: {
   k: string;
+  label?: string;
   value: unknown[];
   onChange: (v: unknown) => void;
 }) {
   const id = `set-${k}`;
+  const text = label ?? k;
   const allStrings = value.every((x) => typeof x === "string");
   if (!allStrings) {
     return (
       <div className="py-1">
-        <label className="mb-0.5 block font-mono text-xs text-zinc-400">{k}</label>
+        <label className="mb-0.5 block text-xs text-zinc-400" title={k}>
+          {text}
+        </label>
         <div className="font-mono text-[11px] text-zinc-500">{JSON.stringify(value)}</div>
       </div>
     );
   }
   return (
     <div className="py-1">
-      <label htmlFor={id} className="mb-0.5 block font-mono text-xs text-zinc-400">
-        {k}
+      <label htmlFor={id} className="mb-0.5 block text-xs text-zinc-400" title={k}>
+        {text}
       </label>
       <input
         id={id}
@@ -107,10 +118,12 @@ function ArrayField({
 function GenericFields({
   obj,
   path,
+  labelFor,
   onChange,
 }: {
   obj: Dict;
   path: string[];
+  labelFor: (k: string) => string;
   onChange: (p: string[], v: unknown) => void;
 }) {
   return (
@@ -118,32 +131,47 @@ function GenericFields({
       {Object.entries(obj).map(([k, v]) => {
         const p = [...path, k];
         if (Array.isArray(v)) {
-          return <ArrayField key={k} k={k} value={v} onChange={(nv) => onChange(p, nv)} />;
+          return (
+            <ArrayField key={k} k={k} label={labelFor(k)} value={v} onChange={(nv) => onChange(p, nv)} />
+          );
         }
         if (v && typeof v === "object") {
           return (
             <div key={k} className="mt-1">
-              <div className="text-[11px] uppercase tracking-wide text-zinc-500">{k}</div>
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500" title={k}>
+                {labelFor(k)}
+              </div>
               <div className="border-l border-zinc-800 pl-2">
-                <GenericFields obj={v as Dict} path={p} onChange={onChange} />
+                <GenericFields obj={v as Dict} path={p} labelFor={labelFor} onChange={onChange} />
               </div>
             </div>
           );
         }
-        return <Field key={k} k={k} value={v} onChange={(nv) => onChange(p, nv)} />;
+        return (
+          <Field key={k} k={k} label={labelFor(k)} value={v} onChange={(nv) => onChange(p, nv)} />
+        );
       })}
     </>
   );
 }
 
-/** 접이식 설정 섹션 (기본 접힘). */
-function ConfigSection({ title, children }: { title: string; children: React.ReactNode }) {
+/** 접이식 설정 섹션 (기본 접힘). title=라벨(i18n), rawKey=원본 섹션 키(tooltip). */
+function ConfigSection({
+  title,
+  rawKey,
+  children,
+}: {
+  title: string;
+  rawKey?: string;
+  children: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <section>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        title={rawKey}
         className="flex w-full items-center justify-between py-1 text-left"
       >
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{title}</h3>
@@ -160,6 +188,8 @@ function ConfigSection({ title, children }: { title: string; children: React.Rea
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  // config 키 → 사람이 읽는 라벨 (settingsKeys.*). 미등록 키는 원본 키로 폴백.
+  const labelFor = (k: string) => t(`settingsKeys.${k}`, { defaultValue: k });
   const qc = useQueryClient();
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["settings"],
@@ -269,7 +299,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   >
                     {engineKeys.map((k) => (
                       <option key={k} value={k}>
-                        {k}
+                        {labelFor(k)}
                       </option>
                     ))}
                   </select>
@@ -281,11 +311,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               {Object.keys(engineCfg).length > 0 && (
                 <section>
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1">
-                    {t("settings.engineConfig", { engine: selected })}
+                    {t("settings.engineConfig", { engine: labelFor(selected) })}
                   </h3>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
                     {Object.entries(engineCfg).map(([k, v]) => (
-                      <Field key={k} k={k} value={v} onChange={(nv) => setEngineField(k, nv)} />
+                      <Field
+                        key={k}
+                        k={k}
+                        label={labelFor(k)}
+                        value={v}
+                        onChange={(nv) => setEngineField(k, nv)}
+                      />
                     ))}
                   </div>
                   <p className="mt-1 text-[11px] text-zinc-500">{t("settings.secretHint")}</p>
@@ -298,8 +334,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     {t("settings.advanced")}
                   </h3>
                   {otherSections.map(([k, v]) => (
-                    <ConfigSection key={k} title={k}>
-                      <GenericFields obj={v as Dict} path={[k]} onChange={setByPath} />
+                    <ConfigSection key={k} title={labelFor(k)} rawKey={k}>
+                      <GenericFields
+                        obj={v as Dict}
+                        path={[k]}
+                        labelFor={labelFor}
+                        onChange={setByPath}
+                      />
                     </ConfigSection>
                   ))}
                 </div>
