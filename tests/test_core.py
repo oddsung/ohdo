@@ -13168,6 +13168,33 @@ if __name__ == "__main__":
         # hwnd None → ShowWindow 호출 전에 False 반환(비-Windows/창없음 모두 안전).
         self.assert_true(_hide_pick_overlay() is False, "오버레이 없으면 숨김 스킵(False)")
 
+    def test_231_extract_code_delta_keeps_block_bodies(self):
+        """[handoff §71] extract_code_delta 가 유지된 제어 블록의 본문을 prev 중복이어도 보존.
+
+        회귀(사용자 실측): 연속된 클릭 step 의 walk-up/pyautogui.click 본문이 직전 step 과 줄
+        단위로 동일해, 델타 추출이 헤더(if/for)는 남기고 본문 라인만 제거 → dangling block
+        (`if x:` 다음 본문 없음) → SyntaxError → 그 step delta 가 깨져 실행 X 였다. fix: 유지된
+        헤더 블록 안의 본문은 prev 중복이어도 보존(블록 밖 module-level 중복만 제거).
+        """
+        import ast
+
+        from core.import_manager import extract_code_delta
+
+        # prev step: if 블록 본문 do_x()/do_y(). new step: 같은 본문을 가진 새 if 블록 추가.
+        prev = "a = 1\nif cond:\n    do_x()\n    do_y()"
+        new = "b = 2\nif cond:\n    do_x()\n    do_y()\nif other:\n    do_x()\n    do_y()"
+        delta = extract_code_delta(new, prev)
+        try:
+            ast.parse(delta)
+            compiles = True
+        except SyntaxError:
+            compiles = False
+        self.assert_true(compiles, "중복 본문 있어도 delta 가 컴파일 (dangling block 없음)")
+        self.assert_true(
+            "if other" in delta and "do_x()" in delta,
+            "새 제어 블록의 본문(do_x)이 prev 중복이어도 보존됨",
+        )
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

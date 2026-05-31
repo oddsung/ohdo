@@ -452,12 +452,29 @@ def extract_code_delta(new_body: str, prev_body: str) -> str:
     )
     prev_set = {ln.strip() for ln in prev_stripped if ln.strip()}
     filtered: list[str] = []
+    # 유지된 제어 헤더(try/if/for/...)의 indent 스택. 그 헤더 블록의 **본문**(더 깊은
+    # indent)은 prev 와 중복 라인이어도 제거하면 안 된다 — 헤더만 남고 본문이 사라지면
+    # dangling block (`if x:` 다음 본문 없음) → SyntaxError 가 된다.
+    # (§71 회귀: 연속된 클릭 step 의 walk-up promote / pyautogui.click 본문이 직전 step 과
+    #  줄 단위로 동일해, 헤더는 남기고 본문만 통째로 제거 → 마지막 step delta 가 깨져 실행 X.)
+    # 블록 **밖**(module-level)의 prev 중복 라인만 stale 단편으로 제거한다.
+    header_indents: list[int] = []
     for line in delta_lines:
         s = line.strip()
         if not s or s.startswith("#"):
             filtered.append(line)
             continue
-        if s in prev_set and not _control_header_re.match(s):
+        indent = len(line) - len(line.lstrip())
+        # 현재 라인 indent 이하로 닫힌 헤더 블록은 스택에서 pop.
+        while header_indents and indent <= header_indents[-1]:
+            header_indents.pop()
+        if _control_header_re.match(s):
+            filtered.append(line)
+            header_indents.append(indent)
+            continue
+        # 비-헤더 statement: 유지된 블록 안(헤더 스택 non-empty)이면 본문이므로 유지.
+        # 블록 밖 + prev 중복이면 stale 단편 → 제거.
+        if s in prev_set and not header_indents:
             continue
         filtered.append(line)
     delta_lines = filtered
