@@ -45,13 +45,13 @@ export function ServerRail() {
   const lang = (i18n.language || currentLang()).startsWith("ko") ? "ko" : "en";
 
   return (
-    <div className="flex h-full w-[72px] flex-col items-center gap-2 bg-discord-rail py-3">
+    <div className="flex h-full w-14 flex-col items-center gap-2 bg-discord-rail py-3">
       {/* 로고 = 홈(세션 선택 해제). */}
       <button
         type="button"
         title={t("sidebar.home")}
         onClick={() => selectSession(null)}
-        className="flex h-12 w-12 items-center justify-center rounded-2xl bg-discord-accent text-lg font-bold text-white transition-[border-radius] hover:rounded-xl"
+        className="flex h-10 w-10 items-center justify-center rounded-2xl bg-discord-accent text-base font-bold text-white transition-[border-radius] hover:rounded-xl"
       >
         oh
       </button>
