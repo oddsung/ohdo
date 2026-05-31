@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Bot,
   ChevronsDown,
   Circle,
   Cog,
@@ -23,6 +24,7 @@ import {
   SendHorizonal,
   Square,
   Trash2,
+  User,
   X,
 } from "lucide-react";
 import {
@@ -185,13 +187,17 @@ function StepCard({
         </div>
       </div>
       {step.user_request && (
-        <p className="text-sm text-discord-text">
-          <span className="text-discord-muted">👤 </span>
-          {step.user_request}
+        <p className="flex items-start gap-1.5 text-sm text-discord-text">
+          <User className="mt-0.5 h-3.5 w-3.5 shrink-0 text-discord-muted" />
+          <span>{step.user_request}</span>
         </p>
       )}
-      {step.ai_description && (
-        <p className="mt-1 line-clamp-3 text-xs text-discord-muted">🤖 {step.ai_description}</p>
+      {/* AI 설명은 기본 숨김 (사용자 요청) — step 을 선택했을 때만 표시. */}
+      {active && step.ai_description && (
+        <p className="mt-1 flex items-start gap-1.5 text-xs text-discord-muted">
+          <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="line-clamp-3">{step.ai_description}</span>
+        </p>
       )}
       {warnings.length > 0 && (
         <p className="mt-1 flex items-center gap-1 text-xs text-amber-400">
