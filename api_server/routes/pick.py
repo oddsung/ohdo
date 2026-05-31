@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from api_server.deps import require_token
+from api_server.deps import get_app_service, require_token, session_captures_dir
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -15,6 +19,41 @@ class _OverlayHwndRequest(BaseModel):
     """Electron 오버레이 창 HWND 등록 (handoff §49 fix2)."""
 
     hwnd: int
+
+
+class PickClickRequest(BaseModel):
+    """클릭 캡처 요청 — session_id 가 있으면 선택 요소의 스크린샷도 그 세션 captures 에 저장.
+
+    session_id 가 None 이면 메타만 캡처(이미지 없음, §48 동작 그대로).
+    """
+
+    session_id: str | None = None
+
+
+def _capture_element_image(app, session_id: str, result: dict) -> None:
+    """선택된 요소의 rect(물리 픽셀) 영역을 스크린샷으로 grab → 세션 captures 에 저장.
+
+    핸들러 스레드에서 호출 — 이 시점 메인 윈도우는 아직 minimize 상태(대상 가시)라
+    grab 이 대상 요소를 잡는다. best-effort: 실패해도 pick 자체는 성공으로 둔다.
+    AI 에는 전송하지 않고(이미지 channel 미경유) **표시 전용** — 생성된 step 에 별도
+    attach 엔드포인트로 붙는다 (handoff §66).
+    """
+    element = result.get("element") or {}
+    rect = element.get("rect")
+    if not (isinstance(rect, (list, tuple)) and len(rect) == 4):
+        return
+    left, top, right, bottom = (int(v) for v in rect)
+    w, h = right - left, bottom - top
+    if w <= 0 or h <= 0:
+        return
+    captures_dir = session_captures_dir(get_app_service(app), session_id)
+    if captures_dir is None:
+        return
+    from api_server.capture_pump import capture_region
+
+    cap = capture_region(captures_dir, left, top, w, h)
+    if cap.get("success"):
+        result["image"] = cap["path"]  # 절대 경로(§60 captures 형식과 동일)
 
 
 @router.post("/pick")
@@ -65,12 +104,19 @@ def pick_element(request: Request, _: None = Depends(require_token)) -> dict:
 
 
 @router.post("/pick/click")
-def pick_on_click_route(request: Request, _: None = Depends(require_token)) -> dict:
+def pick_on_click_route(
+    request: Request,
+    body: PickClickRequest | None = None,
+    _: None = Depends(require_token),
+) -> dict:
     """클릭 시 캡처 (handoff §48, 절충안) — 다음 좌클릭의 element 를 캡처.
 
     카운트다운(/pick) 대신 전역 LL 마우스 후크로 사용자가 대상을 클릭할 때까지 블록한다.
     선택 클릭은 삼켜서 대상 앱이 눌리지 않게 한다. ESC/타임아웃/``/pick/cancel`` 로 취소.
     하이라이트 없음. Windows 전용(그 외 501).
+
+    ``session_id`` 가 주어지면 선택 요소의 rect 스크린샷도 그 세션 captures 에 저장하고
+    ``image`` 경로를 결과에 포함한다(표시 전용, handoff §66).
     """
     import sys as _sys
 
@@ -79,7 +125,14 @@ def pick_on_click_route(request: Request, _: None = Depends(require_token)) -> d
 
     from api_server.pick_pump import pick_on_click
 
-    return pick_on_click()
+    result = pick_on_click()
+    session_id = body.session_id if body else None
+    if result.get("success") and session_id:
+        try:
+            _capture_element_image(request.app, session_id, result)
+        except Exception:
+            logger.debug("요소 스크린샷 캡처 실패 (무시)", exc_info=True)
+    return result
 
 
 @router.post("/pick/cancel")

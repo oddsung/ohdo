@@ -39,6 +39,17 @@ def to_dict(obj):
     return obj
 
 
+def session_captures_dir(service, session_id: str) -> "Path | None":
+    """세션 captures 폴더 — 공개 ``SessionManager.get_captures_dir`` 위임(core 0줄).
+
+    파일 기반 저장소가 아니면(manager 없음) None. capture/pick/serving 라우트 공용.
+    """
+    manager = getattr(getattr(service, "_repo", None), "manager", None)
+    if manager is None or not hasattr(manager, "get_captures_dir"):
+        return None
+    return manager.get_captures_dir(session_id)
+
+
 def step_result_dict(result) -> dict:
     """StepResult(또는 dict) 를 JSON 직렬화 가능한 dict 로 변환."""
     if hasattr(result, "to_dict"):

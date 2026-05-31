@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from api_server.deps import (
     InsertStepRequest,
@@ -15,6 +16,12 @@ from api_server.deps import (
     require_token,
     to_dict,
 )
+
+
+class AttachCaptureRequest(BaseModel):
+    """step 에 캡처 이미지 경로 첨부 (handoff §66). path = 절대경로(§60 captures 형식)."""
+
+    path: str
 
 
 def _step_field(step, name: str):
@@ -72,6 +79,37 @@ def update_step(
     # 편집 후 캐시된 kernel 은 stale — 다음 실행이 새 코드 반영하도록 폐기.
     drop_kernel(app, session_id)
     return {"success": True, "session": to_dict(service.get_session(session_id))}
+
+
+@router.post("/sessions/{session_id}/steps/{step_id}/capture")
+def attach_step_capture(
+    session_id: str,
+    step_id: int,
+    body: AttachCaptureRequest,
+    request: Request,
+    _: None = Depends(require_token),
+) -> dict:
+    """생성된 step 에 캡처 이미지 경로를 첨부 (handoff §66 — 요소 스크린샷 표시 전용).
+
+    pick 시 잡아 둔 요소 스크린샷 경로를 ``step.captures`` 에 병합 저장한다. **AI 에는
+    전송하지 않음**(generate 의 images channel 미경유) — 순수 표시용. ``update_step`` 위임
+    이라 core 0줄. 중복 경로는 무시.
+    """
+    service = get_app_service(request.app)
+    try:
+        session = service.get_session(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+
+    step = _find_step(session, step_id)
+    if step is None:
+        raise HTTPException(status_code=404, detail=f"step not found: {step_id}")
+
+    existing = list(_step_field(step, "captures") or [])
+    if body.path and body.path not in existing:
+        existing.append(body.path)
+    service.update_step(session_id, step_id, {"captures": existing})
+    return {"success": True, "captures": existing}
 
 
 @router.delete("/sessions/{session_id}/steps/{step_id}")

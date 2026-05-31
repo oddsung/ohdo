@@ -24,6 +24,7 @@ export interface Step {
   step_code: string;
   required_packages: string[];
   validation_warnings: { kind: string; message: string; line: number }[];
+  captures?: string[]; // 요소/영역 캡처 이미지 절대경로 (handoff §60/§66) — 표시용
 }
 
 export interface SessionDetail {
@@ -114,6 +115,7 @@ export interface PickResult {
   element?: Record<string, unknown>;
   label?: string;
   is_browser_element?: boolean;
+  image?: string; // 선택 요소 스크린샷 절대경로 (handoff §66, session_id 줬을 때)
   error?: string;
   cancelled?: boolean;
 }
@@ -121,6 +123,7 @@ export interface PickResult {
 export interface PendingElement {
   label: string;
   isBrowser: boolean;
+  imagePath?: string; // pick 시 캡처된 요소 스크린샷 경로 (생성 후 step 에 attach)
 }
 
 export function generateStep(
@@ -143,9 +146,36 @@ export function pickElement(): Promise<PickResult> {
   return apiFetch<PickResult>("/pick", { method: "POST" });
 }
 
-/** 클릭 시 캡처 (§48 절충안) — 다음 좌클릭까지 블록 후 그 위치 element 반환. */
-export function pickElementOnClick(): Promise<PickResult> {
-  return apiFetch<PickResult>("/pick/click", { method: "POST" });
+/** 클릭 시 캡처 (§48 절충안) — 다음 좌클릭까지 블록 후 그 위치 element 반환.
+ * sessionId 를 주면 선택 요소 스크린샷도 그 세션 captures 에 저장(§66, result.image). */
+export function pickElementOnClick(sessionId?: string): Promise<PickResult> {
+  return apiFetch<PickResult>("/pick/click", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId ?? null }),
+  });
+}
+
+/** 생성된 step 에 캡처 이미지 경로를 첨부 (§66, 표시 전용 — AI 무전송). */
+export function attachStepCapture(
+  sessionId: string,
+  stepId: number,
+  path: string,
+): Promise<{ success: boolean; captures: string[] }> {
+  return apiFetch(`/sessions/${sessionId}/steps/${stepId}/capture`, {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+/** 세션 captures 의 이미지를 인증 fetch → object URL 로 로드 (§66, <img src> 용).
+ * 호출자가 더이상 안 쓰면 ``URL.revokeObjectURL`` 해야 한다. */
+export async function fetchCaptureObjectUrl(sessionId: string, filename: string): Promise<string> {
+  const { baseUrl, token } = await apiInfo();
+  const res = await fetch(`${baseUrl}/sessions/${sessionId}/captures/${encodeURIComponent(filename)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`capture load failed: ${res.status}`);
+  return URL.createObjectURL(await res.blob());
 }
 
 /** 진행 중인 클릭 캡처 취소. */

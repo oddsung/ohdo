@@ -11,7 +11,7 @@ interface PickState {
   picking: boolean;
   pending: PendingElement | null;
   error: string | null;
-  startPick: () => void;
+  startPick: (sessionId?: string) => void;
   cancelPick: () => void;
   clearPending: () => void;
 }
@@ -20,16 +20,21 @@ export const usePickStore = create<PickState>((set, get) => ({
   picking: false,
   pending: null,
   error: null,
-  startPick: async () => {
+  // sessionId 를 주면 선택 요소 스크린샷도 그 세션 captures 에 저장(§66) → pending.imagePath.
+  startPick: async (sessionId?: string) => {
     if (get().picking) return;
     set({ picking: true, error: null });
     // 투명 오버레이 창 띄움(+메인 minimize). 실패해도 캡처 자체는 진행.
     await window.ohdo.startPickOverlay().catch(() => {});
     try {
-      const result = await pickElementOnClick();
+      const result = await pickElementOnClick(sessionId);
       if (result.success) {
         set({
-          pending: { label: result.label ?? "", isBrowser: !!result.is_browser_element },
+          pending: {
+            label: result.label ?? "",
+            isBrowser: !!result.is_browser_element,
+            imagePath: result.image,
+          },
           picking: false,
         });
       } else if (result.cancelled) {

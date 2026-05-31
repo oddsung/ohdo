@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from api_server.deps import (
     CONFIG_DIR,
@@ -17,10 +18,31 @@ from api_server.deps import (
     get_app_service,
     load_json,
     require_token,
+    session_captures_dir,
     to_dict,
 )
 
 router = APIRouter()
+
+
+@router.get("/sessions/{session_id}/captures/{filename}")
+def get_capture(
+    session_id: str, filename: str, request: Request, _: None = Depends(require_token)
+) -> FileResponse:
+    """세션 captures 폴더의 이미지 파일을 서빙 (handoff §66 — step 카드 요소/영역 캡처 표시).
+
+    step.captures 엔 절대 경로가 저장되지만, 렌더러는 파일명만으로 이 엔드포인트를 호출한다
+    (인증 헤더 유지 위해 fetch→blob 으로 로드). 경로 traversal 방지: 파일명에 구분자 금지.
+    """
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    captures_dir = session_captures_dir(get_app_service(request.app), session_id)
+    if captures_dir is None:
+        raise HTTPException(status_code=501, detail="파일 기반 저장소가 아닙니다.")
+    path = captures_dir / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"capture not found: {filename}")
+    return FileResponse(str(path))
 
 
 def _safe_dirname(name: str, fallback: str) -> str:

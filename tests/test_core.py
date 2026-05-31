@@ -12881,7 +12881,9 @@ if __name__ == "__main__":
                 pairs.add((path, m))
         self.assert_true(("/secrets", "GET") in pairs, "GET /secrets 라우트 필수")
         self.assert_true(("/secrets", "POST") in pairs, "POST /secrets 라우트 필수")
-        self.assert_true(("/secrets/{label}", "DELETE") in pairs, "DELETE /secrets/{label} 라우트 필수")
+        self.assert_true(
+            ("/secrets/{label}", "DELETE") in pairs, "DELETE /secrets/{label} 라우트 필수"
+        )
 
         self.step("(2) AppService.secrets_vault 속성 + SecretLabel 패턴 (core 0줄 가드)")
         from core.app_service import AppService
@@ -12939,7 +12941,9 @@ if __name__ == "__main__":
         self.assert_true(leak not in sc.text, "scan 응답에 원본 시크릿 값 노출 금지")
         for m in sdata["matches"]:
             self.assert_true("value" not in m, "match 에 value 필드 없어야 함")
-            self.assert_true("suggested_label" in m and "kind" in m, "match 에 kind/suggested_label")
+            self.assert_true(
+                "suggested_label" in m and "kind" in m, "match 에 kind/suggested_label"
+            )
         empty = client.post("/secrets/scan", json={"text": "안녕하세요 평범한 문장입니다"})
         self.assert_equal(empty.status_code, 200, "scan(평문 없음) 200")
 
@@ -13006,6 +13010,96 @@ if __name__ == "__main__":
         self.assert_equal(c404.status_code, 404, "없는 세션 commit 404")
         p409 = client.post("/sessions/any/recording/stop_preview")
         self.assert_equal(p409.status_code, 409, "녹화 중 아님 stop_preview 409")
+
+    def test_228_api_server_capture_serving_and_step_attach(self):
+        """[handoff §66] 요소 스크린샷 표시 — 캡처 서빙 + step attach 라우트.
+
+        pick(session_id) 가 요소 rect 를 grab 해 captures 에 저장(실제 grab 은 디스플레이
+        의존이라 미호출 — PickClickRequest.session_id 스키마만), 생성된 step 에 attach
+        엔드포인트로 경로를 붙여(표시 전용, AI 무전송) 서빙 엔드포인트로 <img> 로드한다.
+        core 0줄 — update_step/get_captures_dir 공개 API 재사용.
+        """
+        import tempfile
+
+        from api_server.server import create_app
+
+        self.step("(1) 서빙 GET + attach POST 라우트 등록")
+        app = create_app(token="", data_dir=tempfile.mkdtemp(prefix="ohdo_cap66_"))
+        pairs = set()
+        for r in app.routes:
+            path = getattr(r, "path", None)
+            for m in getattr(r, "methods", None) or []:
+                pairs.add((path, m))
+        self.assert_true(
+            ("/sessions/{session_id}/captures/{filename}", "GET") in pairs,
+            "GET captures 서빙 라우트 필수",
+        )
+        self.assert_true(
+            ("/sessions/{session_id}/steps/{step_id}/capture", "POST") in pairs,
+            "POST step capture attach 라우트 필수",
+        )
+
+        self.step("(2) PickClickRequest.session_id 옵션 + AttachCaptureRequest.path + helper")
+        from api_server.deps import session_captures_dir
+        from api_server.routes.pick import PickClickRequest
+        from api_server.routes.steps import AttachCaptureRequest
+
+        self.assert_true(PickClickRequest().session_id is None, "session_id 기본 None")
+        self.assert_equal(PickClickRequest(session_id="s").session_id, "s", "session_id 수용")
+        self.assert_equal(AttachCaptureRequest(path="/a.png").path, "/a.png", "attach path 필수")
+
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — 라우트/스키마 가드까지만")
+            return
+
+        from api_server.deps import get_app_service
+
+        client = TestClient(app)
+        service = get_app_service(app)
+
+        self.step("(3) 세션 생성 + captures 폴더 + 더미 이미지 서빙 라운드트립")
+        sid = client.post("/sessions", json={"title": "cap66"}).json()["session"]["session_id"]
+        cdir = session_captures_dir(service, sid)
+        self.assert_true(cdir is not None, "파일 저장소 → captures 경로 존재")
+        (cdir / "shot.png").write_bytes(b"\x89PNG\r\n\x1a\n-dummy")
+        ok = client.get(f"/sessions/{sid}/captures/shot.png")
+        self.assert_equal(ok.status_code, 200, "저장된 캡처 서빙 200")
+        self.assert_true(ok.content.startswith(b"\x89PNG"), "원본 바이트 서빙")
+
+        self.step("(4) 서빙 가드 — traversal 400 / 없는 파일 404")
+        self.assert_equal(
+            client.get(f"/sessions/{sid}/captures/a..b.png").status_code, 400, ".. 포함 400"
+        )
+        self.assert_equal(
+            client.get(f"/sessions/{sid}/captures/nope.png").status_code, 404, "없는 파일 404"
+        )
+
+        self.step("(5) attach — step.captures 병합 저장(중복 무시)")
+        from core.session_manager import Step
+
+        sess = service.get_session(sid)
+        sess.steps.append(Step(step_id=1, user_request="r"))
+        service.save_session(sess)
+        p = str(cdir / "shot.png")
+        a1 = client.post(f"/sessions/{sid}/steps/1/capture", json={"path": p})
+        self.assert_equal(a1.status_code, 200, "attach 200")
+        self.assert_true(p in a1.json()["captures"], "captures 에 경로 추가")
+        a2 = client.post(f"/sessions/{sid}/steps/1/capture", json={"path": p})
+        self.assert_equal(len(a2.json()["captures"]), 1, "중복 경로 무시(1건 유지)")
+
+        self.step("(6) attach 가드 — 없는 step 404 / 없는 세션 404")
+        self.assert_equal(
+            client.post(f"/sessions/{sid}/steps/999/capture", json={"path": p}).status_code,
+            404,
+            "없는 step 404",
+        )
+        self.assert_equal(
+            client.post("/sessions/nope/steps/1/capture", json={"path": p}).status_code,
+            404,
+            "없는 세션 404",
+        )
 
 
 if __name__ == "__main__":

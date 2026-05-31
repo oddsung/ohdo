@@ -35,6 +35,8 @@ import {
   insertStep,
   regenerateStep,
   scanSecrets,
+  attachStepCapture,
+  fetchCaptureObjectUrl,
   type GenerateResult,
   type Step,
 } from "@/api/client";
@@ -52,6 +54,7 @@ import { SecretAutocomplete } from "@/components/SecretAutocomplete";
 
 interface StepCardProps {
   step: Step;
+  sessionId: string;
   running: boolean;
   busy: boolean;
   regenerating: boolean;
@@ -63,6 +66,42 @@ interface StepCardProps {
   onMove: (stepId: number, dir: "up" | "down") => void;
   onInsert: (stepId: number) => void;
   onDelete: (stepId: number) => void;
+}
+
+/** step 캡처 이미지 썸네일 (handoff §66) — 인증 fetch→object URL 로 로드.
+ * 고정 높이(h-20) 컨테이너 + object-contain → 이미지 크기와 무관하게 표시 영역 일정
+ * (step 카드 높이 변형 방지). */
+function CaptureThumb({ sessionId, path }: { sessionId: string; path: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    let obj: string | null = null;
+    const filename = path.split(/[\\/]/).pop() ?? "";
+    if (!filename) return;
+    fetchCaptureObjectUrl(sessionId, filename)
+      .then((u) => {
+        if (active) {
+          obj = u;
+          setUrl(u);
+        } else {
+          URL.revokeObjectURL(u);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      if (obj) URL.revokeObjectURL(obj);
+    };
+  }, [sessionId, path]);
+  return (
+    <div className="flex h-20 items-center justify-center overflow-hidden rounded border border-black/20 bg-black/20">
+      {url ? (
+        <img src={url} alt="" className="max-h-20 max-w-full object-contain" />
+      ) : (
+        <ImageIcon className="h-5 w-5 text-discord-muted/40" />
+      )}
+    </div>
+  );
 }
 
 /** step 카드 액션 아이콘 (div onClick 안에 중첩, stopPropagation). */
@@ -120,6 +159,7 @@ function BlockCard({ kind, active, onSelect }: { kind: "library" | "initial"; ac
 
 function StepCard({
   step,
+  sessionId,
   running,
   busy,
   regenerating,
@@ -186,6 +226,14 @@ function StepCard({
           </div>
         </div>
       </div>
+      {/* 선택 요소/영역 캡처 이미지 (handoff §66) — 고정 높이 영역(카드 크기 안정). */}
+      {step.captures && step.captures.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
+          {step.captures.map((c, i) => (
+            <CaptureThumb key={`${c}-${i}`} sessionId={sessionId} path={c} />
+          ))}
+        </div>
+      )}
       {step.user_request && (
         <p className="flex items-start gap-1.5 text-sm text-discord-text">
           <User className="mt-0.5 h-3.5 w-3.5 shrink-0 text-discord-muted" />
@@ -291,14 +339,26 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     // pending element 는 호출 시점에 store 에서 읽어 stale closure 회피.
     mutationFn: (req: string) =>
       new Promise<GenerateResult>((resolve, reject) => {
+        const pendingEl = usePickStore.getState().pending;
+        const elementImage = pendingEl?.imagePath; // pick 시 캡처된 요소 스크린샷(§66)
         setProgress("");
         generateStream(
           sessionId,
           req,
-          usePickStore.getState().pending,
+          pendingEl,
           {
             onProgress: (m) => setProgress(m),
-            onDone: (result) => resolve(result),
+            onDone: async (result) => {
+              // 선택 요소 스크린샷을 생성된 step 에 첨부 — 표시 전용(AI 무전송).
+              if (result.success && result.step && elementImage) {
+                try {
+                  await attachStepCapture(sessionId, result.step.step_id, elementImage);
+                } catch {
+                  /* 표시용이라 실패는 무시 */
+                }
+              }
+              resolve(result);
+            },
             onError: (msg) => reject(new Error(msg)),
           },
           useCaptureStore.getState().images.map((im) => im.path),
@@ -514,6 +574,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             <StepCard
               key={s.step_id}
               step={s}
+              sessionId={sessionId}
               running={running}
               busy={busyStepId === s.step_id}
               regenerating={regenStepId === s.step_id}
@@ -596,7 +657,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             className="h-[60px] w-10 shrink-0 text-discord-muted hover:text-primary"
             title={t("chat.pickElementTitle")}
             disabled={busy || picking}
-            onClick={() => startPick()}
+            onClick={() => startPick(sessionId)}
           >
             <MousePointerClick className="h-5 w-5" />
           </Button>

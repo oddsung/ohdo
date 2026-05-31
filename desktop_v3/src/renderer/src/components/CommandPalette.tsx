@@ -133,7 +133,7 @@ export function CommandPalette() {
       id: "pick",
       label: t("palette.pickElement"),
       icon: <MousePointerClick className="h-4 w-4" />,
-      run: () => startPick(),
+      run: () => startPick(selectedSessionId ?? undefined),
     });
   }
   if (selectedSessionId) {
