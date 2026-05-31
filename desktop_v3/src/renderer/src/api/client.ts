@@ -116,14 +116,16 @@ export interface PickResult {
   label?: string;
   is_browser_element?: boolean;
   image?: string; // 선택 요소 스크린샷 절대경로 (handoff §66, session_id 줬을 때)
+  element_context?: string; // AI 프롬프트용 풍부한 "## 선택된 UI 요소" 컨텍스트 (handoff §67)
   error?: string;
   cancelled?: boolean;
 }
 
 export interface PendingElement {
-  label: string;
+  label: string; // 한 줄 라벨 (칩 표시용)
   isBrowser: boolean;
   imagePath?: string; // pick 시 캡처된 요소 스크린샷 경로 (생성 후 step 에 attach)
+  elementContext?: string; // AI 에 보낼 풍부한 컨텍스트 (없으면 label 폴백, handoff §67)
 }
 
 export function generateStep(

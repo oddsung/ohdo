@@ -113,7 +113,8 @@ export async function generateStream(
     ws.send(
       JSON.stringify({
         user_request: userRequest,
-        element_context: pending?.label ?? null,
+        // 풍부한 컨텍스트(§67) 우선, 없으면 한 줄 라벨 폴백.
+        element_context: pending?.elementContext ?? pending?.label ?? null,
         is_browser_element: pending?.isBrowser ?? false,
         images: images && images.length ? images : null,
       }),

@@ -39,6 +39,7 @@ import {
   fetchCaptureObjectUrl,
   type GenerateResult,
   type Step,
+  type PendingElement,
 } from "@/api/client";
 import { generateStream } from "@/api/ws";
 import { useUiStore } from "@/store/uiStore";
@@ -336,10 +337,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const genMut = useMutation({
     // 진행상황 스트리밍 (handoff §44, /ws/generate). generateStream 을 Promise 로 감싸
     // onProgress 는 setProgress 로 라이브 표시, onDone/onError 로 resolve/reject.
-    // pending element 는 호출 시점에 store 에서 읽어 stale closure 회피.
-    mutationFn: (req: string) =>
+    // 【§67 race fix】 pending/images 는 store 에서 lazy read 하지 않고 **send() 가 mutate
+    // 호출 시점에 뜬 스냅샷**을 인자로 받는다. React Query 는 mutationFn 을 다음 microtask
+    // 에 실행하는데, send() 가 mutate 직후 동기로 clearPending/clearImages 하므로 여기서
+    // getState() 로 읽으면 이미 null/빈 값이었다(→ element_context 누락 + 이미지 미첨부).
+    mutationFn: (args: { req: string; pendingEl: PendingElement | null; images: string[] }) =>
       new Promise<GenerateResult>((resolve, reject) => {
-        const pendingEl = usePickStore.getState().pending;
+        const { req, pendingEl, images } = args;
         const elementImage = pendingEl?.imagePath; // pick 시 캡처된 요소 스크린샷(§66)
         setProgress("");
         generateStream(
@@ -361,7 +365,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             },
             onError: (msg) => reject(new Error(msg)),
           },
-          useCaptureStore.getState().images.map((im) => im.path),
+          images,
         ).catch(reject);
       }),
     onSettled: () => setProgress(""),
@@ -443,9 +447,14 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
   const busy = genMut.isPending;
   const send = (req: string) => {
-    genMut.mutate(req);
-    if (pending) clearPending(); // 한 요청에 한 번만 첨부
-    if (pendingImages.length) clearImages(); // 첨부 이미지도 한 요청에 한 번만
+    // 【§67 race fix】 mutate 가 mutationFn 을 microtask 로 지연 실행하므로, 여기서 pending/
+    // images 스냅샷을 먼저 떠 mutate 인자로 동기 전달한 뒤 store 를 정리한다. (이전엔 mutate
+    // 직후 clearPending 하고 mutationFn 이 나중에 getState 로 읽어 null 을 받는 race 가 있었다.)
+    const pendingEl = usePickStore.getState().pending;
+    const images = useCaptureStore.getState().images.map((im) => im.path);
+    genMut.mutate({ req, pendingEl, images });
+    if (pendingEl) clearPending(); // 한 요청에 한 번만 첨부
+    if (images.length) clearImages(); // 첨부 이미지도 한 요청에 한 번만
   };
   // 전송 — 평문 시크릿 감지(#21b) 후 발견되면 마스킹 권고 confirm. 이미 placeholder
   // ({{secret:...}})로 바꾼 부분은 detect 가 잡지 않으므로 자동완성 사용 시 경고 없음.

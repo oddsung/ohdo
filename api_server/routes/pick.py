@@ -56,6 +56,32 @@ def _capture_element_image(app, session_id: str, result: dict) -> None:
         result["image"] = cap["path"]  # 절대 경로(§60 captures 형식과 동일)
 
 
+def _build_element_context(element: dict) -> "str | None":
+    """선택 요소 메타 → AI 프롬프트용 풍부한 "## 선택된 UI 요소" 컨텍스트 (handoff §67, v2 동등).
+
+    core 의 공개 ``WindowInspector.get_element_info_text`` 재사용(core 0줄) — 프롬프트 가이드
+    #17 이 "그대로 시작 코드로 사용"하라고 가리키는 **구조화 섹션 + 코드 템플릿**을 생성한다.
+    이게 없으면(이전 v3) element_context 가 한 줄 라벨뿐이라 AI 가 가이드의 폴백 예시
+    (control_type="Document")를 복제하는 약한 타겟팅이 됐다.
+
+    ``capture_element_at`` 의 rect 는 ``[l,t,r,b]`` 리스트지만 get_element_info_text 는
+    ``{left,top,width,height}`` dict 를 기대하므로 정규화(원본 element 는 안 건드림). best-effort.
+    """
+    try:
+        from core.win_inspector import WindowInspector
+
+        info = dict(element)
+        r = info.get("rect")
+        if isinstance(r, (list, tuple)) and len(r) == 4:
+            left, top, right, bottom = (int(v) for v in r)
+            info["rect"] = {"left": left, "top": top, "width": right - left, "height": bottom - top}
+        text = WindowInspector().get_element_info_text(info)
+        return text or None
+    except Exception:
+        logger.debug("element_context 구성 실패 (무시 — 한 줄 라벨로 폴백)", exc_info=True)
+        return None
+
+
 @router.post("/pick")
 def pick_element(request: Request, _: None = Depends(require_token)) -> dict:
     """현재 마우스 커서 위치의 UI element 를 캡처.
@@ -127,11 +153,17 @@ def pick_on_click_route(
 
     result = pick_on_click()
     session_id = body.session_id if body else None
-    if result.get("success") and session_id:
-        try:
-            _capture_element_image(request.app, session_id, result)
-        except Exception:
-            logger.debug("요소 스크린샷 캡처 실패 (무시)", exc_info=True)
+    if result.get("success"):
+        # 풍부한 element_context (v2 동등, §67) — AI 가 선택 요소를 정확히 타겟하도록.
+        ctx = _build_element_context(result.get("element") or {})
+        if ctx:
+            result["element_context"] = ctx
+        # 표시용 요소 스크린샷 (§66) — session_id 줬을 때만.
+        if session_id:
+            try:
+                _capture_element_image(request.app, session_id, result)
+            except Exception:
+                logger.debug("요소 스크린샷 캡처 실패 (무시)", exc_info=True)
     return result
 
 

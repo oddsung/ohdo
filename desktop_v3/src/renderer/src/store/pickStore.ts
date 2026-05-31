@@ -34,6 +34,7 @@ export const usePickStore = create<PickState>((set, get) => ({
             label: result.label ?? "",
             isBrowser: !!result.is_browser_element,
             imagePath: result.image,
+            elementContext: result.element_context,
           },
           picking: false,
         });

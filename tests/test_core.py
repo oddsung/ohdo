@@ -13101,6 +13101,48 @@ if __name__ == "__main__":
             "없는 세션 404",
         )
 
+    def test_229_api_server_pick_rich_element_context(self):
+        """[handoff §67] pick 풍부한 element_context — core get_element_info_text(v2 동등) 재사용.
+
+        이전 v3 는 element_context 로 한 줄 라벨(format_element_label)만 보내 프롬프트 가이드
+        #17 이 참조하는 "## 선택된 UI 요소" 섹션/코드 템플릿이 없어 AI 타겟팅이 약했다(메모장
+        "+"를 Document 로 폴백). _build_element_context 가 capture_element_at 메타(rect=리스트)
+        를 정규화해 그 섹션을 만들어야 한다. core 0줄 — WindowInspector 공개 메서드만 호출.
+        """
+        from api_server.routes.pick import _build_element_context
+
+        self.step("(1) '+' 버튼 메타(rect=리스트) → 풍부한 '## 선택된 UI 요소' 섹션")
+        el = {
+            "control_type": "Button",
+            "name": "새 탭",
+            "automation_id": "AddButton",
+            "class_name": "",
+            "rect": [1200, 10, 1230, 40],  # capture_element_at 형식: [l,t,r,b] 리스트
+            "window_title": "제목 없음 - 메모장",
+            "is_password_field": False,
+        }
+        ctx = _build_element_context(el)
+        self.assert_true(ctx is not None and "선택된 UI 요소" in ctx, "## 선택된 UI 요소 섹션 생성")
+        self.assert_true("Button" in ctx, "control_type 포함")
+        self.assert_true("새 탭" in ctx, "name 포함")
+        self.assert_true("AddButton" in ctx, "automation_id 포함")
+
+        self.step("(2) rect-리스트에 crash 안 함 + rect 없는 메타도 OK")
+        ctx2 = _build_element_context({"control_type": "Button", "name": "x"})
+        self.assert_true(ctx2 is not None and "Button" in ctx2, "rect 없어도 생성")
+
+        self.step("(3) 빈/이상 입력 graceful (예외 없이 str 또는 None)")
+        out = _build_element_context({})
+        self.assert_true(out is None or isinstance(out, str), "빈 dict 비크래시")
+
+        self.step("(4) core get_element_info_text 공개 메서드 가드 (core 0줄)")
+        from core.win_inspector import WindowInspector
+
+        self.assert_true(
+            hasattr(WindowInspector, "get_element_info_text"),
+            "core WindowInspector.get_element_info_text 공개 메서드 필수",
+        )
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
