@@ -7,7 +7,7 @@
     <!-- Electron 렌더러: localhost 브리지 + self 만 허용하는 최소 CSP -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; script-src 'self' blob:; font-src 'self' data:;"
+      content="default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; script-src 'self' blob:; font-src 'self' data:;"
     />
     <title>ohdo</title>
   </head>
