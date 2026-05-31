@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Monaco 기반 코드 뷰어/편집기 (handoff §40 #2) — 선택된 step 의 generated_code 표시.
-// "편집" 토글 시 읽기 전용 해제 → 저장(PUT update_step) → 세션 invalidate.
+// Monaco 기반 코드 뷰어/편집기 (handoff §40 #2). 부모(App)가 넘기는 code 를 표시 — step 은
+// §73 부터 그 step 의 코드(step_code 델타)만(누적 generated_code 아님), 블록은 library/initial.
+// "편집" 토글 시 읽기 전용 해제 → 저장(PUT update_step = step_code 저장+체인 재구성) → invalidate.
 import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";

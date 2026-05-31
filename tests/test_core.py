@@ -13248,6 +13248,60 @@ if __name__ == "__main__":
             "element child_window 호출 없으면(_resolve_element 등) 무변경",
         )
 
+    def test_233_step_code_edit_rebuilds_chain(self):
+        """[handoff §73] step 코드 편집(PUT) 이 step_code 저장 + 누적 generated_code 재구성.
+
+        v3 뷰어가 step 별 코드(step_code)만 표시/편집 → 편집은 step_code 로 저장하고 누적
+        generated_code 를 library+step_code 누적으로 재구성. 핵심: 편집이 **후속 step 의
+        generated_code 에도 전파**(체인 일관성)되어 delta 추출이 정상. core 0줄(api_server).
+        """
+        import tempfile
+
+        from api_server.server import create_app
+
+        app = create_app(token="", data_dir=tempfile.mkdtemp(prefix="ohdo_edit73_"))
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 가능 — skip")
+            return
+
+        import shutil
+
+        from api_server.deps import get_app_service
+        from core.app_service import Step
+
+        client = TestClient(app)
+
+        self.step("(1) 2-step 세션 생성(step_code 보유)")
+        sid = client.post("/sessions", json={"title": "edit73"}).json()["session"]["session_id"]
+        service = get_app_service(app)  # 첫 요청 후 생성됨
+
+        try:
+            session = service.get_session(sid)
+            service.repo.add_step(session, Step(step_code="A1 = 1", generated_code="A1 = 1"))
+            service.repo.add_step(
+                session, Step(step_code="A2 = 2", generated_code="A1 = 1\n\nA2 = 2")
+            )
+            ids = [s["step_id"] for s in client.get(f"/sessions/{sid}").json()["session"]["steps"]]
+
+            self.step("(2) step1 코드 편집(PUT) → step_code 저장 + 체인 재구성")
+            r = client.put(f"/sessions/{sid}/steps/{ids[0]}", json={"generated_code": "A1 = 999"})
+            self.assert_equal(r.status_code, 200, "PUT 편집 200")
+            steps = client.get(f"/sessions/{sid}").json()["session"]["steps"]
+            s1, s2 = steps[0], steps[1]
+            self.assert_equal(s1.get("step_code"), "A1 = 999", "편집이 step_code 로 저장")
+            self.assert_true("A1 = 999" in s1["generated_code"], "step1 누적코드에 편집 반영")
+
+            self.step("(3) 핵심: 후속 step2 의 누적코드에도 편집 전파(체인 재구성)")
+            self.assert_true(
+                "A1 = 999" in s2["generated_code"], "step2 누적코드에 편집된 step1 반영"
+            )
+            self.assert_true("A2 = 2" in s2["generated_code"], "step2 자기 코드 유지")
+            self.assert_true("A1 = 1\n" not in s2["generated_code"], "옛 step1 코드 잔존 안 함")
+        finally:
+            shutil.rmtree(f"data/sessions/{sid}", ignore_errors=True)
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

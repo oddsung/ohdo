@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -16,6 +18,34 @@ from api_server.deps import (
     require_token,
     to_dict,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _rebuild_generated_code_chain(service, session_id: str) -> None:
+    """각 step 의 step_code 를 library + 누적해 generated_code 를 재구성 (handoff §73).
+
+    v3 뷰어가 step 별로 **그 step 의 코드(step_code)만** 보여주고 편집도 step_code 단위로
+    저장하므로(§73), 누적 generated_code 는 여기서 자동 재구성한다(core 의 reorder/delete 와
+    동일 패턴: library + step_code 누적). 마커 없이 누적해도 run-time 의 delta 추출(diff)이
+    각 step 의 델타를 정확히 복원한다. core 0줄 — 공개 get/save + extract_library_block 재사용.
+    """
+    from core.workflow_engine import extract_library_block
+
+    session = service.get_session(session_id)
+    accumulated = extract_library_block(session)
+    for i in range(len(session.steps)):
+        s = session.steps[i]
+        if not isinstance(s, dict):
+            s = to_dict(s)
+            session.steps[i] = s
+        sc = (s.get("step_code") or "").strip()
+        if accumulated.strip() and sc:
+            accumulated = accumulated + "\n\n" + sc
+        elif sc:
+            accumulated = sc
+        s["generated_code"] = accumulated
+    service.save_session(session)
 
 
 class AttachCaptureRequest(BaseModel):
@@ -65,17 +95,20 @@ def update_step(
     if not _has_step(session, step_id):
         raise HTTPException(status_code=404, detail=f"step not found: {step_id}")
 
-    # generated_code 전체를 수동 편집으로 간주 — step_code(실행 delta)도 동일 코드로
-    # 맞춰 workflow_engine 이 manually_edited 우선순위로 이 코드를 실행하게 한다.
+    # §73: 뷰어가 step 별 코드(step_code)만 표시/편집하므로 편집 내용을 step_code 로 저장하고
+    # manually_edited 로 마킹(run-time 이 이 step_code 를 우선 실행). 누적 generated_code 는
+    # _rebuild_generated_code_chain 으로 재구성(이전엔 generated_code 에 편집 블록을 통째로 덮어
+    # 누적 코드가 그 블록으로 줄어들고 후속 step 의 delta 가 깨졌음).
     service.update_step(
         session_id,
         step_id,
-        {
-            "generated_code": body.generated_code,
-            "step_code": body.generated_code,
-            "manually_edited": True,
-        },
+        {"step_code": body.generated_code, "manually_edited": True},
     )
+    try:
+        _rebuild_generated_code_chain(service, session_id)
+    except Exception:
+        # 재구성 실패해도 step_code 편집 자체는 저장됨(run-time 은 manually_edited step_code 사용).
+        logger.debug("generated_code 체인 재구성 실패(무시)", exc_info=True)
     # 편집 후 캐시된 kernel 은 stale — 다음 실행이 새 코드 반영하도록 폐기.
     drop_kernel(app, session_id)
     return {"success": True, "session": to_dict(service.get_session(session_id))}

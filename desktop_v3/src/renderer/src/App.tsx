@@ -41,8 +41,10 @@ function CodePane({ sessionId }: { sessionId: string }) {
   const step = session?.steps.find((s) => s.step_id === selectedStepId);
 
   // 표시 대상 결정: 블록 선택 > step 선택. 블록은 stepId=null 로 넘겨 read-only 강제.
+  // §73: step 은 누적 generated_code(이전 step 전부 + import) 대신 **그 step 의 코드만**
+  // (step_code = 실행 델타, v2 의 블록 단위 표시와 동등). step_code 가 비면 generated_code 폴백.
   let stepId: number | null = step?.step_id ?? null;
-  let code = step?.generated_code ?? "";
+  let code = step?.step_code || step?.generated_code || "";
   let title: string | undefined = step ? `STEP ${step.step_id}` : undefined;
   if (selectedBlock === "library") {
     stepId = null;
