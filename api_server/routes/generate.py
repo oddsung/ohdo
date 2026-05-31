@@ -15,12 +15,55 @@ POST /sessions/{id}/generate 의 스트리밍 버전. core 의 ``generate_step``
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from api_server.deps import get_app_service, to_dict
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+def _enforce_step_selector(service, session_id: str, step, element_context: "str | None") -> None:
+    """§72: 생성된 step 의 element 셀렉터를 picker 가 고른 요소로 결정적으로 교정(best-effort).
+
+    연속 클릭 step 이 쌓이면 프롬프트가 직전 대상(예: Document)으로 도배돼 AI 가 새로 픽한
+    요소를 무시하는 신호-잡음 문제 → picker 가 정확히 아는 요소(auto_id/title)로 생성 후 교정.
+    generated_code(마커 영역) 교정 + step_code(델타) 마커 재추출. core 무관(텍스트 후처리).
+    """
+    if not element_context or not getattr(step, "generated_code", ""):
+        return
+    try:
+        from api_server.selector_enforce import enforce_picked_selector
+
+        new_code, changed = enforce_picked_selector(
+            step.generated_code, step.step_id, element_context
+        )
+        if not changed:
+            return
+        updates: dict = {"generated_code": new_code}
+        # step_code(델타)도 마커 재추출로 일관성 유지(표시/삭제·재정렬 chain).
+        try:
+            from core.workflow_engine import extract_step_delta_code
+
+            sess = service.get_session(session_id)
+            steps = [to_dict(s) for s in sess.steps]
+            idx = next((i for i, s in enumerate(steps) if s.get("step_id") == step.step_id), None)
+            if idx is not None:
+                cur = dict(steps[idx])
+                cur["generated_code"] = new_code
+                prev = steps[idx - 1] if idx > 0 else None
+                delta = extract_step_delta_code(cur, prev)
+                if delta and delta.strip():
+                    updates["step_code"] = delta
+        except Exception:
+            logger.debug("step_code 재추출 실패(generated_code 만 교정)", exc_info=True)
+        service.update_step(session_id, step.step_id, updates)
+        logger.info("§72 셀렉터 교정 적용 (step %s)", step.step_id)
+    except Exception:
+        logger.debug("셀렉터 교정 실패(무시 — AI 출력 유지)", exc_info=True)
 
 
 @router.websocket("/ws/generate")
@@ -103,12 +146,19 @@ async def ws_generate(ws: WebSocket) -> None:
                     }
                 )
             else:
+                # §72: picker 로 고른 요소를 AI 가 무시하고 엉뚱한 셀렉터를 쓴 경우 결정적 교정.
+                _enforce_step_selector(service, session_id, step, element_context)
                 fresh = service.get_session(session_id)
+                # 교정 후 갱신된 step dict 로 응답(없으면 원본).
+                step_dict = next(
+                    (to_dict(s) for s in fresh.steps if to_dict(s).get("step_id") == step.step_id),
+                    to_dict(step),
+                )
                 _emit(
                     {
                         "type": "done",
                         "success": True,
-                        "step": to_dict(step),
+                        "step": step_dict,
                         "session": to_dict(fresh),
                         "description": response.description or "",
                     }

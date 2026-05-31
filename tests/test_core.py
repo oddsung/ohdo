@@ -13195,6 +13195,59 @@ if __name__ == "__main__":
             "새 제어 블록의 본문(do_x)이 prev 중복이어도 보존됨",
         )
 
+    def test_232_picked_selector_enforcement(self):
+        """[handoff §72] picker 로 고른 요소 셀렉터를 생성 코드에 결정적으로 강제.
+
+        연속 클릭 step 에서 프롬프트가 직전 대상(Document)으로 도배돼 AI 가 새 픽 요소를 무시하는
+        신호-잡음 문제(엔진 무능 아님 — 첫 클릭은 정확). picker 가 아는 auto_id 로 생성 후 교정.
+        core 무관(텍스트 후처리). 파싱/교정/idempotent/guard 검증.
+        """
+        import ast
+
+        from api_server.selector_enforce import enforce_picked_selector, parse_picked_selector
+
+        self.step("(1) element_context 에서 셀렉터 파싱 (auto_id 우선, 숫자ID는 title 폴백)")
+        ctx = '## 선택된 UI 요소 (데스크톱 앱)\n- **타입**: Button\n- **이름**: "탭 닫기"\n- **Automation ID**: CloseButton'
+        self.assert_equal(
+            parse_picked_selector(ctx),
+            {"auto_id": "CloseButton", "control_type": "Button"},
+            "auto_id+control_type 파싱",
+        )
+        dyn = '- **타입**: Button\n- **이름**: "탭 닫기"\n- **Automation ID**: 123456 ⚠️ 동적'
+        self.assert_equal(
+            parse_picked_selector(dyn),
+            {"title": "탭 닫기", "control_type": "Button"},
+            "동적(숫자) auto_id → title 폴백",
+        )
+        self.assert_true(parse_picked_selector("타입 없음") is None, "식별자 없으면 None")
+
+        self.step("(2) 대상 step 의 element 셀렉터를 픽 요소로 교정 + compile")
+        gc = (
+            "# === Step 1: a (시작) ===\nwin = c()\n# === Step 1: a (끝) ===\n"
+            '# === Step 2: 클릭 (시작) ===\nelement = win.child_window(\n    control_type="Document",\n    found_index=0\n)\nelement.click()\n# === Step 2: 클릭 (끝) ==='
+        )
+        new, changed = enforce_picked_selector(gc, 2, ctx)
+        self.assert_true(changed, "교정 적용됨")
+        try:
+            ast.parse(new)
+            ok = True
+        except SyntaxError:
+            ok = False
+        self.assert_true(ok, "교정 결과 compile")
+        self.assert_true('auto_id="CloseButton"' in new, "픽 요소 auto_id 로 셀렉터 교정")
+        self.assert_true('"Document"' not in new, "generic Document 셀렉터 제거")
+
+        self.step("(3) idempotent + guard (이미 타겟/요소호출 없음/식별자 없음 → 무변경)")
+        self.assert_true(enforce_picked_selector(new, 2, ctx)[1] is False, "재적용 무변경")
+        self.assert_true(
+            enforce_picked_selector(gc, 2, "식별자 없음")[1] is False, "셀렉터 파싱 불가 무변경"
+        )
+        no_call = "# === Step 2: 클릭 (시작) ===\nclick_target = _resolve_element()\n# === Step 2: 클릭 (끝) ==="
+        self.assert_true(
+            enforce_picked_selector(no_call, 2, ctx)[1] is False,
+            "element child_window 호출 없으면(_resolve_element 등) 무변경",
+        )
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
