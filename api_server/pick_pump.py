@@ -81,6 +81,12 @@ def set_overlay_hwnd(hwnd: int | None) -> None:
     _overlay_hwnd = int(hwnd) if hwnd else None
 
 
+def get_overlay_hwnd() -> "int | None":
+    """직전 등록된 Electron 오버레이 창 HWND (§70). pick_on_click 반환 직후에도 유효 —
+    라우트의 _capture_element_image 가 grab 직전 이 오버레이(붉은 박스)를 숨기는 데 쓴다."""
+    return _overlay_hwnd
+
+
 def cancel_pick() -> bool:
     """진행 중인 클릭 캡처를 취소(있으면). 반환: 취소 신호를 보냈는지."""
     if _active.is_set():
@@ -314,7 +320,9 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
         except Exception:
             pass
         _hover_rect = None
-        _overlay_hwnd = None
+        # _overlay_hwnd 는 여기서 비우지 않는다(§70): pick_on_click 반환 직후 라우트의
+        # _capture_element_image 가 이 HWND 로 오버레이를 숨기고 grab 해야 하기 때문.
+        # 다음 pick 의 set_overlay_hwnd 가 덮어쓰고, 창은 렌더러가 닫는다.
         _paused.clear()
         _active.clear()
         _cancel.clear()

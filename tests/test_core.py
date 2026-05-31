@@ -13147,6 +13147,27 @@ if __name__ == "__main__":
             "core WindowInspector.get_element_info_text 공개 메서드 필수",
         )
 
+    def test_230_api_server_pick_overlay_hide_before_grab(self):
+        """[handoff §70] 캡처 직전 picker 붉은 오버레이 숨김 — get_overlay_hwnd + _hide_pick_overlay.
+
+        grab 시점에 오버레이(붉은 박스)가 아직 떠 있어 캡처에 빨간 테두리가 찍히던 것 수정.
+        pick_on_click finally 가 _overlay_hwnd 를 비우지 않아 라우트가 그 HWND 로 숨길 수 있어야
+        하고, 미등록 시 graceful(숨김 스킵). core 0줄(win API 만).
+        """
+        from api_server.pick_pump import get_overlay_hwnd, set_overlay_hwnd
+        from api_server.routes.pick import _hide_pick_overlay
+
+        self.step("(1) set/get 라운드트립")
+        set_overlay_hwnd(None)
+        self.assert_true(get_overlay_hwnd() is None, "기본/해제 시 None")
+        set_overlay_hwnd(123456)
+        self.assert_equal(get_overlay_hwnd(), 123456, "HWND 등록 후 조회 일치")
+
+        self.step("(2) 오버레이 미등록 시 _hide_pick_overlay graceful (실 창 미접촉)")
+        set_overlay_hwnd(None)  # 정리 + 미등록 상태
+        # hwnd None → ShowWindow 호출 전에 False 반환(비-Windows/창없음 모두 안전).
+        self.assert_true(_hide_pick_overlay() is False, "오버레이 없으면 숨김 스킵(False)")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

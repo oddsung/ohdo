@@ -49,11 +49,44 @@ def _capture_element_image(app, session_id: str, result: dict) -> None:
     captures_dir = session_captures_dir(get_app_service(app), session_id)
     if captures_dir is None:
         return
+    # §70: picker 붉은 하이라이트 오버레이가 아직 떠 있으므로(렌더러가 /pick/click 응답 후
+    # 닫음) grab 에 빨간 테두리가 찍힌다 → grab 직전 오버레이 창을 숨긴다. 복원 안 함(렌더러가
+    # 곧 닫음). 오버레이 미등록(HWND None)이면 그대로 grab(graceful).
+    _hide_pick_overlay()
+
     from api_server.capture_pump import capture_region
 
     cap = capture_region(captures_dir, left, top, w, h)
     if cap.get("success"):
         result["image"] = cap["path"]  # 절대 경로(§60 captures 형식과 동일)
+
+
+def _hide_pick_overlay() -> bool:
+    """grab 직전 picker 오버레이(붉은 박스) 창을 숨긴다 (§70). 성공 시 True.
+
+    오버레이는 다른(렌더러) 프로세스 창이지만 §49 의 SetWindowPos 처럼 cross-process
+    ShowWindow 가 동작한다. 숨긴 뒤 DWM 재합성이 끝나도록 잠깐 대기해야 그 프레임이 grab 된다.
+    복원하지 않는다 — 렌더러가 응답 직후 오버레이를 닫으므로(복원 시 붉은 박스 깜빡임만 유발).
+    """
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        import time as _time
+
+        from api_server.pick_pump import get_overlay_hwnd
+
+        hwnd = get_overlay_hwnd()
+        if not hwnd:
+            return False
+        user32 = ctypes.windll.user32
+        user32.ShowWindow.argtypes = [wt.HWND, ctypes.c_int]  # x64 HWND 절단 방지(§49 교훈)
+        user32.ShowWindow.restype = wt.BOOL
+        user32.ShowWindow(hwnd, 0)  # SW_HIDE
+        _time.sleep(0.12)  # 오버레이 사라진 화면이 grab 되도록 재합성 대기
+        return True
+    except Exception:
+        logger.debug("오버레이 숨김 실패(무시 — 붉은 테두리 포함될 수 있음)", exc_info=True)
+        return False
 
 
 def _build_element_context(element: dict) -> "str | None":
