@@ -13,6 +13,7 @@ export default defineConfig({
   forbidOnly: true,
   reporter: [
     ["list"],
-    ["json", { outputFile: "runs/last-playwright.json" }],
+    // orchestrator 는 PLAYWRIGHT_JSON_OUTPUT_NAME(절대경로)로 강제한다. 수동 실행 시엔 기본 경로.
+    ["json", { outputFile: process.env.PLAYWRIGHT_JSON_OUTPUT_NAME ?? "runs/last-playwright.json" }],
   ],
 });

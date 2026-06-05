@@ -1,9 +1,9 @@
 // Playwright E2E 실행 + JSON 리포트 정규화 → 단일 TestResult.
 
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
-import { DEVLOOP_DIR, IS_WIN, REPO_ROOT, VENV_PYTHON } from "./paths";
+import { existsSync, mkdirSync, readFileSync } from "fs";
+import { dirname, join } from "path";
+import { DEVLOOP_DIR, IS_WIN, REPO_ROOT, VENV_PYTHON, cleanElectronEnv } from "./paths";
 import type { LoopConfig } from "./config";
 import type { TestFailure, TestResult } from "./types";
 
@@ -100,18 +100,23 @@ export function runE2E(config: LoopConfig): TestResult {
   const args = ["playwright", "test"];
   if (config.grep) args.push("--grep", config.grep);
 
+  // JSON 리포트는 환경변수로 강제(절대경로). config 의 outputFile 은 runs/ 디렉터리가
+  // 없으면 조용히 실패하지만, PLAYWRIGHT_JSON_OUTPUT_NAME 은 디렉터리까지 만들어 확실히 쓴다.
+  mkdirSync(dirname(REPORT_PATH), { recursive: true });
+
   const proc = spawnSync(NPX, args, {
     cwd: DEVLOOP_DIR,
     encoding: "utf8",
     maxBuffer: 128 * 1024 * 1024,
     shell: IS_WIN,
-    env: {
-      ...process.env,
-      // 빌드본 Electron 이 .venv python 으로 api_server 를 띄우도록 핀(휴리스틱 의존 제거).
+    // 빌드본 Electron 이 .venv python 으로 api_server 를 띄우도록 핀(휴리스틱 의존 제거).
+    // cleanElectronEnv: VS Code 상속 환경의 ELECTRON_RUN_AS_NODE 등 제거(자식 electron launch 보호).
+    env: cleanElectronEnv({
       OHDO_PYTHON: VENV_PYTHON,
       OHDO_PROJECT_ROOT: REPO_ROOT,
+      PLAYWRIGHT_JSON_OUTPUT_NAME: REPORT_PATH,
       CI: "1", // forbidOnly 등 CI 동작 일관성.
-    },
+    }),
   });
 
   if (!existsSync(REPORT_PATH)) {

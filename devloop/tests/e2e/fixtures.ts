@@ -9,6 +9,7 @@ import {
   DESKTOP_V3_DIR,
   REPO_ROOT,
   VENV_PYTHON,
+  cleanElectronEnv,
   electronBinary,
 } from "../../src/paths";
 
@@ -24,11 +25,11 @@ export const test = base.extend<OhdoFixtures>({
       args: [DESKTOP_MAIN_ENTRY],
       cwd: DESKTOP_V3_DIR,
       // 빌드본 main 이 .venv python 으로 api_server 브리지를 띄우도록 핀.
-      env: {
-        ...process.env,
+      // cleanElectronEnv: VS Code 상속 환경의 ELECTRON_RUN_AS_NODE 등을 제거(미제거 시 launch 실패).
+      env: cleanElectronEnv({
         OHDO_PYTHON: VENV_PYTHON,
         OHDO_PROJECT_ROOT: REPO_ROOT,
-      } as Record<string, string>,
+      }),
     });
     await use(app);
     await app.close();

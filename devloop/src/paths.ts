@@ -52,3 +52,23 @@ export function claudeBinary(): string {
   if (process.env.OHDO_CLAUDE_BIN) return process.env.OHDO_CLAUDE_BIN;
   return IS_WIN ? "claude.cmd" : "claude";
 }
+
+/**
+ * 자식 Electron 에 넘길 정화된 환경변수.
+ *
+ * VS Code(=Electron) 통합 터미널 등에서 실행하면 상속 환경에 `ELECTRON_RUN_AS_NODE=1`
+ * 과 `VSCODE_*` 가 들어 있다. 그대로 넘기면 desktop_v3 의 electron 이 **node 모드**로 떠서
+ * 창을 만들지 않고 Playwright 가 "Process failed to launch" 로 실패한다. 위험 키를 제거한다.
+ * (일반 터미널에선 애초에 없으므로 무해.)
+ */
+export function cleanElectronEnv(extra: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if (k === "ELECTRON_RUN_AS_NODE") continue; // 핵심: electron 을 node 로 만드는 범인
+    if (k === "NODE_OPTIONS") continue; // --require 주입 등 회피
+    if (k.startsWith("VSCODE_")) continue; // VS Code IPC/ESM 훅 회피
+    env[k] = v;
+  }
+  return { ...env, ...extra };
+}
