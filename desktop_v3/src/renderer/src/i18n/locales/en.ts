@@ -169,6 +169,7 @@ export const en: Catalog = {
     welcome: "👋 ohdo desktop_v3",
     pickOrCreate: "Select a session on the left or create one with +.",
     hint: "Open a session and describe a task; AI will generate Python automation code.",
+    createSession: "Create new session",
   },
   tab: {
     close: "Close tab",

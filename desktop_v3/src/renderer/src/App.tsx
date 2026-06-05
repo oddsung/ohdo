@@ -4,7 +4,9 @@
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { Loader2, Plus } from "lucide-react";
 import { createSession, fetchSession, fetchBlocks } from "./api/client";
+import { buttonVariants } from "./components/ui/button";
 import { useUiStore } from "./store/uiStore";
 import { usePickStore } from "./store/pickStore";
 import { useExecStore } from "./store/execStore";
@@ -65,14 +67,29 @@ function CodePane({ sessionId }: { sessionId: string }) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ onCreate, creating }: { onCreate: () => void; creating: boolean }) {
   const { t } = useTranslation();
   return (
     <main className="flex h-full flex-1 items-center justify-center">
-      <div className="text-center text-discord-muted">
+      <div className="flex flex-col items-center text-center text-discord-muted">
         <p className="text-lg">{t("app.welcome")}</p>
         <p className="mt-2 text-sm">{t("app.pickOrCreate")}</p>
         <p className="mt-1 text-xs">{t("app.hint")}</p>
+        {/* 빈 상태에서도 곧장 시작할 수 있는 1차 행동 — 사이드바의 작은 "+" 를 찾지 않아도 된다. */}
+        <button
+          type="button"
+          data-testid="empty-create-session"
+          disabled={creating}
+          onClick={onCreate}
+          className={buttonVariants({ className: "mt-5" })}
+        >
+          {creating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Plus className="h-4 w-4" />
+          )}
+          {t("app.createSession")}
+        </button>
       </div>
     </main>
   );
@@ -132,7 +149,10 @@ export default function App() {
             <CodePane sessionId={selectedSessionId} />
           </div>
         ) : (
-          <EmptyState />
+          <EmptyState
+            onCreate={() => newSessionMut.mutate()}
+            creating={newSessionMut.isPending}
+          />
         )}
       </div>
       <PickOverlay />
