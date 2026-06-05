@@ -36,6 +36,7 @@ export const ko = {
     emptyHint: "아래에 자연어로 작업을 요청하면 AI 가 첫 step 코드를 생성합니다.",
     generatingDefault: "AI 가 코드를 생성하는 중… (agy CLI 는 10~30초 걸릴 수 있습니다)",
     placeholder: "작업을 자연어로 요청하세요 (Enter 전송, Shift+Enter 줄바꿈)",
+    send: "전송",
     attached: "첨부된 요소: {{label}}",
     removeAttach: "첨부 제거",
     recordStartTitle: "작업 녹화 시작 (다른 앱 조작을 step 으로 기록)",

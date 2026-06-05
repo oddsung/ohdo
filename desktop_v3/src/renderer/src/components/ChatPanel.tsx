@@ -695,6 +695,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             disabled={busy || !input.trim()}
             size="icon"
             className="h-[60px] w-12"
+            title={t("chat.send")}
           >
             {busy ? (
               <Loader2 className="h-5 w-5 animate-spin" />

@@ -38,6 +38,7 @@ export const en: Catalog = {
     emptyHint: "Describe a task below in natural language and AI will generate the first step.",
     generatingDefault: "AI is generating code… (agy CLI may take 10–30s)",
     placeholder: "Describe a task in natural language (Enter to send, Shift+Enter for newline)",
+    send: "Send",
     attached: "Attached element: {{label}}",
     removeAttach: "Remove attachment",
     recordStartTitle: "Start recording (capture actions in other apps as steps)",
