@@ -1,0 +1,11 @@
+# devloop 하네스 런타임 산출물 — 소스만 추적, 결과물은 무시.
+node_modules/
+runs/
+dist/
+*.log
+
+# Playwright 산출물
+test-results/
+playwright-report/
+.playwright/
+last-playwright.json
