@@ -870,7 +870,9 @@ def extract_library_block(session) -> str:
                 ln for ln in code.splitlines() if ln.startswith("import ") or ln.startswith("from ")
             ]
             block = "\n".join(import_lines)
-    return _ensure_essential_imports(block)
+    # 핵심 import prepend 후, IME 호환 shim 을 그 뒤에 주입(헬퍼/래핑은 import 이후 정의돼야 함).
+    result = _ensure_essential_imports(block)
+    return result + "\n" + _IME_COMPAT_SHIM.strip() if result else _IME_COMPAT_SHIM.strip()
 
 
 # G5: 모든 step 이 사용할 수 있어야 하는 핵심 패키지. AI 가 누락해도 library
@@ -887,6 +889,51 @@ _ESSENTIAL_LIBRARY_IMPORTS = (
     "import pyperclip",
     "from pywinauto import Application",
 )
+
+
+# IME 호환 shim (devloop 실측, 2026-06-05): 한국어 등 IME 환경에서 Ctrl+Shift 는 IME
+# 언어전환 단축키라 `pyautogui.hotkey('ctrl','shift','s')` (다른 이름으로 저장) 등 modifier
+# 조합이 IME 에 흡수되어 앱에 닿지 않는다(스크린샷으로 확인 — 영문 강제 시 정상 동작).
+# 라이브러리 블럭에 자동 주입: force_english_ime() 헬퍼 + hotkey 래핑(modifier 조합 직전
+# foreground 를 영문 입력으로 강제). 비-IME(영문) 환경에선 무해(no-op 수준).
+_IME_COMPAT_SHIM = '''
+def force_english_ime(hwnd=None):
+    """foreground(또는 지정 hwnd) 창을 영문(US) 레이아웃 + IME 영숫자 모드로 강제.
+    IME 환경에서 Ctrl+Shift 등 가속기가 언어전환에 흡수되는 문제 회피."""
+    try:
+        import ctypes
+        import time as _t
+        u = ctypes.windll.user32
+        if not hwnd:
+            hwnd = u.GetForegroundWindow()
+        try:
+            imm = ctypes.windll.imm32
+            himc = imm.ImmGetContext(hwnd)
+            if himc:
+                imm.ImmSetConversionStatus(himc, 0, 0)  # IME_CMODE_ALPHANUMERIC
+                imm.ImmReleaseContext(hwnd, himc)
+        except Exception:
+            pass
+        hkl = u.LoadKeyboardLayoutW("00000409", 0x00000001)  # US, KLF_ACTIVATE
+        u.PostMessageW(hwnd, 0x0050, 0, hkl)  # WM_INPUTLANGCHANGEREQUEST
+        _t.sleep(0.3)  # 언어전환이 적용되도록 대기(미적용 시 단축키가 IME 에 흡수되는 race)
+    except Exception:
+        pass
+
+try:
+    import pyautogui as _ohdo_pg
+    if not getattr(_ohdo_pg, "_ohdo_ime_wrapped", False):
+        _ohdo_orig_hotkey = _ohdo_pg.hotkey
+        def _ohdo_hotkey(*a, **k):
+            _mods = {"ctrl", "alt", "shift", "win", "command", "option"}
+            if any(isinstance(x, str) and x.lower() in _mods for x in a):
+                force_english_ime()
+            return _ohdo_orig_hotkey(*a, **k)
+        _ohdo_pg.hotkey = _ohdo_hotkey
+        _ohdo_pg._ohdo_ime_wrapped = True
+except Exception:
+    pass
+'''
 
 
 def _ensure_essential_imports(library_block: str) -> str:
