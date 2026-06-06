@@ -77,6 +77,31 @@ function helper(...args: string[]): string {
   return ((p.stdout || "") + (p.stderr || "")).trim();
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function apiPost(info: ApiInfo, path: string, body?: object): Promise<void> {
+  await fetch(`${info.baseUrl}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${info.token}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  }).catch(() => {});
+}
+
+/** '요소 선택' 버튼이 활성(enabled)될 때까지 대기 — picking 상태가 풀렸다는 신호. */
+async function ensurePickReady(win: Page): Promise<boolean> {
+  const b = win.getByRole("button", { name: /요소 선택|Select element|Pick element/i }).first();
+  return waitFor(
+    async () => (await b.count()) > 0 && (await b.isEnabled().catch(() => false)),
+    15_000,
+    "요소선택 버튼 활성",
+  );
+}
+
+/** 계산기가 떠서 UIA 로 버튼을 찾을 수 있을 때까지 대기. */
+async function waitCalcReady(): Promise<boolean> {
+  return waitFor(async () => /^\d+\s+\d+/.test(helper("locate", "num7Button")), 60_000, "계산기 준비");
+}
+
 async function requestStep(win: Page, info: ApiInfo, sid: string, req: string, target: number): Promise<boolean> {
   log(`▶ 요청(${target}): ${req}`);
   const ta = win.locator("textarea").first();
@@ -93,34 +118,35 @@ async function clickRunAll(win: Page): Promise<boolean> {
   return ok;
 }
 
-async function pickButton(win: Page, id: string, label: string, attempts = 3): Promise<boolean> {
-  const pickBtn = win.getByRole("button", { name: /요소 선택|Select element|Pick element/i });
+async function pickButton(win: Page, info: ApiInfo, id: string, label: string, attempts = 3): Promise<boolean> {
+  const pickBtn = win.getByRole("button", { name: /요소 선택|Select element|Pick element/i }).first();
   for (let a = 1; a <= attempts; a++) {
-    log(`'요소 선택' → 계산기 [${label}] 픽 시도 ${a}/${attempts}…`);
-    // 이전 픽이 끝나 ✶ 가 활성(disabled 해제)될 때까지 대기.
-    await pickBtn.first().waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
-    if (!(await pickBtn.count())) {
-      log("⚠️ '요소 선택' 버튼 없음");
-      return false;
+    // 이전 픽이 풀려 ✶ 가 활성(enabled)일 때까지 대기 — picking 레이스 회피.
+    if (!(await ensurePickReady(win))) {
+      log(`  ⚠️ [${label}] ✶ 비활성 지속 — 픽 취소 시도`);
+      await apiPost(info, "/pick/cancel");
+      await win.keyboard.press("Escape").catch(() => {});
+      await sleep(1500);
     }
-    await pickBtn.first().click();
-    await new Promise((r) => setTimeout(r, 3500)); // 오버레이/후크 armed 대기(연장)
-    const out = helper("click", id);
-    log(`  pyautogui: ${out}`);
+    log(`'요소 선택' → 계산기 [${label}] 픽 시도 ${a}/${attempts}…`);
+    await pickBtn.click().catch(() => {});
+    await sleep(3000); // 최소화+오버레이+후크 armed 대기
+    log(`  pyautogui: ${helper("click", id)}`);
     const ok = await waitFor(
       async () => (await win.getByText(/첨부된 요소|Attached element/).count()) > 0,
-      30_000,
+      25_000,
       `[${label}] 첨부(시도 ${a})`,
     );
     if (ok) {
       log(`  ✅ [${label}] 요소 첨부됨`);
       return true;
     }
-    // 실패 → 화면 캡처(원인 규명) + Esc 로 픽 취소 후 재시도.
-    log(`  ⚠️ [${label}] 첨부 실패(시도 ${a}) — 스크린샷 + Esc 후 재시도`);
+    // 실패 → 스크린샷 + API 취소(Esc 보다 확실) 후 재시도.
+    log(`  ⚠️ [${label}] 첨부 실패(시도 ${a}) — 스크린샷 + 취소 후 재시도`);
     helper("shot", `calc_pickfail_${label}_${a}`);
+    await apiPost(info, "/pick/cancel");
     await win.keyboard.press("Escape").catch(() => {});
-    await new Promise((r) => setTimeout(r, 1500));
+    await sleep(2000);
   }
   return false;
 }
@@ -187,13 +213,13 @@ async function main(): Promise<number> {
     await app.close();
     return 1;
   }
-  await waitFor(async () => helper("result").length > 0 || helper("locate", "num7Button").includes(" "), 60_000, "계산기 오픈");
+  await waitCalcReady();
   await new Promise((r) => setTimeout(r, 1500));
 
   // 2) 각 버튼 픽 + "선택한 버튼 클릭" 생성. 픽 실패 시 추측 방지 위해 중단.
   let target = 1;
   for (const b of BUTTONS) {
-    const picked = await pickButton(win, b.id, b.label);
+    const picked = await pickButton(win, info, b.id, b.label);
     if (!picked) {
       log(`🚨 [${b.label}] 픽 실패 — 추측 방지 위해 중단(element_context 없이 생성 안 함)`);
       await app.close();
