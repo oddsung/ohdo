@@ -920,6 +920,45 @@ def force_english_ime(hwnd=None):
     except Exception:
         pass
 
+def save_as_to_path(path):
+    """'다른 이름으로 저장'(Save As)을 안정적으로 수행 — Win11 메모장 등 표준 파일 다이얼로그.
+
+    devloop 실측(2026-06-06)으로 확정한 레시피:
+    1) IME 영문 강제(한글 IME 가 Ctrl+Shift/Ctrl+S 가속기를 흡수하는 문제 회피),
+    2) Ctrl+Shift+S(미저장 문서면 Ctrl+S 폴백)로 다이얼로그 오픈,
+    3) 다이얼로그는 GetForegroundWindow 로 잡음(Desktop().windows() 열거는 모달을 놓침),
+    4) 파일명 필드는 다이얼로그 오픈 시 **자동 포커스** → 다른 Edit 클릭 금지(잘못된 필드 입력 방지).
+       Ctrl+A(기본명 선택) → 전체 경로 붙여넣기 → Enter → 덮어쓰기 확인 Enter.
+    """
+    import time as _t
+    import ctypes as _c
+
+    import pyautogui as _p
+    import pyperclip as _pc
+
+    _u = _c.windll.user32
+    force_english_ime()  # 대상 앱(foreground)에 영문 강제
+    _t.sleep(0.1)
+    _before = _u.GetForegroundWindow()
+    _p.hotkey("ctrl", "shift", "s")  # wrapped hotkey(=영문강제 포함) → Save As
+    _t.sleep(1.5)
+    _dlg = _u.GetForegroundWindow()
+    if _dlg == _before:  # 안 열렸으면 미저장 문서용 Ctrl+S 폴백
+        _p.hotkey("ctrl", "s")
+        _t.sleep(1.5)
+        _dlg = _u.GetForegroundWindow()
+    # 파일명 필드 자동 포커스 — 클릭하지 않는다.
+    _p.hotkey("ctrl", "a")  # 기본 파일명 전체선택
+    _t.sleep(0.15)
+    _pc.copy(path)
+    _p.hotkey("ctrl", "v")  # 전체 경로 붙여넣기
+    _t.sleep(0.3)
+    _p.press("enter")  # 저장
+    _t.sleep(1.2)
+    _p.press("enter")  # 덮어쓰기 확인(있으면)
+    _t.sleep(0.5)
+
+
 try:
     import pyautogui as _ohdo_pg
     if not getattr(_ohdo_pg, "_ohdo_ime_wrapped", False):
