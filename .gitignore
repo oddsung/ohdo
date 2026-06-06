@@ -127,3 +127,4 @@ dist/ohdo-bridge/
 !desktop_v3/build/
 !desktop_v3/build/bridge_entry.py
 !desktop_v3/build/ohdo-bridge.spec
+~$*
