@@ -6254,6 +6254,70 @@ if __name__ == "__main__":
                 f"match 필수. 실제: {[(m.kind, m.value, m.confidence) for m in actionable]}",
             )
 
+    def test_235_run_blocks_persists_step_status(self):
+        """[devloop #6] 실행 결과(step.status)가 session.json 에 영속화된다.
+
+        devloop 제품 시나리오가 발견한 ohdo 결함: execute_session_blocks 가 실행
+        결과를 step.status 에 기록하지 않고 run_blocks 도 영속화하지 않아, renderer
+        가 onDone 후 세션을 invalidate→refetch(useExecution.ts) 하면 status 가
+        'pending' 에 고착 → ChatPanel 배지가 실제 실행 결과(성공/실패)를 못 보여주고
+        외부 폴링(GET /sessions/{id})도 stale 했다.
+
+        Fix: execute_session_blocks 가 실행한 step 의 status 를 completed/failed 로
+        기록 + app_service.run_blocks 가 실행 후 save_session 으로 영속화.
+        """
+        import asyncio
+
+        from core.app_service import AppService
+        from core.session_manager import Step
+        from core.storage.local_json import LocalJsonRepository
+        from core.workflow_engine import WorkflowEngine
+
+        class _FakeResult:
+            def __init__(self, success, error=""):
+                self.success = success
+                self.error = error
+                self.output = ""
+                self.duration_ms = 1
+                self.step_id = 0
+
+        class _FakeKernel:
+            """실제 코드 실행 없이 step_id 별 성공/실패를 통제 (결정적, 서브프로세스 X)."""
+
+            def __init__(self, outcomes):
+                self.executed_steps = set()
+                self._outcomes = outcomes
+                self.library_hash = None
+
+            def execute_block(self, code, step_id, timeout=None, silent=False):
+                self.executed_steps.add(step_id)
+                ok = self._outcomes.get(step_id, True)  # 라이브러리 블럭(0)은 성공
+                r = _FakeResult(ok, "" if ok else f"step {step_id} 강제 실패")
+                r.step_id = step_id
+                return r
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalJsonRepository(data_dir=Path(tmp))
+            svc = AppService(session_repo=repo, workflow_engine=WorkflowEngine(step_delay_ms=0))
+            session = svc.create_session(title="status persist test")
+            # step_code 만으로 delta 추출(candidate 3) — 코드 내용은 FakeKernel 이 무시.
+            repo.add_step(session, Step(step_code="a = 1", wait_after_ms=0))
+            repo.add_step(session, Step(step_code="b = 2", wait_after_ms=0))
+
+            self.step("run_blocks 실행 — step1 성공 / step2 실패 (FakeKernel)")
+            kernel = _FakeKernel({1: True, 2: False})
+            asyncio.run(svc.run_blocks(session=session, kernel=kernel))
+
+            self.step("in-memory session.steps 에 status 반영")
+            self.assert_equal(session.steps[0]["status"], "completed", "step1 → completed")
+            self.assert_equal(session.steps[1]["status"], "failed", "step2 → failed")
+
+            self.step("session.json 에 영속화 — 재로드(refetch) 후에도 유지")
+            reloaded = repo.load_session(session.session_id)
+            rsteps = {s["step_id"]: s["status"] for s in reloaded.steps}
+            self.assert_equal(rsteps.get(1), "completed", "재로드 step1 status 영속화 필수")
+            self.assert_equal(rsteps.get(2), "failed", "재로드 step2 status 영속화 필수")
+
     # ──────────────────────────────────────────
     # ADR 0003 Phase 2-c PR-6 — Hot secret reload (test_134 ~ test_135)
     # ──────────────────────────────────────────

@@ -62,7 +62,8 @@ ohdo 구동 → AI 에 단계 요청(NL) → agy 가 Python 생성 → 실행(�
 | 3 | **한국어 IME 가 Ctrl+Shift+S(다른이름저장) 흡수** → 단축키 미동작 | ✅ 수정 | 라이브러리 shim `force_english_ime()` + hotkey 래핑(`core/workflow_engine.py`) |
 | 4 | Save As 다이얼로그 탐지 실패(`Desktop().windows()` 모달 누락) | ✅ 수정 | `save_as_to_path()` 헬퍼(GetForegroundWindow) + 가이드 #22(`config/prompts.json`). **닫힌 루프 완성** |
 | 5 | 평문-시크릿 감지가 따옴표 일반텍스트 오탐(`quoted_literal`) | ✅ 수정 | `secrets_detector._is_natural_language` 가드 — 따옴표 안 다중단어 구절/순수글자 단어는 skip(자격증명은 공백없는 단일토큰). `detect()→[]`로 confirm 모달 미발동. 회귀테스트 `test_234`. 닫힌 루프 완성 |
-| 6 | 실행 실패인데 `success=True` 오보고(생성코드가 예외 삼킴) | ⏳ 발견 | 시나리오 성공은 step.status 아닌 **실제 산출물**로 판정 |
+| 6a | `step.status` 가 session.json 에 미반영 → UI 배지/외부 폴링 stale(`pending` 고착) | ✅ 수정 | `execute_session_blocks` 가 실행결과를 step.status(completed/failed)로 기록 + `run_blocks` 가 `save_session` 영속화(renderer onDone refetch 일관성). 회귀테스트 `test_235` |
+| 6b | 생성코드가 예외 삼켜 목표 실패인데 `success=True`(returncode 0) 오보고 | ⏳ 발견 | codegen 가이드 이슈(AI 가 broad try/except). 결정적 검증 어려움(AI 의존). 시나리오 성공은 status 아닌 **실제 산출물**로 판정 권장 |
 | 7 | picker 연속 픽 신뢰성(=버튼/4번째 캡처 실패) | ⏳ 부분개선 | 상태기반 페이싱(요소선택 enabled 대기 + /pick/cancel) — 7/+/3 안정, = 잔존 |
 | 8 | 선택요소 없을 때 AI 가 wrong-button 추측 | ⏳ 발견 | 드라이버는 추측 방지 위해 중단 |
 | 9 | 브라우저 codegen routing 비결정성(Selenium/pyautogui/Desktop 혼용) | ⏳ 부분개선 | prompt_builder Selenium-세션 강제 지시(부분) |

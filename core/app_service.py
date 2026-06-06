@@ -807,7 +807,7 @@ class AppService:
             if on_log:
                 on_log(f"Step {sid} 실패: {msg}")
 
-        return await engine.execute_session_blocks(
+        report = await engine.execute_session_blocks(
             session=session,
             kernel=kernel,
             start_from_step_id=start_from_step_id,
@@ -818,6 +818,18 @@ class AppService:
             on_error=on_error_wrapped,
             on_log=on_log,
         )
+        # 실행으로 갱신된 step.status(completed/failed)를 session.json 에 영속화 (devloop #6).
+        # UI 는 onDone 후 세션을 invalidate→refetch 하므로 영속화돼야 배지가 실제 실행
+        # 결과를 보여준다. 이전엔 미영속화로 status 가 'pending' 에 고착했다.
+        try:
+            self.save_session(session)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "run_blocks: 실행 후 session 영속화 실패", exc_info=True
+            )
+        return report
 
     def stop_blocks(self) -> None:
         """진행 중인 ``run_blocks`` 실행을 중지 (should_stop 플래그)."""

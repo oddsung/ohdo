@@ -785,6 +785,12 @@ class WorkflowEngine:
             result.step_id = step_id
             report.executed_steps += 1
 
+            # 실행 결과를 step.status 에 반영 (devloop #6). 이후 app_service.run_blocks
+            # 가 session.json 에 영속화 → UI 배지/외부 폴링이 실제 실행 결과를 본다.
+            # 이전엔 status 가 'pending' 으로 고착(엔진이 status 미기록 + onDone refetch).
+            if isinstance(step_data, dict):
+                step_data["status"] = "completed" if result.success else "failed"
+
             if result.success:
                 report.successful_steps += 1
                 if on_log:
