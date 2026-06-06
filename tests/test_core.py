@@ -6377,6 +6377,42 @@ if __name__ == "__main__":
             f"[devloop] os 가 essential library import 로 포함 필수. 블럭:\n{lib}",
         )
 
+    def test_237_prompts_has_excel_read_and_reuse_guidance(self):
+        """[devloop #12/#13] prompts.json 에 엑셀 openpyxl 읽기 + 직전상태 재사용 가이드.
+
+        엑셀→웹폼 시나리오가 발견: (#13) AI 가 엑셀 셀을 pyautogui 클립보드로 읽어
+        일부 값만/오류, (#12) 누적 세션에서 직전 step 데이터·페이지 대신 자기만의
+        temp xlsx/HTML 을 새로 만들어 가짜 데이터로 작업. system_context 가이드
+        #2 명확화 + #23 추가로 교정(재실행 시 openpyxl 로 전체 읽기 + 실제 파일/
+        페이지 사용 → 시나리오 통과). 회귀 시 self-contained 데모 환각 재발.
+
+        가이드 준수는 AI 의존(비결정적)이라 본 테스트는 **가이드 존재**를 가드한다.
+        """
+        import json as _json
+
+        prompts_path = Path(__file__).parent.parent / "config" / "prompts.json"
+        ctx = _json.loads(prompts_path.read_text(encoding="utf-8"))["system_context"]
+
+        self.step("#13 — 엑셀 셀은 openpyxl 로 읽기 (클립보드 금지)")
+        self.assert_true(
+            "openpyxl.load_workbook" in ctx,
+            "[devloop #13] system_context 에 openpyxl 직접 읽기 지시 필수",
+        )
+        self.assert_true(
+            "OpenClipboard" in ctx or "클립보드" in ctx,
+            "[devloop #13] 클립보드/pyautogui 로 셀 긁기 금지 단서 필수",
+        )
+
+        self.step("#12 — 누적 세션: 임시/데모 데이터·파일·페이지 생성 금지")
+        self.assert_true(
+            "임시" in ctx and ("데모" in ctx or "가짜 데이터" in ctx),
+            "[devloop #12] 임시/데모 데이터·파일 생성 금지 단서 필수",
+        )
+        self.assert_true(
+            "devloop" in ctx,
+            "[devloop] 가이드 추적성 — devloop 출처 표기 필수",
+        )
+
     # ──────────────────────────────────────────
     # ADR 0003 Phase 2-c PR-6 — Hot secret reload (test_134 ~ test_135)
     # ──────────────────────────────────────────

@@ -70,8 +70,8 @@ ohdo 구동 → AI 에 단계 요청(NL) → agy 가 Python 생성 → 실행(�
 | 9 | 브라우저 codegen routing 비결정성(Selenium/pyautogui/Desktop 혼용) | ⏳ 부분개선 | prompt_builder Selenium-세션 강제 지시(부분) |
 | 10 | Selenium Chrome 실행이 커널 컨텍스트에서 flaky | ⏳ 발견 | 동일 코드 단독실행은 성공 |
 | 11 | **멀티스텝/혼용 세션 import 유실** → 후속 step `name 'Options'/'os' is not defined` NameError | ✅ 수정 | 엑셀→웹폼 시나리오 발견. delta 추출이 step import 제거 + 라이브러리 블럭은 마지막 step 만 봄 → 중간 step 고유 import 유실. `extract_library_block` 가 전 step import union + `os` essential 추가(`core/workflow_engine.py`). 회귀테스트 `test_236` + 실런타임 확인(steps 3/4/5 NameError 소거, Chrome 실제 오픈) |
-| 12 | 멀티스텝 세션에서 AI 가 직전 step 상태(데이터/페이지) 미활용 — 자기만의 temp 파일/데이터 환각 생성 | ⏳ 발견 | 엑셀→웹폼 step4: 읽은 리스트·열린 페이지 대신 `temp_data.xlsx`(사과/바나나/오렌지)+`temp_page.html` 새로 생성해 입력. prompt_builder 누적상태 강조 필요 |
-| 13 | 엑셀 셀 데이터를 pyautogui 클립보드(Ctrl+C)로 읽음 → 불안정(1개 값만/OpenClipboard 오류) | ⏳ 발견 | openpyxl/COM 으로 읽도록 codegen 가이드 필요. project_type=auto 첫 step 라우팅 |
+| 12 | 멀티스텝 세션에서 AI 가 직전 step 상태(데이터/페이지) 미활용 — 자기만의 temp 파일/데이터 환각 생성 | ✅ 수정 | 뿌리=가이드 #2 "즉시 실행 가능한 완전한 형태" → self-contained 데모 유발. #2 명확화(누적 세션·임시/데모 데이터 금지) + #23 추가(`config/prompts.json`). 재실행 시 step4 가 실제 `excel_data.xlsx` 로드(temp 없음). **시나리오 통과** |
+| 13 | 엑셀 셀 데이터를 pyautogui 클립보드(Ctrl+C)로 읽음 → 불안정(1개 값만/OpenClipboard 오류) | ✅ 수정 | 가이드 #23 — 엑셀 셀은 `openpyxl.load_workbook` 으로 파일 직접 읽기(클립보드 금지). 재실행 시 step2 가 `['Alice','Bob','Carol']` 전부 읽음. 존재성 회귀테스트 `test_237` |
 
 ## 방법론 교훈
 
