@@ -876,6 +876,25 @@ def extract_library_block(session) -> str:
                 ln for ln in code.splitlines() if ln.startswith("import ") or ln.startswith("from ")
             ]
             block = "\n".join(import_lines)
+
+    # 멀티스텝/혼용 세션 import 집계 (devloop): 각 step 이 자기 import 를 따로 선언하면
+    # delta 추출 시 import 가 제거되고(extract_step_delta_code), 위 block 은 마지막 step
+    # 만 보므로 중간 step 고유 import (예: 엑셀 pywinauto, 브라우저 selenium Options/webdriver)
+    # 가 유실 → 후속 step NameError. 모든 step 의 import 라인을 union 해 보강한다.
+    # (markers 누적코드 세션은 last_step 에 전 import 가 모여 있어 dedupe 로 무해.)
+    existing = {ln.strip() for ln in block.splitlines() if ln.strip()}
+    extra_imports: list[str] = []
+    for st in session.steps:
+        gen = st.get("generated_code", "") if isinstance(st, dict) else ""
+        for ln in gen.splitlines():
+            s = ln.strip()
+            if (s.startswith("import ") or s.startswith("from ")) and s not in existing:
+                existing.add(s)
+                extra_imports.append(s)
+    if extra_imports:
+        joined = "\n".join(extra_imports)
+        block = (joined + "\n" + block).strip() if block else joined
+
     # 핵심 import prepend 후, IME 호환 shim 을 그 뒤에 주입(헬퍼/래핑은 import 이후 정의돼야 함).
     result = _ensure_essential_imports(block)
     return result + "\n" + _IME_COMPAT_SHIM.strip() if result else _IME_COMPAT_SHIM.strip()
@@ -888,6 +907,7 @@ def extract_library_block(session) -> str:
 # 코드 템플릿에서 import 라인 제거 후 누락 회피.
 _ESSENTIAL_LIBRARY_IMPORTS = (
     "import time",
+    "import os",
     "import subprocess",
     "import ctypes",
     "import ctypes.wintypes",

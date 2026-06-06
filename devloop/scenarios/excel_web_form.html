@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<!-- ohdo 시나리오: 엑셀→웹폼 데이터 입력 검증용 고정 페이지 (file://).
+     전송 시 입력값을 #out 리스트에 누적(append)하고 입력창을 비운다 →
+     "데이터를 하나씩 입력"을 끝까지 검증할 수 있다 (browser_test.html 은 덮어쓰기라 부적합). -->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>ohdo excel→web form</title>
+  </head>
+  <body style="font-family: sans-serif; padding: 40px">
+    <h1 id="title">엑셀 → 웹 입력 폼</h1>
+    <input
+      id="msg"
+      name="msg"
+      placeholder="값을 입력하세요"
+      style="font-size: 20px; padding: 8px; width: 320px"
+    />
+    <button
+      id="go"
+      style="font-size: 20px; padding: 8px 20px; margin-left: 8px"
+      onclick="(function(){var v=document.getElementById('msg').value; if(!v)return; var li=document.createElement('li'); li.textContent=v; document.getElementById('out').appendChild(li); document.getElementById('msg').value='';})()"
+    >
+      전송
+    </button>
+    <!-- 제출된 값이 한 줄씩 누적된다. 검증은 #out 텍스트에 모든 값이 있는지로 판정. -->
+    <ul id="out" style="margin-top: 24px; font-size: 22px; color: green"></ul>
+  </body>
+</html>

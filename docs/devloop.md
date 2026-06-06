@@ -43,6 +43,7 @@ ohdo 구동 → AI 에 단계 요청(NL) → agy 가 Python 생성 → 실행(�
 | `scenarios/calc_pick.mts` | 계산기 실행→버튼 4개 **picker 선택**(7+3=10)→결과검증 | `npx tsx scenarios/calc_pick.mts` |
 | `scenarios/close_loop2.py` | Save As 닫힌루프(새 세션 3스텝 생성→실행→파일검증) | `python devloop/scenarios/close_loop2.py` |
 | `scenarios/browser_nl.py` | 로컬 HTML 을 Chrome(Selenium)으로 열기→입력→전송→결과 | `python devloop/scenarios/browser_nl.py` |
+| `scenarios/excel_to_browser.py` | 엑셀 실행→A열 읽기→크롬으로 웹폼 열기→값 하나씩 입력(NL 5스텝). 픽스처 `excel_data.xlsx`+`excel_web_form.html` | `python devloop/scenarios/excel_to_browser.py` |
 | `scenarios/exec_diag.py` | 기존 세션의 step 들을 직접 실행해 단계별 성공/실패 진단(agy 0) | `python devloop/scenarios/exec_diag.py <세션id접두사>` |
 | `scenarios/calc_pick_target.py`, `pick_target.py` | picker용 — 대상 요소 좌표 찾아 실제 클릭(DPI-aware) | (드라이버가 호출) |
 | `scenarios/saveas_probe*.py` | Save As 원인 추적 진단 probe 모음(투명 기록용) | (참고) |
@@ -63,11 +64,14 @@ ohdo 구동 → AI 에 단계 요청(NL) → agy 가 Python 생성 → 실행(�
 | 4 | Save As 다이얼로그 탐지 실패(`Desktop().windows()` 모달 누락) | ✅ 수정 | `save_as_to_path()` 헬퍼(GetForegroundWindow) + 가이드 #22(`config/prompts.json`). **닫힌 루프 완성** |
 | 5 | 평문-시크릿 감지가 따옴표 일반텍스트 오탐(`quoted_literal`) | ✅ 수정 | `secrets_detector._is_natural_language` 가드 — 따옴표 안 다중단어 구절/순수글자 단어는 skip(자격증명은 공백없는 단일토큰). `detect()→[]`로 confirm 모달 미발동. 회귀테스트 `test_234`. 닫힌 루프 완성 |
 | 6a | `step.status` 가 session.json 에 미반영 → UI 배지/외부 폴링 stale(`pending` 고착) | ✅ 수정 | `execute_session_blocks` 가 실행결과를 step.status(completed/failed)로 기록 + `run_blocks` 가 `save_session` 영속화(renderer onDone refetch 일관성). 회귀테스트 `test_235` |
-| 6b | 생성코드가 예외 삼켜 목표 실패인데 `success=True`(returncode 0) 오보고 | ⏳ 발견 | codegen 가이드 이슈(AI 가 broad try/except). 결정적 검증 어려움(AI 의존). 시나리오 성공은 status 아닌 **실제 산출물**로 판정 권장 |
+| 6b | 생성코드가 예외 삼켜 목표 실패인데 `success=True`(returncode 0) 오보고 | ⏳ 발견(뿌리 확정) | **뿌리 = `config/prompts.json` 가이드 #3 "try/except 강제"** — 모든 블록을 try/except 로 감싸고 `except: print(오류)` 후 계속 → 예외 미전파. #6a 와 결합 시 거짓 성공이 `completed` 로 영속화. fix 후보: 에러 핸들러 `print` 후 `raise`(idempotent 폴백 except 와 구분). AI 준수 비결정적 |
 | 7 | picker 연속 픽 신뢰성(=버튼/4번째 캡처 실패) | ⏳ 부분개선 | 상태기반 페이싱(요소선택 enabled 대기 + /pick/cancel) — 7/+/3 안정, = 잔존 |
 | 8 | 선택요소 없을 때 AI 가 wrong-button 추측 | ⏳ 발견 | 드라이버는 추측 방지 위해 중단 |
 | 9 | 브라우저 codegen routing 비결정성(Selenium/pyautogui/Desktop 혼용) | ⏳ 부분개선 | prompt_builder Selenium-세션 강제 지시(부분) |
 | 10 | Selenium Chrome 실행이 커널 컨텍스트에서 flaky | ⏳ 발견 | 동일 코드 단독실행은 성공 |
+| 11 | **멀티스텝/혼용 세션 import 유실** → 후속 step `name 'Options'/'os' is not defined` NameError | ✅ 수정 | 엑셀→웹폼 시나리오 발견. delta 추출이 step import 제거 + 라이브러리 블럭은 마지막 step 만 봄 → 중간 step 고유 import 유실. `extract_library_block` 가 전 step import union + `os` essential 추가(`core/workflow_engine.py`). 회귀테스트 `test_236` + 실런타임 확인(steps 3/4/5 NameError 소거, Chrome 실제 오픈) |
+| 12 | 멀티스텝 세션에서 AI 가 직전 step 상태(데이터/페이지) 미활용 — 자기만의 temp 파일/데이터 환각 생성 | ⏳ 발견 | 엑셀→웹폼 step4: 읽은 리스트·열린 페이지 대신 `temp_data.xlsx`(사과/바나나/오렌지)+`temp_page.html` 새로 생성해 입력. prompt_builder 누적상태 강조 필요 |
+| 13 | 엑셀 셀 데이터를 pyautogui 클립보드(Ctrl+C)로 읽음 → 불안정(1개 값만/OpenClipboard 오류) | ⏳ 발견 | openpyxl/COM 으로 읽도록 codegen 가이드 필요. project_type=auto 첫 step 라우팅 |
 
 ## 방법론 교훈
 

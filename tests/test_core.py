@@ -6318,6 +6318,65 @@ if __name__ == "__main__":
             self.assert_equal(rsteps.get(1), "completed", "재로드 step1 status 영속화 필수")
             self.assert_equal(rsteps.get(2), "failed", "재로드 step2 status 영속화 필수")
 
+    def test_236_library_block_aggregates_multistep_imports(self):
+        """[devloop] 멀티스텝/혼용 세션의 import 를 라이브러리 블럭이 union 한다.
+
+        devloop 엑셀→웹폼 시나리오가 발견한 ohdo 결함: 각 step 이 자기 import 를
+        따로 선언하면 delta 추출(extract_step_delta_code)이 import 를 제거하고,
+        extract_library_block 은 마지막 step 만 봐서 중간 step 고유 import (엑셀
+        pywinauto / 브라우저 selenium Options·webdriver)가 유실 → 후속 step
+        `name 'Options' is not defined` / `name 'os' is not defined` NameError.
+
+        Fix: extract_library_block 가 모든 step 의 import 라인을 union + os 를
+        essential library import 에 추가.
+        """
+        from core.workflow_engine import extract_library_block
+
+        class _Sess:
+            pass
+
+        sess = _Sess()
+        # 마커 없는 per-step 코드 (혼용 세션). 마지막 step 은 selenium 일부만 import
+        # → 기존 구현은 이 step 만 보고 라이브러리 블럭을 구성해 중간 import 유실.
+        sess.steps = [
+            {
+                "step_id": 1,
+                "generated_code": "from pywinauto import Application\n\ntry:\n    app = Application().connect(title_re='Excel')\nexcept Exception as e:\n    print(e)",
+            },
+            {
+                "step_id": 2,
+                "generated_code": "import openpyxl\n\nwb = openpyxl.load_workbook('x.xlsx')",
+            },
+            {
+                "step_id": 3,
+                "generated_code": "from selenium import webdriver\nfrom selenium.webdriver.chrome.options import Options\n\noptions = Options()\ndriver = webdriver.Chrome(options=options)",
+            },
+            {
+                "step_id": 4,
+                "generated_code": "from selenium.webdriver.common.by import By\n\nout = driver.find_element(By.ID, 'out').text\nprint(out)",
+            },
+        ]
+        lib = extract_library_block(sess)
+
+        for need in [
+            "from pywinauto import Application",
+            "import openpyxl",
+            "from selenium import webdriver",
+            "from selenium.webdriver.chrome.options import Options",
+            "from selenium.webdriver.common.by import By",
+        ]:
+            self.step(f"라이브러리 블럭에 union — {need}")
+            self.assert_true(
+                need in lib,
+                f"[devloop] 라이브러리 블럭에 '{need}' union 필수. 블럭:\n{lib}",
+            )
+
+        self.step("os 는 essential 로 항상 포함 (AI 미import 시 NameError 방지)")
+        self.assert_true(
+            "import os" in lib,
+            f"[devloop] os 가 essential library import 로 포함 필수. 블럭:\n{lib}",
+        )
+
     # ──────────────────────────────────────────
     # ADR 0003 Phase 2-c PR-6 — Hot secret reload (test_134 ~ test_135)
     # ──────────────────────────────────────────
