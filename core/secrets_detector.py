@@ -239,6 +239,30 @@ def _is_pure_word(s: str) -> bool:
     return all(c.isalpha() and ord(c) < 128 for c in s)
 
 
+def _is_natural_language(s: str) -> bool:
+    """일반 자연어(문장/단어)로 보이면 True — 자격증명 아님.
+
+    비밀번호·토큰은 공백 없는 단일 토큰이고 보통 숫자/특수문자를 섞는다.
+    반면 RPA 명령의 따옴표 값이
+      (a) 내부 공백을 포함한 다중 단어 구절 ('안녕하세요 테스트입니다'), 또는
+      (b) 숫자·특수문자 없이 글자(한글/영문 등)로만 이뤄진 단어
+    면 입력하려는 일반 텍스트일 뿐 시크릿이 아니다.
+
+    devloop #5 오탐 가드: 메모장 등에 일반 문장을 따옴표로 적어 RPA 입력할 때
+    quoted_literal 이 0.55~0.75 로 잡혀 평문-시크릿 confirm 모달이 자동화를
+    차단하던 문제. 명시 키워드(password_hint)/named token 경로는 별도라 영향 X.
+    """
+    # (a) 내부 공백 = 다중 단어 자연어 구절
+    if any(c.isspace() for c in s):
+        return True
+    # (b) 숫자·특수문자 없이 글자로만 (스크립트 무관 — _is_pure_word 의 ASCII 한정
+    #     을 한글 등 유니코드 글자까지 일반화). 자격증명은 entropy 위해 보통 숫자/
+    #     특수문자를 섞으므로 순수 글자 단어는 라벨/텍스트로 본다.
+    if s and all(c.isalpha() for c in s):
+        return True
+    return False
+
+
 def _is_email_like(s: str) -> bool:
     """간단한 email/도메인 패턴 — name@host 또는 host.tld."""
     if "@" in s and "." in s.split("@", 1)[-1]:
@@ -385,6 +409,11 @@ def detect(text: str, *, entropy_threshold: float = 4.5) -> list[SecretMatch]:
             continue
         # 순수 영문 단어 (특수문자 / 숫자 없음) — 'doosung' 같은 식별자 skip
         if _is_pure_word(val):
+            continue
+        # devloop #5 — 따옴표 안 일반 자연어(다중 단어 구절 / 순수 글자 단어)는
+        # 시크릿 아님. 자격증명은 공백 없는 단일 토큰(보통 숫자/특수문자 mix).
+        # '안녕하세요 테스트입니다' 같은 메모장 입력 텍스트 오탐 방지.
+        if _is_natural_language(val):
             continue
         # 너무 짧으면 (PW 추정 임계 6자 미만) skip — _QUOTED_LITERAL 정규식이
         # 이미 6+ 강제하지만 안전망

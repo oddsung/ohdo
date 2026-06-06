@@ -6208,6 +6208,52 @@ if __name__ == "__main__":
             "[ADR 0003 PR-5] 명시 키워드 password_hint path 회귀 X",
         )
 
+    def test_234_detector_skips_natural_language_phrases(self):
+        """[devloop #5] quoted_literal — 따옴표 안 일반 자연어 오탐 방지.
+
+        devloop 제품 시나리오(메모장 입력 자동화)가 발견한 실제 ohdo 결함:
+        "메모장에 '안녕하세요 테스트입니다' 입력" 같은 평범한 텍스트를
+        quoted_literal 로 잡아(0.55~0.75) ChatPanel 의 평문-시크릿 confirm 모달
+        (ChatPanel.tsx submit → /secrets/scan)이 자동화를 차단했다. 자격증명은
+        보통 공백 없는 단일 토큰(숫자/특수문자 mix)이고, 따옴표 안 다중 단어
+        구절이나 순수 글자 단어는 RPA 로 입력하려는 일반 텍스트일 뿐이다.
+
+        Fix: detect() quoted_literal 블록에 _is_natural_language 가드 추가
+        (내부 공백 포함 구절 또는 숫자/특수문자 없는 순수 글자 단어 → skip).
+        """
+        from core.secrets_detector import detect
+
+        phrases_should_not_alert = [
+            "메모장에 '안녕하세요 테스트입니다' 입력",
+            "메모장 열고 '오늘 날씨가 좋네요' 입력",
+            "입력창에 '회의록 2026년 6월' 입력해",
+            "텍스트 '프로젝트 진행 상황 보고' 타이핑",
+            "검색창에 '서울특별시 강남구' 입력",
+            "'Hello World Test' 입력",
+            "메모에 '점심 메뉴 김치찌개' 써줘",
+        ]
+        for text in phrases_should_not_alert:
+            self.step(f"자연어 구절 오탐 방지 — {text[:36]}")
+            actionable = [m for m in detect(text) if m.confidence >= 0.5]
+            quoted = [m for m in actionable if m.kind == "quoted_literal"]
+            self.assert_true(
+                len(quoted) == 0,
+                f"[devloop #5] '{text}' 는 quoted_literal alert 0건 필수 (자연어). "
+                f"실제: {[(m.value, m.confidence) for m in quoted]}",
+            )
+
+        self.step("실제 시크릿(공백 없는 단일 토큰)은 여전히 catch — 회귀 가드")
+        for secret_text, secret_val in [
+            ("클릭하고 '@06dhentjd%@%^' 입력", "@06dhentjd%@%^"),
+            ("값 'aB3!cD5#eF7$' 입력", "aB3!cD5#eF7$"),
+        ]:
+            actionable = [m for m in detect(secret_text) if m.confidence >= 0.5]
+            self.assert_true(
+                any(m.value == secret_val and m.kind == "quoted_literal" for m in actionable),
+                f"[devloop #5] 실제 시크릿 '{secret_val}' 는 여전히 quoted_literal "
+                f"match 필수. 실제: {[(m.kind, m.value, m.confidence) for m in actionable]}",
+            )
+
     # ──────────────────────────────────────────
     # ADR 0003 Phase 2-c PR-6 — Hot secret reload (test_134 ~ test_135)
     # ──────────────────────────────────────────
