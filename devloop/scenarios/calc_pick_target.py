@@ -37,6 +37,20 @@ def _connect():
 def main() -> int:
     _dpi()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "result"
+
+    # 계산기 연결 불필요한 명령(스크린샷)은 먼저 처리.
+    if cmd == "shot":
+        import os
+
+        import pyautogui
+
+        name = sys.argv[2] if len(sys.argv) > 2 else "shot"
+        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "runs")
+        os.makedirs(d, exist_ok=True)
+        pyautogui.screenshot(os.path.join(d, name + ".png"))
+        print(f"shot {name}")
+        return 0
+
     try:
         win = _connect()
     except Exception as exc:  # noqa: BLE001

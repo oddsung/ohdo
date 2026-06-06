@@ -93,24 +93,36 @@ async function clickRunAll(win: Page): Promise<boolean> {
   return ok;
 }
 
-async function pickButton(win: Page, id: string, label: string): Promise<boolean> {
-  log(`'요소 선택' → 계산기 [${label}] 버튼 실제 클릭…`);
+async function pickButton(win: Page, id: string, label: string, attempts = 3): Promise<boolean> {
   const pickBtn = win.getByRole("button", { name: /요소 선택|Select element|Pick element/i });
-  if (!(await pickBtn.count())) {
-    log("⚠️ '요소 선택' 버튼 없음");
-    return false;
+  for (let a = 1; a <= attempts; a++) {
+    log(`'요소 선택' → 계산기 [${label}] 픽 시도 ${a}/${attempts}…`);
+    // 이전 픽이 끝나 ✶ 가 활성(disabled 해제)될 때까지 대기.
+    await pickBtn.first().waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
+    if (!(await pickBtn.count())) {
+      log("⚠️ '요소 선택' 버튼 없음");
+      return false;
+    }
+    await pickBtn.first().click();
+    await new Promise((r) => setTimeout(r, 3500)); // 오버레이/후크 armed 대기(연장)
+    const out = helper("click", id);
+    log(`  pyautogui: ${out}`);
+    const ok = await waitFor(
+      async () => (await win.getByText(/첨부된 요소|Attached element/).count()) > 0,
+      30_000,
+      `[${label}] 첨부(시도 ${a})`,
+    );
+    if (ok) {
+      log(`  ✅ [${label}] 요소 첨부됨`);
+      return true;
+    }
+    // 실패 → 화면 캡처(원인 규명) + Esc 로 픽 취소 후 재시도.
+    log(`  ⚠️ [${label}] 첨부 실패(시도 ${a}) — 스크린샷 + Esc 후 재시도`);
+    helper("shot", `calc_pickfail_${label}_${a}`);
+    await win.keyboard.press("Escape").catch(() => {});
+    await new Promise((r) => setTimeout(r, 1500));
   }
-  await pickBtn.first().click();
-  await new Promise((r) => setTimeout(r, 2500)); // 오버레이/후크 armed 대기
-  const out = helper("click", id);
-  log(`  pyautogui: ${out}`);
-  const ok = await waitFor(
-    async () => (await win.getByText(/첨부된 요소|Attached element/).count()) > 0,
-    20_000,
-    `[${label}] 첨부`,
-  );
-  log(ok ? `  ✅ [${label}] 요소 첨부됨` : `  ⚠️ [${label}] 첨부 실패`);
-  return ok;
+  return false;
 }
 
 async function main(): Promise<number> {
@@ -178,10 +190,15 @@ async function main(): Promise<number> {
   await waitFor(async () => helper("result").length > 0 || helper("locate", "num7Button").includes(" "), 60_000, "계산기 오픈");
   await new Promise((r) => setTimeout(r, 1500));
 
-  // 2) 각 버튼 픽 + "선택한 버튼 클릭" 생성.
+  // 2) 각 버튼 픽 + "선택한 버튼 클릭" 생성. 픽 실패 시 추측 방지 위해 중단.
   let target = 1;
   for (const b of BUTTONS) {
-    await pickButton(win, b.id, b.label);
+    const picked = await pickButton(win, b.id, b.label);
+    if (!picked) {
+      log(`🚨 [${b.label}] 픽 실패 — 추측 방지 위해 중단(element_context 없이 생성 안 함)`);
+      await app.close();
+      return 2;
+    }
     target += 1;
     if (!(await requestStep(win, info, sid, "선택한 버튼을 클릭해줘", target))) {
       log(`🚨 [${b.label}] step 생성 실패 — 중단`);
@@ -190,7 +207,9 @@ async function main(): Promise<number> {
     }
   }
 
-  // 3) 전체 실행 → 결과 검증.
+  // 3) 전체 실행 전 계산기 초기화(픽 중 잔여 입력 방지) → 실행 → 결과 검증.
+  log(`계산기 초기화: ${helper("click", "clearButton")}`);
+  await new Promise((r) => setTimeout(r, 800));
   log("전체 실행 → 계산기 버튼 클릭 (PC 만지지 마세요)…");
   await new Promise((r) => setTimeout(r, 1500));
   if (!(await clickRunAll(win))) {
