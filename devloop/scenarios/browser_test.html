@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<!-- ohdo 브라우저 자동화 테스트용 고정 페이지 (file://). 입력창+버튼+결과 div. -->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>ohdo browser test</title>
+  </head>
+  <body style="font-family: sans-serif; padding: 40px">
+    <h1 id="title">ohdo 브라우저 자동화 테스트</h1>
+    <input
+      id="msg"
+      name="msg"
+      placeholder="메시지를 입력하세요"
+      style="font-size: 20px; padding: 8px; width: 320px"
+    />
+    <button
+      id="go"
+      style="font-size: 20px; padding: 8px 20px; margin-left: 8px"
+      onclick="document.getElementById('out').innerText = '입력값: ' + document.getElementById('msg').value"
+    >
+      전송
+    </button>
+    <div id="out" style="margin-top: 24px; font-size: 26px; color: green"></div>
+  </body>
+</html>

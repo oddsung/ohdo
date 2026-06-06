@@ -324,6 +324,25 @@ class PromptBuilder:
         parts.extend(self._build_automation_guide(is_macos))
         parts.append("")
 
+        # 브라우저(Selenium) 세션 일관성 강제 (devloop 실측 2026-06-06):
+        # 자동화 가이드가 pywinauto 를 "최우선"으로 제시해, 브라우저 세션에서도 '버튼 클릭' 같은
+        # 일반 요청이 pywinauto Desktop 으로 잘못 라우팅 → `name 'Desktop' is not defined` NameError.
+        # 이전 누적코드가 이미 Selenium(driver 생성 완료)일 때만 — 즉 2번째 step 이후에만 발동.
+        # (project_type=browser 만으로 첫 step 에 발동하면 driver 가 없는데 "재사용"하라고 해서 실패.)
+        _browser_session = bool(current_code) and (
+            "webdriver" in current_code or "selenium" in current_code.lower()
+        )
+        if _browser_session and not is_macos:
+            parts.append(
+                "🚨 **브라우저(Selenium) 세션입니다**: 이 세션은 Selenium 으로 브라우저를 제어합니다"
+                "(이전 step 에서 `driver` 생성). 모든 요소 조작(클릭/입력/읽기)을 반드시 **Selenium "
+                "`driver.find_element(By...)`** 로 하고 이전 step 의 `driver` 변수를 재사용하세요. "
+                "**pywinauto(Application/Desktop/child_window)·`win` 변수·pyautogui 좌표 클릭을 절대 "
+                "섞지 마세요** — `name 'Desktop' is not defined` / `name 'win' is not defined` 오류가 납니다. "
+                "버튼 클릭도 `driver.find_element(By.XPATH, \"//button[contains(text(),'전송')]\").click()` 처럼 Selenium 으로."
+            )
+            parts.append("")
+
         # 윈도우 컨트롤 정보 (있을 경우)
         if window_context:
             parts.append(window_context)
