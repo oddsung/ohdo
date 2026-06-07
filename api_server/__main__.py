@@ -56,7 +56,33 @@ def _bind_free_socket(host: str, start_port: int) -> "tuple[socket.socket, int]"
     )
 
 
+def _ensure_bridge_dpi_awareness() -> str:
+    """브리지 프로세스를 PER_MONITOR_AWARE_V2 로 설정 (handoff §76).
+
+    멀티모니터(서로 다른 DPI/해상도)에서 pick/capture/LL-hook 의 좌표가 OS 에 의해
+    가상화되면 ElementFromPoint 가 엉뚱한 요소를 잡고 하이라이트 박스가 어긋난다.
+    v1 의 ``main.py`` 가 ``SetProcessDpiAwarenessContext`` 로 하던 것과 동등하지만,
+    v3 는 브리지가 별도 프로세스라 여기서 직접 보장한다.
+
+    실패해도 서버 기동을 막지 않는다(best-effort). 결정된 모드 문자열을 반환하되,
+    예외 시 ``"error"`` 를 반환한다 (non-Windows 에선 core 가 ``"unsupported"``).
+    """
+    try:
+        from core.input_hooks import ensure_dpi_awareness
+
+        return str(ensure_dpi_awareness())
+    except Exception:
+        return "error"
+
+
 def main(argv: "list[str] | None" = None) -> None:
+    # 멀티모니터(서로 다른 DPI/해상도)에서 pick/capture/LL-hook 좌표가 OS 에 의해
+    # "가상화"되지 않도록 브리지 프로세스를 PER_MONITOR_AWARE_V2 로 설정한다(handoff §76).
+    # v1 의 main.py 가 SetProcessDpiAwarenessContext 로 하던 것과 동등 — 브리지는 별도
+    # 프로세스라 직접 보장해야 한다. 어떤 GUI/DPI 의존 호출보다 먼저, 1회. non-Windows
+    # 환경에선 "unsupported" 반환(무해)이며 idempotent.
+    _ensure_bridge_dpi_awareness()
+
     parser = argparse.ArgumentParser(prog="python -m api_server", description=__doc__)
     parser.add_argument("--host", default="127.0.0.1", help="bind host (기본 localhost)")
     parser.add_argument("--port", type=int, default=8765, help="시작 포트 (기본 8765)")

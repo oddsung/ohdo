@@ -13520,6 +13520,44 @@ if __name__ == "__main__":
         finally:
             shutil.rmtree(f"data/sessions/{sid}", ignore_errors=True)
 
+    def test_238_bridge_sets_per_monitor_dpi_awareness(self):
+        """[handoff §76] 브리지 진입점이 PER_MONITOR_AWARE_V2 를 설정 — 멀티모니터(서로 다른
+        DPI/해상도)에서 pick/capture/LL-hook 좌표가 OS 에 가상화되어 ElementFromPoint 가
+        엉뚱한 요소를 잡거나 하이라이트가 어긋나는 v1→v3 회귀를 막는다.
+
+        v1 의 main.py 가 SetProcessDpiAwarenessContext 로 하던 것과 동등하지만, v3 는
+        브리지가 별도 프로세스라 직접 보장해야 한다. core 0줄(api_server.__main__ 가
+        core 공개 함수 ensure_dpi_awareness 를 호출).
+        """
+        import inspect
+
+        import api_server.__main__ as bridge_main
+
+        self.step("(1) main() 이 DPI awareness 를 parser/그 외 작업보다 먼저 설정")
+        main_src = inspect.getsource(bridge_main.main)
+        idx_dpi = main_src.find("_ensure_bridge_dpi_awareness()")
+        idx_parser = main_src.find("ArgumentParser")
+        self.assert_true(idx_dpi >= 0, "main() 이 _ensure_bridge_dpi_awareness() 호출")
+        self.assert_true(
+            0 <= idx_dpi < idx_parser, "DPI 설정이 parser 생성보다 앞 (어떤 DPI 호출보다 먼저)"
+        )
+
+        self.step("(2) 헬퍼가 core.input_hooks.ensure_dpi_awareness 에 위임")
+        helper_src = inspect.getsource(bridge_main._ensure_bridge_dpi_awareness)
+        self.assert_true("ensure_dpi_awareness" in helper_src, "헬퍼가 ensure_dpi_awareness 사용")
+
+        self.step("(3) 헬퍼 실제 호출 — 정의된 모드 반환, 예외 없음")
+        mode = bridge_main._ensure_bridge_dpi_awareness()
+        valid = {
+            "per_monitor_v2",
+            "per_monitor_v1",
+            "system",
+            "unaware",
+            "unsupported",
+            "error",
+        }
+        self.assert_true(mode in valid, f"헬퍼가 정의된 모드 반환: {mode!r}")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner
