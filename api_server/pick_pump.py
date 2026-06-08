@@ -45,9 +45,10 @@ _active = threading.Event()
 # 등 조작 가능) + 하이라이트 끔. 다시 F3 로 재개하면 다음 클릭이 선택.
 _paused = threading.Event()
 
-# Electron 오버레이 창 HWND — main 이 /pick/overlay 로 등록. 펌프 루프가 이 창을
+# Electron 오버레이 창 HWND **리스트** — main 이 /pick/overlay 로 등록. 펌프 루프가 각 창을
 # SetWindowPos(HWND_TOPMOST) 로 주기적으로 최상단에 박는다 (작업표시줄 가림 회피).
-_overlay_hwnd: int | None = None
+# §77: 디스플레이마다 오버레이 1개라 리스트(멀티모니터 다른 DPI). 단일창 시절엔 1개 원소.
+_overlay_hwnds: list[int] = []
 
 # 실시간 hover 하이라이트용 — 펌프 루프가 ~50ms 마다 갱신하는 "커서 아래 element 의
 # rect" (물리 픽셀, {left,top,right,bottom} 또는 None). /pick/hover 가 이 값을 읽어
@@ -71,20 +72,30 @@ def is_paused() -> bool:
     return _paused.is_set()
 
 
-def set_overlay_hwnd(hwnd: int | None) -> None:
-    """Electron 오버레이 창의 HWND 등록 (handoff §49 fix2).
+def set_overlay_hwnds(hwnds: "list[int] | None") -> None:
+    """Electron 오버레이 창 HWND **리스트** 등록 (handoff §49 fix2 / §77 디스플레이별).
 
-    펌프 루프가 이 HWND 를 SetWindowPos(HWND_TOPMOST) 로 주기 재적용해 작업표시줄 위
-    z-order 를 강제한다(Electron setAlwaysOnTop 으론 Shell_TrayWnd 못 이김). 0/None=해제.
+    펌프 루프가 각 HWND 를 SetWindowPos(HWND_TOPMOST) 로 주기 재적용해 작업표시줄 위
+    z-order 를 강제한다(Electron setAlwaysOnTop 으론 Shell_TrayWnd 못 이김). None/[]=해제.
     """
-    global _overlay_hwnd
-    _overlay_hwnd = int(hwnd) if hwnd else None
+    global _overlay_hwnds
+    _overlay_hwnds = [int(h) for h in hwnds if h] if hwnds else []
+
+
+def set_overlay_hwnd(hwnd: int | None) -> None:
+    """단일 HWND 등록 (하위호환). 내부적으로 1원소 리스트로 위임."""
+    set_overlay_hwnds([hwnd] if hwnd else [])
+
+
+def get_overlay_hwnds() -> "list[int]":
+    """직전 등록된 Electron 오버레이 창 HWND 리스트 (§70/§77). pick_on_click 반환 직후에도
+    유효 — 라우트의 _capture_element_image 가 grab 직전 이 오버레이(붉은 박스)들을 숨기는 데 쓴다."""
+    return list(_overlay_hwnds)
 
 
 def get_overlay_hwnd() -> "int | None":
-    """직전 등록된 Electron 오버레이 창 HWND (§70). pick_on_click 반환 직후에도 유효 —
-    라우트의 _capture_element_image 가 grab 직전 이 오버레이(붉은 박스)를 숨기는 데 쓴다."""
-    return _overlay_hwnd
+    """직전 등록 HWND 중 첫 번째 (하위호환). 없으면 None."""
+    return _overlay_hwnds[0] if _overlay_hwnds else None
 
 
 def cancel_pick() -> bool:
@@ -168,7 +179,7 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
             ("dwExtraInfo", ulong_ptr),
         ]
 
-    global _hover_rect, _overlay_hwnd
+    global _hover_rect, _overlay_hwnds
     captured: dict = {"pt": None}
     _hover_rect = None
     _cancel.clear()
@@ -243,21 +254,22 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
             if now - start > timeout_s:
                 return {"success": False, "cancelled": True, "error": "시간 초과"}
 
-            # ── 오버레이를 작업표시줄 위로 (빠른 호출, 후크 비차단) — §49 미해결분 유지 ──
-            if _overlay_hwnd and now - last_topmost >= _TOPMOST_INTERVAL_S:
+            # ── 오버레이(디스플레이별 전부)를 작업표시줄 위로 (빠른 호출, 후크 비차단) — §49/§77 ──
+            if _overlay_hwnds and now - last_topmost >= _TOPMOST_INTERVAL_S:
                 last_topmost = now
-                try:
-                    user32.SetWindowPos(
-                        _overlay_hwnd,
-                        _HWND_TOPMOST,
-                        0,
-                        0,
-                        0,
-                        0,
-                        _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE,
-                    )
-                except Exception:
-                    pass
+                for _ov in _overlay_hwnds:
+                    try:
+                        user32.SetWindowPos(
+                            _ov,
+                            _HWND_TOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE,
+                        )
+                    except Exception:
+                        pass
 
             # ── hover 하이라이트 — **디바운스**(handoff §49 fix7/8) ──
             # 이동 중엔 EFP(무거운 UIA)를 건너뛴다 → 매 루프 PeekMessage 가 빠르게 돌아
@@ -320,9 +332,9 @@ def pick_on_click(timeout_s: float = 60.0) -> dict:
         except Exception:
             pass
         _hover_rect = None
-        # _overlay_hwnd 는 여기서 비우지 않는다(§70): pick_on_click 반환 직후 라우트의
-        # _capture_element_image 가 이 HWND 로 오버레이를 숨기고 grab 해야 하기 때문.
-        # 다음 pick 의 set_overlay_hwnd 가 덮어쓰고, 창은 렌더러가 닫는다.
+        # _overlay_hwnds 는 여기서 비우지 않는다(§70): pick_on_click 반환 직후 라우트의
+        # _capture_element_image 가 이 HWND 들로 오버레이를 숨기고 grab 해야 하기 때문.
+        # 다음 pick 의 set_overlay_hwnds 가 덮어쓰고, 창은 렌더러가 닫는다.
         _paused.clear()
         _active.clear()
         _cancel.clear()

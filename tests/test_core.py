@@ -13558,6 +13558,62 @@ if __name__ == "__main__":
         }
         self.assert_true(mode in valid, f"헬퍼가 정의된 모드 반환: {mode!r}")
 
+    def test_239_pick_overlay_multi_display_hwnds(self):
+        """[handoff §77] 디스플레이별 picker 오버레이 — HWND **리스트** 등록/숨김.
+
+        멀티모니터(서로 다른 DPI)에서 단일 spanning 투명창이 보조모니터에 렌더 안 돼 붉은 박스가
+        주모니터에서만 보이던 문제 → 디스플레이마다 오버레이 1개. Python 은 z-order/숨김 대상
+        HWND 를 **리스트**로 받아 전부 처리. /pick/overlay 가 hwnds 리스트(+하위호환 단일 hwnd)
+        수용, _hide_pick_overlay 가 전부 숨김. core 0줄(api_server).
+        """
+        import sys as _sys
+
+        from api_server.pick_pump import (
+            get_overlay_hwnd,
+            get_overlay_hwnds,
+            set_overlay_hwnds,
+        )
+
+        self.step("(1) 리스트 등록 — get_overlay_hwnds 전부, get_overlay_hwnd 첫번째(하위호환)")
+        set_overlay_hwnds([111, 222, 333])
+        self.assert_equal(get_overlay_hwnds(), [111, 222, 333], "리스트 라운드트립")
+        self.assert_equal(get_overlay_hwnd(), 111, "단일 getter 는 첫 HWND(하위호환)")
+        set_overlay_hwnds(None)
+        self.assert_equal(get_overlay_hwnds(), [], "None 해제")
+
+        self.step("(2) /pick/overlay 라우트 — hwnds 리스트 + 하위호환 단일 hwnd")
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 — 라우트 검증 skip")
+            return
+        import tempfile
+
+        from api_server.server import create_app
+
+        app = create_app(token="t", data_dir=tempfile.mkdtemp(prefix="ohdo_ov77_"))
+        client = TestClient(app)
+        h = {"Authorization": "Bearer t"}
+        r = client.post("/pick/overlay", json={"hwnds": [11, 22]}, headers=h)
+        self.assert_equal(r.status_code, 200, "리스트 등록 200")
+        self.assert_equal(r.json().get("count"), 2, "count=2")
+        self.assert_equal(get_overlay_hwnds(), [11, 22], "리스트가 펌프 상태에 반영")
+        r2 = client.post("/pick/overlay", json={"hwnd": 77}, headers=h)
+        self.assert_equal(r2.json().get("count"), 1, "단일 hwnd 하위호환 count=1")
+        self.assert_equal(get_overlay_hwnds(), [77], "단일 hwnd → 1원소 리스트")
+
+        self.step("(3) _hide_pick_overlay — 등록분 전부 대상, 미등록 graceful")
+        from api_server.routes.pick import _hide_pick_overlay
+
+        set_overlay_hwnds([11, 22])
+        hid = _hide_pick_overlay()
+        if _sys.platform == "win32":
+            self.assert_true(hid is True, "Windows: 등록되면 전부 숨김 시도(True)")
+        else:
+            self.assert_true(hid is False, "non-Windows: ctypes 없음 graceful(False)")
+        set_overlay_hwnds(None)
+        self.assert_true(_hide_pick_overlay() is False, "미등록이면 스킵(False)")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

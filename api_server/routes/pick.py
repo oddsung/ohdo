@@ -16,9 +16,14 @@ router = APIRouter()
 
 
 class _OverlayHwndRequest(BaseModel):
-    """Electron 오버레이 창 HWND 등록 (handoff §49 fix2)."""
+    """Electron 오버레이 창 HWND 등록 (handoff §49 fix2 / §77 디스플레이별 리스트).
 
-    hwnd: int
+    멀티모니터는 디스플레이마다 오버레이 1개라 ``hwnds`` 리스트로 받는다. 단일창 시절
+    하위호환으로 ``hwnd`` 단일도 허용(둘 중 하나).
+    """
+
+    hwnd: int | None = None
+    hwnds: list[int] | None = None
 
 
 class PickClickRequest(BaseModel):
@@ -62,27 +67,33 @@ def _capture_element_image(app, session_id: str, result: dict) -> None:
 
 
 def _hide_pick_overlay() -> bool:
-    """grab 직전 picker 오버레이(붉은 박스) 창을 숨긴다 (§70). 성공 시 True.
+    """grab 직전 picker 오버레이(붉은 박스) 창을 **전부** 숨긴다 (§70/§77). 하나라도 숨기면 True.
 
     오버레이는 다른(렌더러) 프로세스 창이지만 §49 의 SetWindowPos 처럼 cross-process
-    ShowWindow 가 동작한다. 숨긴 뒤 DWM 재합성이 끝나도록 잠깐 대기해야 그 프레임이 grab 된다.
-    복원하지 않는다 — 렌더러가 응답 직후 오버레이를 닫으므로(복원 시 붉은 박스 깜빡임만 유발).
+    ShowWindow 가 동작한다. 멀티모니터는 디스플레이마다 오버레이가 있어(§77) 요소가 보조
+    모니터에 있어도 그 위의 오버레이를 숨겨야 붉은 테두리가 안 찍힌다 → 등록된 HWND 전부 숨김.
+    숨긴 뒤 DWM 재합성이 끝나도록 한 번만 대기한다(루프 밖). 복원하지 않는다 — 렌더러가 응답
+    직후 오버레이를 닫으므로(복원 시 붉은 박스 깜빡임만 유발).
     """
     try:
         import ctypes
         import ctypes.wintypes as wt
         import time as _time
 
-        from api_server.pick_pump import get_overlay_hwnd
+        from api_server.pick_pump import get_overlay_hwnds
 
-        hwnd = get_overlay_hwnd()
-        if not hwnd:
+        hwnds = get_overlay_hwnds()
+        if not hwnds:
             return False
         user32 = ctypes.windll.user32
         user32.ShowWindow.argtypes = [wt.HWND, ctypes.c_int]  # x64 HWND 절단 방지(§49 교훈)
         user32.ShowWindow.restype = wt.BOOL
-        user32.ShowWindow(hwnd, 0)  # SW_HIDE
-        _time.sleep(0.12)  # 오버레이 사라진 화면이 grab 되도록 재합성 대기
+        for hwnd in hwnds:
+            try:
+                user32.ShowWindow(hwnd, 0)  # SW_HIDE
+            except Exception:
+                pass
+        _time.sleep(0.12)  # 오버레이 사라진 화면이 grab 되도록 재합성 대기 (한 번만)
         return True
     except Exception:
         logger.debug("오버레이 숨김 실패(무시 — 붉은 테두리 포함될 수 있음)", exc_info=True)
@@ -241,7 +252,8 @@ def pick_overlay_route(
     펌프 루프가 이 HWND 를 SetWindowPos(HWND_TOPMOST) 로 주기 재적용해 작업표시줄 위로
     z-order 를 강제한다(Electron setAlwaysOnTop 은 Shell_TrayWnd 를 못 이김).
     """
-    from api_server.pick_pump import set_overlay_hwnd
+    from api_server.pick_pump import set_overlay_hwnds
 
-    set_overlay_hwnd(body.hwnd)
-    return {"ok": True}
+    hwnds = body.hwnds if body.hwnds else ([body.hwnd] if body.hwnd else [])
+    set_overlay_hwnds(hwnds)
+    return {"ok": True, "count": len(hwnds)}

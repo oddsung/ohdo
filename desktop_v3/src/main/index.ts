@@ -27,7 +27,11 @@ interface ApiInfo {
 let pyProc: ChildProcessWithoutNullStreams | null = null;
 let apiInfo: ApiInfo | null = null;
 let mainWindow: BrowserWindow | null = null;
-let overlayWindow: BrowserWindow | null = null;
+// element picker 오버레이: **디스플레이마다 1개**. 단일 spanning 투명창은 Windows 에서
+// 보조 모니터(특히 다른 DPI)에 합성/렌더되지 않아 붉은 박스가 주모니터에서만 보였다(§77).
+// 각 창은 한 디스플레이만 덮어(단일 DPI) 그 모니터에 정상 렌더된다. hover 박스는 요소가
+// 위치한 디스플레이의 창에만 그려진다.
+let overlayWindows: { win: BrowserWindow; displayId: number }[] = [];
 let captureWindow: BrowserWindow | null = null;
 
 /** 프로젝트 루트 = desktop_v3/ 의 부모. dev 에서 .venv 와 api_server 가 여기에 있다. */
@@ -230,70 +234,75 @@ function createWindow(): void {
  * 클릭/Esc 는 이 창이 아니라 전역 LL 후크(Python pick_pump)가 잡는다.
  */
 function createPickOverlay(): void {
-  if (overlayWindow) return;
-
-  // 모든 디스플레이를 덮는 union bounds (DIP).
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const d of screen.getAllDisplays()) {
-    minX = Math.min(minX, d.bounds.x);
-    minY = Math.min(minY, d.bounds.y);
-    maxX = Math.max(maxX, d.bounds.x + d.bounds.width);
-    maxY = Math.max(maxY, d.bounds.y + d.bounds.height);
-  }
-
-  overlayWindow = new BrowserWindow({
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY,
-    transparent: true,
-    frame: false,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    focusable: false,
-    hasShadow: false,
-    enableLargerThanScreen: true,
-    alwaysOnTop: true,
-    show: false,
-    webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
-      sandbox: false,
-    },
-  });
-
-  // 클릭통과(WS_EX_TRANSPARENT) — 대상 앱이 클릭을 받고 LL 후크가 캡처. forward 로
-  // 마우스 이동 이벤트는 받아 cursor 표시 유지.
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-  overlayWindow.setAlwaysOnTop(true, "screen-saver");
-  // 작업표시줄(Shell_TrayWnd) 위 z-order 강제는 Python pick_pump 가 ctypes
-  // SetWindowPos(HWND_TOPMOST) 로 처리한다(§49 fix2/3) — Electron setAlwaysOnTop/moveTop
-  // 으론 작업표시줄을 못 이김. 여기선 초기 1회만 올리고 주기 재적용은 Python 이 담당.
+  if (overlayWindows.length) return;
 
   const devUrl = process.env.ELECTRON_RENDERER_URL;
-  if (devUrl) {
-    overlayWindow.loadURL(`${devUrl}/overlay.html`);
-  } else {
-    // 빌드 시 두 엔트리(index/overlay) 모두 out/renderer/ 루트로 emit (index.html 과 동일 레벨).
-    overlayWindow.loadFile(join(__dirname, "../renderer/overlay.html"));
+  // 디스플레이마다 1개 — 단일 spanning 투명창은 멀티모니터(특히 다른 DPI)에서 보조모니터에
+  // 합성 안 됨(§77). 각 창은 자기 디스플레이의 bounds(DIP)만 덮어 그 모니터에 정상 렌더.
+  for (const d of screen.getAllDisplays()) {
+    const win = new BrowserWindow({
+      x: d.bounds.x,
+      y: d.bounds.y,
+      width: d.bounds.width,
+      height: d.bounds.height,
+      transparent: true,
+      frame: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      focusable: false,
+      hasShadow: false,
+      enableLargerThanScreen: true,
+      alwaysOnTop: true,
+      show: false,
+      webPreferences: {
+        preload: join(__dirname, "../preload/index.js"),
+        sandbox: false,
+      },
+    });
+
+    // 클릭통과(WS_EX_TRANSPARENT) — 대상 앱이 클릭을 받고 LL 후크가 캡처. forward 로
+    // 마우스 이동 이벤트는 받아 cursor 표시 유지.
+    win.setIgnoreMouseEvents(true, { forward: true });
+    win.setAlwaysOnTop(true, "screen-saver");
+    // 작업표시줄(Shell_TrayWnd) 위 z-order 강제는 Python pick_pump 가 ctypes
+    // SetWindowPos(HWND_TOPMOST) 로 처리한다(§49 fix2/3) — Electron setAlwaysOnTop/moveTop
+    // 으론 작업표시줄을 못 이김. 모든 오버레이 HWND 를 등록해 Python 이 주기 재적용.
+
+    if (devUrl) {
+      win.loadURL(`${devUrl}/overlay.html`);
+    } else {
+      // 빌드 시 두 엔트리(index/overlay) 모두 out/renderer/ 루트로 emit (index.html 과 동일 레벨).
+      win.loadFile(join(__dirname, "../renderer/overlay.html"));
+    }
+    win.once("ready-to-show", () => win.showInactive());
+    win.on("closed", () => {
+      overlayWindows = overlayWindows.filter((o) => o.win !== win);
+    });
+    overlayWindows.push({ win, displayId: d.id });
   }
-  overlayWindow.once("ready-to-show", () => overlayWindow?.showInactive());
-  overlayWindow.on("closed", () => {
-    overlayWindow = null;
-  });
 }
 
 function closePickOverlay(): void {
-  if (overlayWindow) {
-    overlayWindow.destroy();
-    overlayWindow = null;
+  for (const o of overlayWindows) {
+    if (!o.win.isDestroyed()) o.win.destroy();
   }
+  overlayWindows = [];
+}
+
+/** 모든 picker 오버레이 창의 네이티브 HWND (Python z-order/§70 숨김 등록용). */
+function overlayHwnds(): number[] {
+  const out: number[] = [];
+  for (const o of overlayWindows) {
+    if (o.win.isDestroyed()) continue;
+    const buf = o.win.getNativeWindowHandle();
+    // Win64: HWND 는 8바이트. 값은 안전정수 범위라 Number 변환 OK.
+    out.push(buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : buf.readUInt32LE(0));
+  }
+  return out;
 }
 
 /** 가상 데스크톱 전체를 덮는 union bounds (DIP). picker/capture 오버레이 공용. */
@@ -378,19 +387,23 @@ function overlayCssRectToPhysical(rect: {
   return { left: tl.x, top: tl.y, width: br.x - tl.x, height: br.y - tl.y };
 }
 
-/** Python 물리픽셀 rect → 오버레이 로컬 CSS px(DIP). 멀티모니터/고DPI 대응. */
-function physicalRectToOverlayCss(rect: {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}): { x: number; y: number; w: number; h: number } | null {
-  if (!overlayWindow) return null;
-  // screenToDipPoint: 물리 스크린 px → DIP (Windows). 두 모서리를 각각 변환해야
-  // 모니터별 scaleFactor 가 다른 경우에도 정확.
+/** Python 물리픽셀 rect → 특정 오버레이 창(=한 디스플레이) 로컬 CSS px(DIP).
+ *
+ * 요소가 이 창의 디스플레이에 있을 때만 box 를 반환(아니면 null) — 디스플레이별 오버레이가
+ * 각자 자기 모니터의 요소만 그리게 한다(§77). `screenToDipPoint` 로 두 모서리를 각각 변환해
+ * 모니터별 scaleFactor 가 달라도 정확.
+ */
+function physicalRectToOverlayCss(
+  rect: { left: number; top: number; right: number; bottom: number },
+  entry: { win: BrowserWindow; displayId: number },
+): { x: number; y: number; w: number; h: number } | null {
+  if (entry.win.isDestroyed()) return null;
   const tl = screen.screenToDipPoint({ x: rect.left, y: rect.top });
   const br = screen.screenToDipPoint({ x: rect.right, y: rect.bottom });
-  const b = overlayWindow.getBounds();
+  // 요소 중심(DIP)이 속한 디스플레이가 이 창의 디스플레이가 아니면 그리지 않는다.
+  const center = { x: Math.round((tl.x + br.x) / 2), y: Math.round((tl.y + br.y) / 2) };
+  if (screen.getDisplayNearestPoint(center).id !== entry.displayId) return null;
+  const b = entry.win.getBounds();
   return { x: tl.x - b.x, y: tl.y - b.y, w: br.x - tl.x, h: br.y - tl.y };
 }
 
@@ -400,20 +413,19 @@ function registerPickIpc(): void {
     // v2 처럼 메인 윈도우를 숨겨 대상 앱이 가려지지 않게 한다.
     mainWindow?.minimize();
     createPickOverlay();
-    // 오버레이 HWND 를 Python 에 등록 → 펌프 루프가 SetWindowPos(HWND_TOPMOST) 로
-    // 작업표시줄(Shell_TrayWnd) 위로 z-order 강제 (Electron setAlwaysOnTop 으론 부족).
+    // 모든 오버레이 HWND 를 Python 에 등록 → 펌프 루프가 각 창을 SetWindowPos(HWND_TOPMOST) 로
+    // 작업표시줄(Shell_TrayWnd) 위로 z-order 강제(Electron setAlwaysOnTop 으론 부족) + §70
+    // grab 직전 숨김도 전부 처리. (디스플레이별 오버레이라 리스트로 등록 — §77.)
     try {
-      if (overlayWindow && apiInfo) {
-        const buf = overlayWindow.getNativeWindowHandle();
-        // Win64: HWND 는 8바이트. 값은 안전정수 범위라 Number 변환 OK.
-        const hwnd = buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : buf.readUInt32LE(0);
+      const hwnds = overlayHwnds();
+      if (hwnds.length && apiInfo) {
         await fetch(`${apiInfo.baseUrl}/pick/overlay`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${apiInfo.token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ hwnd }),
+          body: JSON.stringify({ hwnds }),
         });
       }
     } catch {
@@ -493,7 +505,7 @@ function registerPickIpc(): void {
   ipcMain.handle("fs:reveal", (_e, p: string) => {
     if (p) shell.showItemInFolder(p);
   });
-  ipcMain.handle("pick:hover", async () => {
+  ipcMain.handle("pick:hover", async (event) => {
     if (!apiInfo) return { box: null, paused: false };
     try {
       const res = await fetch(`${apiInfo.baseUrl}/pick/hover`, {
@@ -503,10 +515,11 @@ function registerPickIpc(): void {
         rect?: { left: number; top: number; right: number; bottom: number } | null;
         paused?: boolean;
       };
-      return {
-        box: data?.rect ? physicalRectToOverlayCss(data.rect) : null,
-        paused: !!data?.paused,
-      };
+      // 어느 오버레이(=디스플레이)가 폴링했는지 식별 → 그 디스플레이의 요소만 box 반환(§77).
+      const sender = BrowserWindow.fromWebContents(event.sender);
+      const entry = overlayWindows.find((o) => o.win === sender);
+      const box = data?.rect && entry ? physicalRectToOverlayCss(data.rect, entry) : null;
+      return { box, paused: !!data?.paused };
     } catch {
       return { box: null, paused: false };
     }
