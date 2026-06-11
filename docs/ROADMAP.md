@@ -6,7 +6,7 @@
 
 ## 0. 문서 메타
 
-- **마지막 업데이트**: 2026-05-31 (**Phase E 배포 freeze 실측/de-risk** (handoff §64) — §46 이 미룬 PyInstaller freeze 를 개발 환경에서 실제로 빌드·부팅·동봉까지 돌려 막힘 제거(`pyinstaller` build extra 선언, spec hidden import fix, frozen exe 부팅·엔드포인트 검증, `electron-builder --dir` 동봉 확인, packaged `--data-dir` userData 분리, §63 tsc 버그 동반수정). 신규 `docs/BUILD.md`. core 222/222·core 0줄. 남은: NSIS 설치 GUI 실측(사용자 머신) + 코드서명/config 영속성. 이전 동일 데스크톱 트랙: **v3 패리티 백로그 + (A)유형 구현** (handoff §47) — v2 대비 v3 기능 격차 22항목 분류·우선순위화, P0 일괄 구현. 이전: **Phase E 배포 셋업** (handoff §46) — electron-builder + PyInstaller freeze 동봉 (설정/문서, freeze 는 사용자 머신). 이전 동일자: **Phase D i18n + 애니메이션** (handoff §45) — react-i18next (신규 ko/en) + 언어 토글 + 핵심 트랜지션. 이전 동일자: **AI 생성 진행상황 스트리밍** (handoff §44) — WS /ws/generate, core 무수정(토큰 대신 on_progress 진행상황). 이전 동일자: **api_server 리팩토링** (§43) — server.py 568→55줄, deps.py + routes/ 분리. 이전 동일자: **녹화 실제 캡처 fix** (§42) — 전용 메시지 펌프 스레드(RecordingController)로 LL 훅 콜백 발화. 이전 동일자: **TS UI v3 #3 잔여 = 작업 녹화 lifecycle** (§41) + Monaco 로컬 번들 fix. 이전 동일자: **Phase B 확장** — 실행 WS + 코드 편집 + element picker + polish (§40), **Phase B 1차 증분** (§39), **Phase A 셋업 완료** — handoff §37/§38. `api_server/` FastAPI 브리지 + `desktop_v3/` Electron+React 보일러플레이트 신규, core/PySide6 0줄 수정. §7 에 Node 툴체인 표준 추가, §10 변경 로그 갱신. 이전: 2026-05-12 — **Phase 0 + Phase 1 모두 100% 완료**. Phase 1 sub-task 2 Chunk B (ui/ legacy 정리) 5/9 마무리 → KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족. Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정. **5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 11 unit — handoff §16 참조. baseline 85→96**. **5/12 PySide6 (LGPL) 메인 전환 완료 — handoff §19/§20 — 이전 PyQt6 코드는 legacy_pyqt6/ 보관**)
+- **마지막 업데이트**: 2026-06-10 (**로드맵 검토 + 실제 상태 동기화 + 전략 방향 확정**. 검토에서 **문서-실제 괴리** 발견: ROADMAP §3 가 Phase 2/3 를 미완료로 표기하나 실제로는 **SaaS MVP 가 배포까지 완료**(`packages/backend` Railway 배포 M0~M2.10 + `packages/web` Vercel 배포 M3.1.1~M3.1.6 + `ohdo-agent-setup-0.4.0.exe` 인스톨러, 2026-04-27 브라우저 e2e PASS — 상세 [docs/saas/CHANGELOG.md](saas/CHANGELOG.md)) 후 **~6주 휴면**. 그 사이 작업은 PySide6 전환(5/12) → **desktop_v3 (Electron) §37~§77** 로 이동 → **UI 트랙 3중화**(PySide6 `ui_v2` + Electron `desktop_v3` + Next.js `packages/web`). **전략 결정(2026-06-10 사용자)**: 게이트 병목은 기능이 아니라 **유통/시장검증**(commercial_review GO/NO-GO 0/4 미착수, 코드 외 사용자 작업)이므로 → **OSS 데스크톱(`desktop_v3`)을 flagship 으로 확정 → v1.0 출시 → 배포/검증**에 집중. 새 SaaS 기능은 사용자 검증(5명+) 후 재개, 배포된 SaaS MVP 는 parked, `ui_v2` 안정 fallback 유지. §3.0 "현재 실제 상태" 신규 + Phase 2/3 실제 배포 callout + §10 갱신. 이전: 2026-05-31 (**Phase E 배포 freeze 실측/de-risk** (handoff §64) — §46 이 미룬 PyInstaller freeze 를 개발 환경에서 실제로 빌드·부팅·동봉까지 돌려 막힘 제거(`pyinstaller` build extra 선언, spec hidden import fix, frozen exe 부팅·엔드포인트 검증, `electron-builder --dir` 동봉 확인, packaged `--data-dir` userData 분리, §63 tsc 버그 동반수정). 신규 `docs/BUILD.md`. core 222/222·core 0줄. 남은: NSIS 설치 GUI 실측(사용자 머신) + 코드서명/config 영속성. 이전 동일 데스크톱 트랙: **v3 패리티 백로그 + (A)유형 구현** (handoff §47) — v2 대비 v3 기능 격차 22항목 분류·우선순위화, P0 일괄 구현. 이전: **Phase E 배포 셋업** (handoff §46) — electron-builder + PyInstaller freeze 동봉 (설정/문서, freeze 는 사용자 머신). 이전 동일자: **Phase D i18n + 애니메이션** (handoff §45) — react-i18next (신규 ko/en) + 언어 토글 + 핵심 트랜지션. 이전 동일자: **AI 생성 진행상황 스트리밍** (handoff §44) — WS /ws/generate, core 무수정(토큰 대신 on_progress 진행상황). 이전 동일자: **api_server 리팩토링** (§43) — server.py 568→55줄, deps.py + routes/ 분리. 이전 동일자: **녹화 실제 캡처 fix** (§42) — 전용 메시지 펌프 스레드(RecordingController)로 LL 훅 콜백 발화. 이전 동일자: **TS UI v3 #3 잔여 = 작업 녹화 lifecycle** (§41) + Monaco 로컬 번들 fix. 이전 동일자: **Phase B 확장** — 실행 WS + 코드 편집 + element picker + polish (§40), **Phase B 1차 증분** (§39), **Phase A 셋업 완료** — handoff §37/§38. `api_server/` FastAPI 브리지 + `desktop_v3/` Electron+React 보일러플레이트 신규, core/PySide6 0줄 수정. §7 에 Node 툴체인 표준 추가, §10 변경 로그 갱신. 이전: 2026-05-12 — **Phase 0 + Phase 1 모두 100% 완료**. Phase 1 sub-task 2 Chunk B (ui/ legacy 정리) 5/9 마무리 → KPI "ui/ 폴더에서 banned core 직접 import 0건" 충족. Phase 2 진입은 [docs/commercial_review.md](commercial_review.md) GO/NO-GO 게이트 통과 후 결정. **5/9~5/10 Phase 1.8 OpenAI 호환 (DeepSeek) 등록 + 코드 생성 품질 루프 11 unit — handoff §16 참조. baseline 85→96**. **5/12 PySide6 (LGPL) 메인 전환 완료 — handoff §19/§20 — 이전 PyQt6 코드는 legacy_pyqt6/ 보관**)
 - **Owner**: @toytiger (dohahado22@gmail.com)
 - **타깃 시장**: B2C 개인 개발자 (**글로벌 + 한국 dual-locale**, 오픈코어 전략) — *2026-05-09 사용자 결정으로 한국 niche → 글로벌 우선 + 한국 동시 진행으로 확장*
 - **관련 문서**:
@@ -79,6 +79,36 @@
 ---
 
 ## 3. 단계별 마일스톤
+
+### 3.0 현재 실제 상태 (2026-06-10 로드맵 검토 — 문서/실제 동기화)
+
+> 아래 Phase 0~5 는 **원래 계획(2026-04-21 수립)** 이다. 실제 저장소는 계획과 다른 순서로 진행됐으므로,
+> 이 절이 **실제 상태**를 먼저 요약한다. 상세는 [docs/saas/CHANGELOG.md](saas/CHANGELOG.md)(SaaS 트랙) +
+> [docs/handoff.md](handoff.md)(데스크톱 트랙).
+
+| 트랙 | 위치 | 실제 상태 | 활성도 |
+|---|---|---|---|
+| **SaaS 백엔드** | `packages/backend/` | FastAPI + Alembic + Postgres, **Railway 배포** (device-flow auth · executions REST/WS · 로그 스트리밍 · 캡처 업로드). M0~M2.10. | 💤 휴면 (마지막 2026-04-27) |
+| **SaaS 웹** | `packages/web/` | Next.js, **Vercel 배포**. 매직링크 sign-in → 대시보드 → 실행 생성/취소 → 로그/캡처 뷰어. M3.1.1~M3.1.6, 브라우저 e2e PASS. | 💤 휴면 (마지막 2026-04-27) |
+| **Agent 인스톨러** | `agent/` | `ohdo-agent-setup-0.4.0.exe` (embedded Python + RPA 4종), HP-Laptop 실설치·실행 검증. | 💤 휴면 |
+| **PySide6 데스크톱** | `ui/`, `ui_v2/`, `main.py` | 현 "main" 데스크톱 앱 (안정). core 234/234. | 🟢 안정 (유지보수) |
+| **Electron 데스크톱 v3** | `desktop_v3/` + `api_server/` | TS UI v3 (handoff §37~§77). v2 패리티 + 멀티모니터 등. **→ flagship 확정.** | 🔵 **활성 (현재 트랙)** |
+
+**전략 결정 (2026-06-10 사용자)**: 게이트(commercial_review GO/NO-GO)의 병목은 추가 기능이 아니라
+**유통/시장검증**(Stars 500+ · 유료의향 5명+ · 콘텐츠 mix — 전부 미착수, **코드 외 사용자 작업**). 따라서:
+
+1. **`desktop_v3` 를 OSS flagship 으로 확정** (§2.4 "OSS 데스크톱 = 커뮤니티 확산 채널"). → **v1.0 출시**가 다음 목표.
+2. **배포된 SaaS MVP 는 parked** — 사용자 검증(5명+) 후 재개. 휴면 코드는 보존(삭제 X).
+3. **`ui_v2`(PySide6) 는 안정 fallback 으로 유지** — desktop_v3 v1.0 출시 후 은퇴 여부 별도 결정.
+4. **Computer Use 어댑터 PoC**(commercial_review 옵션 B) 는 #1 위협 de-risk 로 병행 가치.
+
+**desktop_v3 v1.0 출시 임계경로** (GUI 실측은 사용자 머신):
+- [ ] GUI 실측 백로그 소진 (handoff §58~§64 + §77 멀티모니터 재테스트 + §60 영역캡처 멀티모니터 후속)
+- [ ] NSIS 설치본 빌드·실측 (handoff §64, [docs/BUILD.md](BUILD.md) 런북)
+- [ ] 코드서명 + config 영속성 (`--config-dir`)
+- [ ] 출시 후 배포/유통 (사용자): 공개 repo 정리 · 영어 Show HN/Reddit · 사용자 5명 확보
+
+---
 
 ### Phase 0: OSS 안정화 (1~2개월)
 
@@ -162,6 +192,12 @@ agent/
 
 클라우드 컨트롤 플레인 MVP. 사용자는 여전히 로컬 PC 에서 실행하지만, 세션·스텝·이력이 서버에 저장되고 GitHub 처럼 공유 가능.
 
+> **⚠️ 실제 상태 (2026-06-10 검토 — §3.0 참조)**: 이 Phase 는 **계획보다 먼저 대부분 구현·배포됨**(2026-04-23~27).
+> `packages/backend/` FastAPI + Alembic + Postgres 가 **Railway 에 배포**되어 device-flow auth · executions
+> REST/WS · 로그 스트리밍 · 캡처 업로드(M0~M2.10) 동작, agent 인스톨러 `0.4.0` 실기 검증 완료. **현재 휴면**
+> (마지막 2026-04-27). 미완: S3/R2 캡처(현 로컬 FS) · `docs/AGENT_PROTOCOL.md` 루트 문서(상세는 `docs/saas/protocols`) ·
+> `ohdo migrate-to-cloud` CLI · 결제(Phase 4). 아래 체크리스트는 원래 계획 기준이며 일부는 이미 충족됨.
+
 - [ ] 모노레포 구조로 전환
   ```
   ohdo/
@@ -200,6 +236,11 @@ agent/
 ### Phase 3: 웹 대시보드 (2~3개월)
 
 브라우저에서 세션 편집·모니터링·실행 트리거. PySide6 UI 를 점진적으로 웹으로 이관.
+
+> **⚠️ 실제 상태 (2026-06-10 검토 — §3.0 참조)**: 이 Phase 의 **모니터링 슬라이스가 이미 구현·배포됨**(2026-04-24~27).
+> `packages/web/` Next.js 가 **Vercel 에 배포**되어 매직링크 sign-in → executions 리스트/상세 → 로그 폴링 →
+> 캡처 인라인 뷰어 → 실행 생성/취소(M3.1.1~M3.1.6) 동작, 브라우저 e2e PASS. **현재 휴면**(마지막 2026-04-27).
+> 미완: 세션 편집(Monaco) · SSE 로그(현 3초 폴링) · `ohdo://` Open in Desktop · 프롬프트 템플릿 · 공유 링크.
 
 - [ ] `packages/web/` (Next.js 14 App Router, TypeScript, Tailwind, shadcn/ui)
   - 세션 목록/편집 (좌측 스텝 리스트 + 중앙 Monaco 에디터 + 우측 프롬프트/캡처)
@@ -446,3 +487,4 @@ Phase 0~1 착수 시 가장 먼저 손대야 할 파일 (프로젝트 루트 기
 | 2026-05-12 | **PySide6 (LGPL) 메인 전환 완료 — Plan 1** — 2026-05-02 PySide6 port 추가 이후 양쪽 sync 부담 + PyQt6 (GPL/Riverbank commercial) 라이선스 마찰 해소를 위한 결정. `pyside6_port/` → root promotion (`ui/`, `ui_v2/`, `main.py`, `core/visual_overlay.py`, `core/environment_scanner.py` 의 PySide6 카피로 swap), 이전 PyQt6 코드는 `legacy_pyqt6/` 에 보존 (삭제 X — 사용자 명시 요청), PyQt6 의존성은 `[project.optional-dependencies] legacy-pyqt6` 로 격리. baseline 회귀 0 (core 107 + scenarios 73 그린, PySide6 단독 .venv). 자세한 단계: handoff.md §20. |
 | 2026-05-29 | **TS UI v3 트랙 착수 — Phase A 셋업 완료** (handoff §37 결정 —> §38 구현). 같은 repo 에 신규 디렉터리 2개: `api_server/` (FastAPI + uvicorn 브리지 — core/ 를 AppService 경유 호출, GET /health + /sessions, 토큰 인증, READY 마커 포트 협상) + `desktop_v3/` (Electron 38 + React 19 + TS 5 + Vite 6 + Tailwind + Zustand + TanStack Query 보일러플레이트, Discord-like UX). **위험 완화**: core/ + PySide6 (ui/, ui_v2/, main.py) 0줄 수정. pyproject 에 fastapi/uvicorn 추가. test_206 회귀 가드 +1 (core 205—>206 + scenarios 73 + recording_fixtures 2 그린). §7.5 에 Node 툴체인 추가. 다음: Phase B 핵심 화면 MVP. | TS UI v3 트랙 실착수 (§37 결정 이행) |
 | 2026-05-31 | **Phase E 배포 freeze 실측/de-risk** (handoff §64). §46 이 미룬 PyInstaller freeze 를 개발 환경(Windows, freeze 는 GUI 불필요한 CLI)에서 실제로 빌드·부팅·동봉까지 실행. `pyinstaller>=6.0` 을 `[project.optional-dependencies].build` extra 로 선언(문서 명령이 미선언으로 실패하던 것), spec 죽은 hidden import(`pywinpty`→`winpty`) 제거, frozen `ohdo-bridge.exe` 단독 부팅 + /health·/sessions·/environment 응답 검증, `electron-builder --dir` 로 `resources/pybridge/` 동봉 확인(exit 0). Electron `bridgeCommand` 가 packaged 시 `--data-dir %APPDATA%/ohdo/data` 전달(번들 내부 data 소실 회피, **TS만 — core 0줄**). §63 의 미검출 tsc 버그(ChatPanel `stopCommit`→`stopReview`) 동반 수정. 신규 `docs/BUILD.md` 런북 + README 빌드 섹션. core 222/222 유지. | 출시 임계경로 — 설치본 빌드 파이프라인 사전 검증. 남은 것은 사용자 머신 NSIS 설치 GUI 실측 + 코드서명/config 영속성 후속. |
+| 2026-06-10 | **로드맵 검토 + 문서/실제 동기화 + 전략 방향 확정**. 검토에서 문서-실제 괴리 발견 — ROADMAP §3 가 Phase 2/3 를 미완료로 표기하나 실제로는 SaaS MVP 가 배포 완료(`packages/backend` Railway M0~M2.10 + `packages/web` Vercel M3.1.1~M3.1.6 + agent `0.4.0`, 2026-04-27 브라우저 e2e PASS, 상세 docs/saas/CHANGELOG.md) 후 ~6주 휴면. UI 트랙 3중화(PySide6 `ui_v2` + Electron `desktop_v3` + Next.js `packages/web`). §3.0 "현재 실제 상태" 신규 + Phase 2/3 실제 배포 callout + §0 갱신. | 게이트 병목 = 유통/시장검증(0/4 미착수)이라 추가 기능 무의미 → **OSS 데스크톱(`desktop_v3`) flagship 확정 + v1.0 출시 집중**, SaaS MVP parked, `ui_v2` 안정 fallback 유지. 사용자 결정. |
