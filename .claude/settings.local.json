@@ -10,7 +10,11 @@
       "Bash(sort -t_ -k2 -n)",
       "Bash(git add *)",
       "Bash(tasklist)",
-      "Bash(sed 's/^/EXCEL 프로세스 수: /')"
+      "Bash(sed 's/^/EXCEL 프로세스 수: /')",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"\\(exit $?: 0=ignored, 1=not ignored\\)\")",
+      "Bash(git ls-tree *)",
+      "Bash(git ls-remote *)"
     ]
   }
 }
