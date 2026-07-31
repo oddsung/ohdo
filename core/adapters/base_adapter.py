@@ -420,23 +420,21 @@ class BaseAIAdapter(ABC):
         # found_index=0 인자 없으면 자동 추가 (첫 매칭 사용).
         def _add_found_index(m: re.Match) -> str:
             full = m.group(0)
-            if "found_index" in full:
-                return full  # 이미 있음
+            # title= 인자 없는 호출(process=/handle= 등)이나 이미 found_index 있으면 그대로.
+            if "found_index" in full or not re.search(r"\btitle\s*=", full):
+                return full
             # 닫는 괄호 직전에 ", found_index=0" 삽입
             return full[:-1] + ", found_index=0)"
 
-        # Application(...).connect(title=...)
-        code = re.sub(
-            r"\.connect\([^)]*\btitle\s*=[^)]*\)",
-            _add_found_index,
-            code,
-        )
-        # app.window(title=...)
-        code = re.sub(
-            r"\bapp\.window\([^)]*\btitle\s*=[^)]*\)",
-            _add_found_index,
-            code,
-        )
+        # 인자 영역 = 따옴표 문자열(내부에 괄호 허용) 또는 괄호가 아닌 문자.
+        # 이전 패턴의 [^)]* 는 title 문자열 안의 ')' 에서 끊겨 — 예: Gmail 창제목
+        # "받은편지함 (17) - ..." — 문자열 한복판에 ", found_index=0" 을 삽입해
+        # 제목을 오염시켰다(2026-07-29 실측, 괄호 포함 창제목은 connect 항상 실패).
+        _call_args = r"(?:\"[^\"]*\"|'[^']*'|[^()])*"
+        # Application(...).connect(...)
+        code = re.sub(rf"\.connect\({_call_args}\)", _add_found_index, code)
+        # app.window(...)
+        code = re.sub(rf"\bapp\.window\({_call_args}\)", _add_found_index, code)
 
         return code
 

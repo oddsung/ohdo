@@ -148,6 +148,10 @@ async def ws_generate(ws: WebSocket) -> None:
             else:
                 # §72: picker 로 고른 요소를 AI 가 무시하고 엉뚱한 셀렉터를 쓴 경우 결정적 교정.
                 _enforce_step_selector(service, session_id, step, element_context)
+                # §78c: 주석만 생성/이전 스텝 누락을 템플릿·체인으로 결정적 보정.
+                from api_server.step_guard import apply_step_guards
+
+                apply_step_guards(service, session_id, step, element_context)
                 fresh = service.get_session(session_id)
                 # 교정 후 갱신된 step dict 로 응답(없으면 원본).
                 step_dict = next(

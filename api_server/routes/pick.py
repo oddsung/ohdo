@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -100,6 +101,114 @@ def _hide_pick_overlay() -> bool:
         return False
 
 
+_BROWSER_EXE_NAMES = frozenset(
+    {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "iexplore.exe"}
+)
+
+
+def _looks_like_desktop_root(title: str) -> bool:
+    """UIA 데스크톱 루트/가상 데스크톱 이름 판정 (§78b).
+
+    core ``_resolve_top_window_title`` 는 UIA 트리를 끝까지 올라가 **마지막 비어있지 않은
+    이름**을 반환하는데, Win11(가상 데스크톱)에선 루트 이름이 "데스크톱 1"/"Desktop 1" 이라
+    실제 앱 창 제목을 덮어쓴다 → connect(title="데스크톱 1") 은 실행 시 0 windows. 이런
+    값은 창 제목으로 쓰면 안 된다.
+    """
+    t = (title or "").strip().lower()
+    if not t:
+        return False
+    if t in ("program manager", "desktop", "바탕 화면"):
+        return True
+    return t.startswith("데스크톱 ") or t.startswith("desktop ")
+
+
+def _derive_root_window_title(info: dict) -> str:
+    """요소의 **실제 최상위 창** 제목을 Win32 로 도출 (§78b, pick 시점 호출 전제).
+
+    ``GetAncestor(GA_ROOT)`` 는 top-level 창에서 멈추므로(UIA 트리 walk 와 달리) 데스크톱
+    루트 이름이 섞일 수 없다. 요소 hwnd 가 없으면 rect 중심의 ``WindowFromPoint`` 사용
+    (picker 오버레이는 WS_EX_TRANSPARENT 라 건너뜀 — §49 와 동일 원리). 실패 시 "".
+    """
+    import sys as _sys
+
+    if _sys.platform != "win32":
+        return ""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        user32 = ctypes.windll.user32
+        hwnd = int(info.get("hwnd") or 0)
+        if not hwnd:
+            r = info.get("rect")
+            if isinstance(r, dict):
+                cx = int(r.get("left", 0)) + int(r.get("width", 0)) // 2
+                cy = int(r.get("top", 0)) + int(r.get("height", 0)) // 2
+            elif isinstance(r, (list, tuple)) and len(r) == 4:
+                cx = (int(r[0]) + int(r[2])) // 2
+                cy = (int(r[1]) + int(r[3])) // 2
+            else:
+                return ""
+            hwnd = user32.WindowFromPoint(wt.POINT(cx, cy))
+        if not hwnd:
+            return ""
+        root = user32.GetAncestor(hwnd, 2)  # GA_ROOT
+        if not root or root == user32.GetDesktopWindow():
+            return ""
+        buf = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(root, buf, 512)
+        return buf.value or ""
+    except Exception:
+        return ""
+
+
+def _stabilize_browser_connect(ctx: str, info: dict) -> str:
+    """브라우저 요소 템플릿의 connect/window 라인을 실행-시점 안정형으로 교체 (§78g).
+
+    브라우저 창 제목은 **활성 탭을 따라 바뀌므로** pick 시점 full-title hardcode 는 이전
+    스텝이 탭을 전환한 뒤 재실행하면 0 windows 로 깨진다(사용자 실측: 탭클릭 스텝이 1차
+    실행 성공 → 창 제목 변경 → 2차 실행 connect 실패). 교체 전략:
+    - process 우선: pick 시점 PID 로 connect (브라우저 재시작 전까지 제목 무관 안정)
+    - 폴백: 프로그램명(제목 마지막 " - " 세그먼트, 예: Chrome) title_re — PID 만료 대응
+    - ``win = app.top_window()`` — full-title window 매칭 제거
+    교체 결과가 컴파일 불가면 원본 유지(best-effort).
+    """
+    pid = info.get("process_id")
+    title = info.get("parent_window_title") or ""
+    program = (title.split(" - ")[-1] or "").strip()
+    if not program:
+        return ctx
+    title_re_literal = repr(".*" + re.escape(program))
+    fallback = (
+        f'Application(backend="uia").connect(title_re={title_re_literal}, '
+        "timeout=10, found_index=0)"
+    )
+    if pid:
+        new_connect = (
+            "try:\n"
+            f'    app = Application(backend="uia").connect(process={int(pid)}, timeout=5)\n'
+            "except Exception:\n"
+            f"    app = {fallback}"
+        )
+    else:
+        new_connect = f"app = {fallback}"
+    new = re.sub(
+        r'^app = Application\(backend="[^"]+"\)\.connect\([^\n]*\)$',
+        lambda _m: new_connect,
+        ctx,
+        count=1,
+        flags=re.M,
+    )
+    new = re.sub(
+        r"^win = app\.window\([^\n]*\)$", "win = app.top_window()", new, count=1, flags=re.M
+    )
+    if new == ctx:
+        return ctx
+    from api_server.step_guard import extract_template_code
+
+    return new if extract_template_code(new) else ctx
+
+
 def _build_element_context(element: dict) -> "str | None":
     """선택 요소 메타 → AI 프롬프트용 풍부한 "## 선택된 UI 요소" 컨텍스트 (handoff §67, v2 동등).
 
@@ -108,20 +217,48 @@ def _build_element_context(element: dict) -> "str | None":
     이게 없으면(이전 v3) element_context 가 한 줄 라벨뿐이라 AI 가 가이드의 폴백 예시
     (control_type="Document")를 복제하는 약한 타겟팅이 됐다.
 
-    ``capture_element_at`` 의 rect 는 ``[l,t,r,b]`` 리스트지만 get_element_info_text 는
-    ``{left,top,width,height}`` dict 를 기대하므로 정규화(원본 element 는 안 건드림). best-effort.
+    §78 실버그: ``capture_element_at``(recorder 형식) 과 ``get_element_info_text``(picker
+    형식) 는 **키 체계가 다르다** — 특히 recorder 의 ``window_title`` 을 picker 의
+    ``parent_window_title`` 로 매핑하지 않으면 코드 템플릿의 connect 라인이
+    ``connect(title="...")`` 플레이스홀더로 떨어져 **AI 가 그대로 복사 → 실행 실패**한다
+    (v2 는 PR-19d ``_recorder_meta_to_picker_dict`` 가 같은 변환을 이미 수행). 여기서
+    rect 정규화 + 키 매핑(parent_window_title/is_browser/screen_x·y/backend)을 모두 한다.
     """
     try:
         from core.win_inspector import WindowInspector
 
         info = dict(element)
         r = info.get("rect")
+        screen_x = screen_y = 0
         if isinstance(r, (list, tuple)) and len(r) == 4:
             left, top, right, bottom = (int(v) for v in r)
             info["rect"] = {"left": left, "top": top, "width": right - left, "height": bottom - top}
+            screen_x, screen_y = (left + right) // 2, (top + bottom) // 2
+        elif isinstance(r, dict):
+            screen_x = int(r.get("left", 0)) + int(r.get("width", 0)) // 2
+            screen_y = int(r.get("top", 0)) + int(r.get("height", 0)) // 2
+        # recorder(element_inspect) → picker(win_inspector) 키 매핑 (v2 PR-19d 동등).
+        # §78b: 창 제목은 Win32 GA_ROOT 재도출을 우선 — core 의 UIA walk-up 은 Win11 에서
+        # 가상 데스크톱 이름("데스크톱 1")을 반환할 수 있어 그대로 쓰면 connect 가 항상 실패.
+        if not info.get("parent_window_title"):
+            derived = _derive_root_window_title(info)
+            fallback = info.get("window_title") or ""
+            if _looks_like_desktop_root(fallback):
+                fallback = ""
+            info["parent_window_title"] = derived or fallback
+        exe = (info.get("exe_name") or "").lower()
+        info.setdefault("is_browser", exe in _BROWSER_EXE_NAMES)
+        info.setdefault("screen_x", screen_x)
+        info.setdefault("screen_y", screen_y)
+        info.setdefault("detected_backend", "uia")
+        info.setdefault("recommended_backend", "uia")
         text = WindowInspector().get_element_info_text(info)
         if not text:
             return None
+        # §78g: 브라우저 요소는 connect 를 실행-시점 안정형(process 우선 + 프로그램명
+        # title_re 폴백)으로 교체 — full-title 은 활성 탭 변화에 깨짐.
+        if info.get("is_browser"):
+            text = _stabilize_browser_connect(text, info)
         # §68: agy/Gemini 가 위 _resolve_element 템플릿(title/auto_id 셀렉터)을 무시하고
         # 시스템 가이드의 generic 예시(`child_window(control_type='...', found_index=0)`)로
         # 단순화 → 같은 타입의 첫 요소가 잡혀 오클릭(사용자 실측: 메모장 "+" 대신 다른 Button).
@@ -131,6 +268,14 @@ def _build_element_context(element: dict) -> "str | None":
             "그대로 사용하세요.** `win.child_window(control_type='...', found_index=0)` 처럼 "
             "control_type+found_index 만으로 단순화하지 마세요 — 같은 타입(예: Button)의 첫 번째 "
             "요소가 잡혀 의도와 다른 대상을 클릭합니다. 이 요소의 title/auto_id 를 셀렉터에 반드시 포함하세요."
+            "\n🚨 **이 템플릿은 참고용 예시일 뿐, 아직 세션 코드에 포함되지 않았고 실행되지도 않았습니다.** "
+            "새 스텝 마커 블록 **안에** 템플릿 코드를 복사해 넣어야 실제로 동작합니다. "
+            '"템플릿이 이미 클릭했다"고 가정하고 주석만 작성하는 것은 금지 — '
+            "새 스텝 블록에는 반드시 실행 가능한 코드(connect→요소 해석→클릭)가 있어야 합니다. "
+            "코드를 요약하지 마세요 — try:/클릭 문장 등을 설명 주석으로 대체하거나 일부만 "
+            "발췌하면 들여쓰기가 깨져 SyntaxError 가 납니다. 스텝 블록은 그 자체로 완전하고 "
+            "컴파일 가능한 코드여야 합니다. "
+            "또한 이전 스텝들의 코드는 삭제하지 말고 전부 유지한 채 새 블록을 뒤에 추가하세요."
         )
         return text + directive
     except Exception:
