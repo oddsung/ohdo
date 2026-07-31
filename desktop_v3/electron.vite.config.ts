@@ -22,10 +22,12 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          // 메인 UI + element picker 오버레이(§49) + 영역 캡처 오버레이(§60) 3개 엔트리.
+          // 메인 UI + element picker 오버레이(§49) + 영역 캡처 오버레이(§60)
+          // + 실행 FX 오버레이(§79) 4개 엔트리.
           index: resolve("src/renderer/index.html"),
           overlay: resolve("src/renderer/overlay.html"),
           capture_overlay: resolve("src/renderer/capture_overlay.html"),
+          run_overlay: resolve("src/renderer/run_overlay.html"),
         },
       },
     },

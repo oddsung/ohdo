@@ -115,12 +115,14 @@ export function CodeViewer({ sessionId, stepId, code, title }: CodeViewerProps) 
       )}
       <div className="flex-1">
         {code ? (
+          /* §78e: path 로 모델을 만들면 안 됨 — Monaco 모델은 전역·영속이라 스텝 전부
+             삭제 후 재생성된 같은 step_id(또는 다른 세션의 같은 id)가 옛 모델을 재사용해
+             이전 코드(예: 삭제된 Word 스텝)가 표시되는 stale-model 버그. value 단일 모델로. */
           <Editor
             height="100%"
             defaultLanguage="python"
             theme="vs-dark"
             value={editing ? draft : code}
-            path={`step-${stepId}`}
             onChange={(v) => {
               if (editing) setDraft(v ?? "");
             }}

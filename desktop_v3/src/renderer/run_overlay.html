@@ -1,0 +1,131 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- 실행 중 시각 효과 오버레이 (handoff §79) — 디스플레이별 투명·클릭통과 창.
+     테두리 글로우 + 상태 HUD(주 디스플레이) + 커서 링 + 클릭 리플. -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        cursor: none;
+        user-select: none;
+      }
+      /* 화면 가장자리 글로우 — 자동화 실행 중 표시 (화면공유 UX 관례) */
+      #frame {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        box-shadow: inset 0 0 0 3px rgba(88, 101, 242, 0.85),
+          inset 0 0 24px 6px rgba(88, 101, 242, 0.28);
+        animation: pulse 2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.55;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+      #frame.done-ok {
+        animation: none;
+        box-shadow: inset 0 0 0 3px rgba(35, 165, 90, 0.95),
+          inset 0 0 28px 8px rgba(35, 165, 90, 0.35);
+      }
+      #frame.done-fail {
+        animation: none;
+        box-shadow: inset 0 0 0 3px rgba(218, 62, 68, 0.95),
+          inset 0 0 28px 8px rgba(218, 62, 68, 0.35);
+      }
+      /* 상단 상태 HUD (주 디스플레이만) */
+      #hud {
+        position: fixed;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: rgba(20, 21, 26, 0.88);
+        border: 1px solid rgba(88, 101, 242, 0.7);
+        color: #dbdee1;
+        font:
+          600 12px "Segoe UI",
+          "Malgun Gothic",
+          sans-serif;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      #hud .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #5865f2;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      /* 커서 링 */
+      #ring {
+        position: fixed;
+        width: 34px;
+        height: 34px;
+        margin: -17px 0 0 -17px;
+        border: 2.5px solid rgba(88, 101, 242, 0.95);
+        border-radius: 50%;
+        box-shadow: 0 0 10px rgba(88, 101, 242, 0.6);
+        pointer-events: none;
+        display: none;
+      }
+      #ring::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 4px;
+        height: 4px;
+        margin: -2px 0 0 -2px;
+        border-radius: 50%;
+        background: rgba(88, 101, 242, 0.95);
+      }
+      /* 클릭 리플 */
+      .ripple {
+        position: fixed;
+        width: 12px;
+        height: 12px;
+        margin: -6px 0 0 -6px;
+        border: 3px solid rgba(250, 204, 21, 0.95);
+        border-radius: 50%;
+        pointer-events: none;
+        animation: ripple 0.6s ease-out forwards;
+      }
+      @keyframes ripple {
+        0% {
+          transform: scale(0.6);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(4.5);
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="frame"></div>
+    <div id="hud"><span class="dot"></span><span id="hud-text"></span></div>
+    <div id="ring"></div>
+    <script type="module" src="./run_overlay.ts"></script>
+  </body>
+</html>

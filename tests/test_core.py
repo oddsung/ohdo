@@ -6413,6 +6413,14 @@ if __name__ == "__main__":
             "[devloop] 가이드 추적성 — devloop 출처 표기 필수",
         )
 
+        self.step("[§79 후속] #24 — 새로 실행한 앱 connect timeout=30 (스토어 앱 콜드스타트)")
+        # 실측: Win11 스토어 메모장 콜드스타트가 1.5s sleep + timeout=10 을 초과 →
+        # 메모장은 떴는데 스텝은 TimeoutError. 재실행 폴백 connect 는 timeout=30 지시.
+        self.assert_true(
+            "콜드스타트" in ctx and "`timeout=30`" in ctx,
+            "[가이드 #24] 스토어 앱 콜드스타트 timeout=30 지시 필수",
+        )
+
     # ──────────────────────────────────────────
     # ADR 0003 Phase 2-c PR-6 — Hot secret reload (test_134 ~ test_135)
     # ──────────────────────────────────────────
@@ -13613,6 +13621,314 @@ if __name__ == "__main__":
             self.assert_true(hid is False, "non-Windows: ctypes 없음 graceful(False)")
         set_overlay_hwnds(None)
         self.assert_true(_hide_pick_overlay() is False, "미등록이면 스킵(False)")
+
+    def test_240_pick_element_context_window_title_mapping(self):
+        """[handoff §78] pick element_context — recorder→picker 키 매핑(창제목/브라우저).
+
+        실버그(사용자 실측, DeepSeek 전환 후 노출): capture_element_at 은 최상위 창제목을
+        ``window_title`` 로 주는데 get_element_info_text 는 ``parent_window_title`` 을 읽음 →
+        매핑 없이는 코드 템플릿 connect 라인이 ``connect(title="...")`` 플레이스홀더로 떨어지고,
+        템플릿을 충실히 복사하는 AI 가 그대로 내보내 실행이 항상 실패. v2 는 PR-19d
+        ``_recorder_meta_to_picker_dict`` 가 같은 변환을 수행 — v3 pick 도 동등해야 한다.
+        """
+        from api_server.routes.pick import _build_element_context
+
+        self.step("(1) window_title → connect 라인에 창제목 반영 + 플레이스홀더 금지")
+        # rect/hwnd 없음 = §78b GA_ROOT/WindowFromPoint 재도출 불가 상황 → window_title
+        # 폴백 경로만 검증 (rect 를 주면 실제 화면의 그 좌표 창을 잡아 테스트가 비결정적이 됨.
+        # 실 재도출은 test_241 (3) 이 Progman 으로 검증).
+        el = {
+            "control_type": "Button",
+            "name": "기본 메뉴",
+            "automation_id": "",
+            "class_name": "",
+            "rect": None,
+            "window_title": "문서1 - 워드패드",
+            "exe_name": "wordpad.exe",
+            "is_password_field": False,
+        }
+        ctx = _build_element_context(el)
+        self.assert_true(ctx is not None, "element_context 생성")
+        self.assert_true('connect(title="...")' not in ctx, "connect 플레이스홀더 없음")
+        self.assert_true("워드패드" in ctx, "connect/window 라인에 실제 창제목(프로그램명) 반영")
+
+        self.step("(2) 브라우저 exe → is_browser 매핑 (full title 유지 분기)")
+        el_browser = dict(el, exe_name="chrome.exe", window_title="ohdo docs - Chrome")
+        ctx_b = _build_element_context(el_browser)
+        self.assert_true(
+            ctx_b is not None and "ohdo docs - Chrome" in ctx_b, "브라우저 창제목 포함"
+        )
+
+        self.step("(3) 창제목 없는 요소 graceful (여전히 생성, 크래시 X)")
+        el_no_title = dict(el)
+        el_no_title.pop("window_title")
+        ctx_n = _build_element_context(el_no_title)
+        self.assert_true(ctx_n is None or isinstance(ctx_n, str), "창제목 없어도 비크래시")
+
+    def test_241_pick_element_context_desktop_root_guard(self):
+        """[handoff §78b] 창제목 = 가상 데스크톱 이름 오염 방지 + GA_ROOT 재도출.
+
+        실버그(사용자 실측 2차): core ``_resolve_top_window_title`` 이 UIA 트리를 데스크톱
+        루트까지 올라가 Win11 가상 데스크톱 이름("데스크톱 1")을 창제목으로 반환 →
+        ``connect(title="데스크톱 1")`` 은 실행 시 0 windows → TimeoutError. pick 경로는
+        Win32 ``GetAncestor(GA_ROOT)`` (top-level 에서 멈춤) 로 제목을 재도출하고, 데스크톱류
+        이름은 폴백으로도 쓰지 않아야 한다. core 0줄(api_server).
+        """
+        import sys as _sys
+
+        from api_server.routes.pick import (
+            _build_element_context,
+            _derive_root_window_title,
+            _looks_like_desktop_root,
+        )
+
+        self.step("(1) 데스크톱류 이름 판정")
+        for bad in ("데스크톱 1", "데스크톱 2", "Desktop 1", "Program Manager", "바탕 화면"):
+            self.assert_true(_looks_like_desktop_root(bad), f"데스크톱류 판정: {bad}")
+        for ok in ("제목 없음 - 메모장", "문서1 - 워드패드", "데스크톱앱 매니저", ""):
+            self.assert_true(not _looks_like_desktop_root(ok), f"일반 제목 통과: {ok or '(빈)'}")
+
+        self.step("(2) window_title 이 '데스크톱 1' 이어도 connect 에 사용 금지")
+        el = {
+            "control_type": "Button",
+            "name": "기본 메뉴",
+            "rect": None,  # 재도출 불가 상황 강제 → 폴백 필터만 검증
+            "window_title": "데스크톱 1",
+            "exe_name": "someapp.exe",
+        }
+        ctx = _build_element_context(el)
+        self.assert_true(ctx is not None, "context 생성")
+        self.assert_true('connect(title="데스크톱 1"' not in ctx, "가상 데스크톱 이름 connect 금지")
+
+        self.step("(3) GA_ROOT 실 재도출 (Windows: Progman='Program Manager' / 그 외 '')")
+        if _sys.platform == "win32":
+            import ctypes
+
+            progman = ctypes.windll.user32.FindWindowW("Progman", None)
+            if progman:
+                title = _derive_root_window_title({"hwnd": int(progman)})
+                self.assert_equal(title, "Program Manager", "GA_ROOT 제목 재도출")
+            else:
+                self.step("Progman 없음 — 실 재도출 skip")
+            self.assert_equal(_derive_root_window_title({}), "", "hwnd/rect 없으면 빈 문자열")
+        else:
+            self.assert_equal(_derive_root_window_title({"hwnd": 1}), "", "non-Windows 빈 문자열")
+
+    def test_242_step_guard_comment_only_and_chain(self):
+        """[handoff §78c] 결정적 실행성 가드 — 주석뿐 스텝 감지/템플릿 추출/이전 스텝 누락 감지.
+
+        실버그(사용자 실측, DeepSeek): "## 선택된 UI 요소" 코드 템플릿을 "이미 실행된 코드"로
+        오독해 새 스텝 블록에 주석만 생성 + 이전 스텝 코드를 응답에서 누락 → step_code="" ·
+        누적 generated_code 축소. 가드가 (1) 실행문 없는 스텝을 감지해 픽 템플릿 코드로 대체
+        (2) 이전 스텝 마커 누락을 감지해 §73 체인 rebuild 를 트리거해야 한다. core 0줄.
+        """
+        from api_server.routes.pick import _build_element_context
+        from api_server.step_guard import (
+            block_is_comment_only,
+            extract_template_code,
+            missing_prior_step_ids,
+        )
+
+        self.step("(1) 주석뿐 마커 블록 감지")
+        commented = (
+            "x = 1\n"
+            '# === Step 2: "메일" 탭 클릭 (시작) ===\n'
+            "# 이미 위 템플릿에서 정의되어 있음\n"
+            "# 추가 동작 없음\n"
+            '# === Step 2: "메일" 탭 클릭 (끝) ===\n'
+        )
+        self.assert_true(block_is_comment_only(commented, 2), "주석뿐 블록 = True")
+        executable = commented.replace("# 추가 동작 없음", "pyautogui.click(1, 2)")
+        self.assert_true(not block_is_comment_only(executable, 2), "실행문 있으면 False")
+        self.assert_true(not block_is_comment_only(commented, 9), "마커 없는 step 은 False")
+
+        self.step("(2) element_context 에서 템플릿 코드 추출 (컴파일 가능 + connect 포함)")
+        ctx = _build_element_context(
+            {
+                "control_type": "Button",
+                "name": "기본 메뉴",
+                "rect": None,
+                "window_title": "문서1 - 워드패드",
+                "exe_name": "wordpad.exe",
+            }
+        )
+        template = extract_template_code(ctx)
+        self.assert_true(bool(template), "템플릿 추출 성공")
+        self.assert_true("connect(" in template and "워드패드" in template, "connect+창제목 포함")
+        self.assert_true(extract_template_code("펜스 없음") is None, "펜스 없으면 None")
+        self.assert_true(
+            extract_template_code("```python\nif broken(:\n```") is None, "비컴파일 템플릿 거부"
+        )
+
+        self.step("(3) 이전 스텝 마커 누락 감지 (AI 가 이전 코드 미유지)")
+        self.assert_equal(
+            missing_prior_step_ids(commented, [1]), [1], "step1 마커 없음 → 누락 감지"
+        )
+        full = "# === Step 1: a (시작) ===\ny = 2\n# === Step 1: a (끝) ===\n" + commented
+        self.assert_equal(missing_prior_step_ids(full, [1]), [], "마커 있으면 누락 아님")
+
+        self.step("(4) [§78f] 부분 요약(주석 대체+들여쓰기 파편) = 비컴파일 step_code 감지")
+        from api_server.step_guard import is_broken_step_code
+
+        # 실측 파편: try:/클릭 문장이 주석으로 대체되고 본문 print 만 들여쓰기 그대로 잔존.
+        broken = (
+            "rect = _t.rectangle()\n"
+            "# pyautogui 클릭 (브라우저 탭 — GPU compositor 렌더링이므로 pyautogui 우선)\n"
+            "    print('클릭 완료')\n"
+            "        _t.click_input()\n"
+        )
+        self.assert_true(is_broken_step_code(broken), "dangling indent = broken")
+        self.assert_true(is_broken_step_code("# 주석뿐\n"), "주석뿐 = broken")
+        self.assert_true(is_broken_step_code(""), "빈 코드 = broken")
+        self.assert_true(
+            not is_broken_step_code("pyautogui.click(1, 2)\nprint('ok')\n"),
+            "정상 코드 = not broken",
+        )
+
+    def test_244_browser_connect_stabilized(self):
+        """[handoff §78g] 브라우저 요소 connect 안정화 — full-title → process 우선 + 폴백.
+
+        실버그(사용자 실측): 탭클릭 스텝의 connect 가 pick 시점 창제목("홈 - 그룹웨어 -
+        Chrome") hardcode → 그 스텝이 성공하면 활성 탭이 바뀌어 창제목도 바뀜 → 재실행 시
+        0 windows. 브라우저 요소는 pick 시점 PID 로 connect(재시작 전까지 제목 무관) +
+        프로그램명 title_re 폴백 + app.top_window() 로 교체돼야 한다. 데스크톱 요소는 불변.
+        """
+        from api_server.routes.pick import _build_element_context
+        from api_server.step_guard import extract_template_code
+
+        self.step("(1) 브라우저 TabItem → process 우선 connect + 프로그램명 폴백")
+        ctx = _build_element_context(
+            {
+                "control_type": "TabItem",
+                "name": "스카이스캐너의 도쿄 호텔 특가 상품",
+                "rect": None,
+                "window_title": "홈 - 우양HC 그룹웨어 - Chrome",
+                "exe_name": "chrome.exe",
+                "process_id": 4321,
+            }
+        )
+        self.assert_true(ctx is not None, "browser element_context 생성")
+        if "connect(" in ctx:
+            self.assert_true("connect(process=4321" in ctx, "process 우선 connect")
+            self.assert_true("title_re='.*Chrome'" in ctx, "프로그램명 title_re 폴백")
+            self.assert_true("app.top_window()" in ctx, "full-title window 매칭 제거")
+            self.assert_true('connect(title="홈 - 우양HC' not in ctx, "pick 시점 full-title 미사용")
+            self.assert_true(
+                extract_template_code(ctx) is not None, "교체 후 템플릿 컴파일 가능(가드 호환)"
+            )
+        else:
+            self.step("브라우저 라우팅이 Selenium 텍스트 — connect 교체 no-op (허용)")
+
+        self.step("(2) 데스크톱 요소는 기존 title_re 연결 유지 (불변)")
+        ctx_d = _build_element_context(
+            {
+                "control_type": "Button",
+                "name": "기본 메뉴",
+                "rect": None,
+                "window_title": "문서1 - 워드패드",
+                "exe_name": "wordpad.exe",
+                "process_id": 999,
+            }
+        )
+        self.assert_true("connect(process=" not in ctx_d, "데스크톱은 process connect 미적용")
+        self.assert_true("워드패드" in ctx_d, "데스크톱 title_re 유지")
+
+    def test_245_fx_pump_click_buffer_and_routes(self):
+        """[handoff §79] 실행 FX — 클릭 관찰 버퍼(since 폴링 계약) + /fx 라우트.
+
+        전체 실행 중 클릭 리플용 관찰 전용 훅. 여기선 훅 arming 없이(테스트 프로세스에
+        전역 LL 훅 설치 회피 — test_230 과 동일 정책) 버퍼/폴링 계약과 라우트만 검증:
+        - get_clicks(since) 는 since 이후만 반환 + 응답 seq 를 다음 since 로 쓰는 계약
+        - ring buffer 상한(_MAX_EVENTS) — 폴링 밀려도 무한 증식 금지
+        - /fx/stop idempotent, /fx/clicks 인증 + 형태
+        """
+        from api_server import fx_pump
+        from api_server.fx_pump import _record_click, get_clicks, stop_fx
+
+        self.step("(1) since 폴링 계약 — 이후 이벤트만 + seq 승계")
+        fx_pump._clicks.clear()
+        _record_click(10, 20, "left")
+        _record_click(30, 40, "right")
+        first = get_clicks(0)
+        self.assert_equal(len(first["clicks"]), 2, "전체 2건")
+        self.assert_true(first["seq"] >= 2, "seq 부여")
+        again = get_clicks(first["seq"])
+        self.assert_equal(len(again["clicks"]), 0, "since 이후 없음")
+        self.assert_equal(again["seq"], first["seq"], "이벤트 없으면 seq 유지")
+        _record_click(50, 60, "left")
+        nxt = get_clicks(first["seq"])
+        self.assert_equal(len(nxt["clicks"]), 1, "새 이벤트 1건만")
+        self.assert_equal(nxt["clicks"][0]["x"], 50, "좌표 보존")
+
+        self.step("(2) ring buffer 상한")
+        for i in range(fx_pump._MAX_EVENTS + 50):
+            _record_click(i, i, "left")
+        self.assert_true(
+            len(fx_pump._clicks) <= fx_pump._MAX_EVENTS, "버퍼 상한 유지(무한 증식 금지)"
+        )
+
+        self.step("(3) stop idempotent (미시작 상태)")
+        self.assert_true(stop_fx() is False, "미시작 stop = False (no-op)")
+
+        self.step("(4) /fx 라우트 — 인증 + 형태 (start 는 실훅이라 스킵)")
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.step("TestClient 미사용 — 라우트 검증 skip")
+            fx_pump._clicks.clear()
+            return
+        import tempfile
+
+        from api_server.server import create_app
+
+        app = create_app(token="t", data_dir=tempfile.mkdtemp(prefix="ohdo_fx_"))
+        client = TestClient(app)
+        h = {"Authorization": "Bearer t"}
+        self.assert_equal(client.get("/fx/clicks").status_code, 401, "무인증 401")
+        r = client.get("/fx/clicks?since=0", headers=h)
+        self.assert_equal(r.status_code, 200, "clicks 200")
+        body = r.json()
+        self.assert_true("seq" in body and "clicks" in body and "active" in body, "응답 형태")
+        r2 = client.post("/fx/stop", headers=h)
+        self.assert_equal(r2.status_code, 200, "stop 200 (idempotent)")
+        fx_pump._clicks.clear()
+
+    def test_243_found_index_paren_title_safe(self):
+        """[handoff §78d] restore_user_strings 8단계 — 괄호 포함 창제목 오염 방지 (core fix).
+
+        실버그(사용자 실측, Gmail): found_index 자동추가 정규식의 [^)]* 가 title 문자열 안의
+        ')' — "받은편지함 (17) - ... - Chrome" — 에서 끊겨 문자열 한복판에 ", found_index=0"
+        을 삽입 → connect(title="받은편지함 (17, found_index=0) - ...") = 존재하지 않는 창 →
+        항상 TimeoutError. 문자열 인지 패턴으로 교체: 괄호 제목 무손상 + 기존 동작(미보유 시
+        추가, 보유 시 유지, title 없으면 무시) 보존. 2026-05-05 G-시리즈부터 잠복, v2 공유.
+        """
+        from core.adapters.base_adapter import BaseAIAdapter
+
+        rs = BaseAIAdapter.restore_user_strings
+
+        self.step("(1) 괄호 포함 제목 + found_index 기보유 → 무손상")
+        line = (
+            'app = Application(backend="uia").connect('
+            'title="받은편지함 (17) - a@b.com - Gmail - Chrome", timeout=10, found_index=0)\n'
+            'win = app.window(title="받은편지함 (17) - a@b.com - Gmail - Chrome", found_index=0)\n'
+        )
+        out = rs(line, "")
+        self.assert_equal(out, line, "괄호 제목 무손상(기보유 유지)")
+        self.assert_true("(17, found_index" not in out, "문자열 내부 삽입 오염 없음")
+
+        self.step("(2) 괄호 포함 제목 + found_index 미보유 → 호출 끝에 정상 추가")
+        line2 = (
+            'app = Application(backend="uia").connect(title="받은편지함 (17) - Gmail", timeout=10)'
+        )
+        out2 = rs(line2, "")
+        self.assert_true(out2.rstrip().endswith("timeout=10, found_index=0)"), "호출 끝에 추가")
+        self.assert_true('title="받은편지함 (17) - Gmail"' in out2, "제목 원형 보존")
+
+        self.step("(3) 기존 동작 보존 — 괄호 없는 제목 추가 / title 없는 connect 무시")
+        out3 = rs('app = Application(backend="uia").connect(title="메모장", timeout=5)', "")
+        self.assert_true("found_index=0)" in out3, "괄호 없는 제목도 추가(기존 동작)")
+        plain = 'app = Application(backend="uia").connect(process=1234, timeout=5)'
+        self.assert_equal(rs(plain, ""), plain, "title 없는 connect 는 무시(기존 동작)")
 
 
 if __name__ == "__main__":

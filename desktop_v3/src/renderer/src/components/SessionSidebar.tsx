@@ -303,7 +303,7 @@ export function SessionSidebar() {
         </div>
       </ScrollArea>
       <footer className="flex items-center border-t border-black/20 px-4 py-2">
-        {/* 전역 유틸(도움말/환경/설정/언어/테마)은 ServerRail 로 이동(§59). 여기는 브리지 상태만. */}
+        {/* 전역 유틸(도움말/환경/설정/언어/테마)은 상단 TitleBar 메뉴로 이동(§59→§78). 여기는 브리지 상태만. */}
         <HealthDot />
       </footer>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}

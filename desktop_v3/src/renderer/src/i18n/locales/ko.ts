@@ -28,6 +28,12 @@ export const ko = {
     help: "시작 안내 다시 보기",
     home: "홈 (선택 해제)",
   },
+  menu: {
+    open: "메뉴",
+  },
+  runfx: {
+    hud: "ohdo 자동화 실행 중 · {{done}}/{{total}} 완료",
+  },
   chat: {
     title: "ohdo desktop v3",
     untitled: "(제목 없음)",

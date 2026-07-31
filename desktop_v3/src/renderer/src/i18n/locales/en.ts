@@ -30,6 +30,12 @@ export const en: Catalog = {
     help: "Show the getting-started guide",
     home: "Home (clear selection)",
   },
+  menu: {
+    open: "Menu",
+  },
+  runfx: {
+    hud: "ohdo automation running · {{done}}/{{total}} done",
+  },
   chat: {
     title: "ohdo desktop v3",
     untitled: "(untitled)",

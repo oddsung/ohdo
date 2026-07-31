@@ -11,6 +11,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { createServer } from "net";
 import { randomBytes } from "crypto";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
 
@@ -33,6 +34,32 @@ let mainWindow: BrowserWindow | null = null;
 // 위치한 디스플레이의 창에만 그려진다.
 let overlayWindows: { win: BrowserWindow; displayId: number }[] = [];
 let captureWindow: BrowserWindow | null = null;
+
+// ── 실행 중 시각 효과 (run FX, handoff §79) ─────────────────────────
+// 전체 실행 동안 디스플레이마다 클릭통과 오버레이 1개(§77 패턴): 테두리 글로우 +
+// 상태 HUD + 커서 링 + 클릭 리플. 클릭 좌표는 Python 관찰 훅(/fx/clicks)을 main 이
+// 폴링해 물리픽셀→해당 디스플레이 로컬 DIP 로 변환, 오버레이가 runfx:poll 로 소비.
+interface RunFxState {
+  active: boolean;
+  phase: "running" | "done";
+  success: boolean | null;
+  progress: { current: number; total: number; label: string } | null;
+  lastSeq: number;
+  clickBuf: Map<number, { x: number; y: number }[]>; // displayId → 로컬 DIP 클릭
+  pollTimer: NodeJS.Timeout | null;
+  closeTimer: NodeJS.Timeout | null;
+}
+let runOverlays: { win: BrowserWindow; displayId: number }[] = [];
+const runFx: RunFxState = {
+  active: false,
+  phase: "running",
+  success: null,
+  progress: null,
+  lastSeq: 0,
+  clickBuf: new Map(),
+  pollTimer: null,
+  closeTimer: null,
+};
 
 /** 프로젝트 루트 = desktop_v3/ 의 부모. dev 에서 .venv 와 api_server 가 여기에 있다. */
 function projectRoot(): string {
@@ -199,15 +226,93 @@ function stopPythonBridge(): void {
   }, KILL_GRACE_MS);
 }
 
+// ── 커스텀 타이틀바 + 창 상태 영속 (OpenCode/VS Code 스타일 IDE 셸) ──
+//
+// titleBarStyle:"hidden" + titleBarOverlay(WCO) 로 네이티브 캡션 버튼(최소화/최대화/닫기,
+// Win11 스냅 레이아웃 포함)은 OS 가 그리고, 나머지 타이틀바 영역은 renderer 의 TitleBar
+// 컴포넌트가 채운다(-webkit-app-region: drag). 오버레이 색은 renderer 테마 토글 시
+// window:set-titlebar-theme IPC 로 동기화한다.
+
+const TITLEBAR_HEIGHT = 36;
+// index.css 다크 테마 --d-rail/--d-text 와 일치하는 초기값 (renderer 로드 전 FOUC 방지).
+const TITLEBAR_DARK = { color: "#1e1f22", symbolColor: "#dbdee1" };
+
+interface WindowState {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  maximized?: boolean;
+}
+
+const DEFAULT_WINDOW_STATE: WindowState = { width: 1440, height: 900 };
+
+function windowStateFile(): string {
+  return join(app.getPath("userData"), "window-state.json");
+}
+
+/** 마지막 창 크기/위치/최대화 복원 (IDE 관례). 저장 위치가 현재 디스플레이 밖이면 기본값. */
+function loadWindowState(): WindowState {
+  try {
+    const raw = JSON.parse(readFileSync(windowStateFile(), "utf-8")) as WindowState;
+    if (
+      typeof raw.width !== "number" ||
+      typeof raw.height !== "number" ||
+      raw.width < 600 ||
+      raw.height < 400
+    ) {
+      return { ...DEFAULT_WINDOW_STATE };
+    }
+    // 위치가 있으면 어느 디스플레이와도 안 겹치는지 검사 (모니터 해제/재배치 대비).
+    if (typeof raw.x === "number" && typeof raw.y === "number") {
+      const visible = screen.getAllDisplays().some((d) => {
+        const a = d.workArea;
+        return (
+          raw.x! < a.x + a.width - 40 &&
+          raw.x! + raw.width > a.x + 40 &&
+          raw.y! < a.y + a.height - 40 &&
+          raw.y! >= a.y - 20
+        );
+      });
+      if (!visible) {
+        delete raw.x;
+        delete raw.y;
+      }
+    }
+    return raw;
+  } catch {
+    return { ...DEFAULT_WINDOW_STATE };
+  }
+}
+
+function saveWindowState(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const maximized = mainWindow.isMaximized();
+    // 최대화 상태면 복원(normal) bounds 를 저장해 다음 실행에서 최대화 해제 시 크기 유지.
+    const b = maximized ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+    const state: WindowState = { x: b.x, y: b.y, width: b.width, height: b.height, maximized };
+    writeFileSync(windowStateFile(), JSON.stringify(state));
+  } catch {
+    /* best-effort */
+  }
+}
+
 function createWindow(): void {
+  const state = loadWindowState();
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    x: state.x,
+    y: state.y,
+    width: state.width,
+    height: state.height,
     minWidth: 940,
     minHeight: 600,
     backgroundColor: "#313338",
     show: false,
     autoHideMenuBar: true,
+    // 네이티브 타이틀바 숨김 + WCO 캡션 버튼 (VS Code/Cursor/OpenCode 스타일).
+    titleBarStyle: "hidden",
+    titleBarOverlay: { ...TITLEBAR_DARK, height: TITLEBAR_HEIGHT },
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
@@ -216,7 +321,9 @@ function createWindow(): void {
     },
   });
 
+  if (state.maximized) mainWindow.maximize();
   mainWindow.on("ready-to-show", () => mainWindow?.show());
+  mainWindow.on("close", () => saveWindowState());
 
   // electron-vite 가 dev 서버 URL 을 ELECTRON_RENDERER_URL 로 주입한다.
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -407,6 +514,165 @@ function physicalRectToOverlayCss(
   return { x: tl.x - b.x, y: tl.y - b.y, w: br.x - tl.x, h: br.y - tl.y };
 }
 
+/** 실행 FX 오버레이 생성/해제 (handoff §79) — picker 오버레이(§77)와 동일 창 구조. */
+function createRunOverlays(): void {
+  if (runOverlays.length) return;
+  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  for (const d of screen.getAllDisplays()) {
+    const win = new BrowserWindow({
+      x: d.bounds.x,
+      y: d.bounds.y,
+      width: d.bounds.width,
+      height: d.bounds.height,
+      transparent: true,
+      frame: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      focusable: false,
+      hasShadow: false,
+      enableLargerThanScreen: true,
+      alwaysOnTop: true,
+      show: false,
+      webPreferences: {
+        preload: join(__dirname, "../preload/index.js"),
+        sandbox: false,
+      },
+    });
+    win.setIgnoreMouseEvents(true);
+    win.setAlwaysOnTop(true, "screen-saver");
+    if (devUrl) {
+      win.loadURL(`${devUrl}/run_overlay.html`);
+    } else {
+      win.loadFile(join(__dirname, "../renderer/run_overlay.html"));
+    }
+    win.once("ready-to-show", () => win.showInactive());
+    win.on("closed", () => {
+      runOverlays = runOverlays.filter((o) => o.win !== win);
+    });
+    runOverlays.push({ win, displayId: d.id });
+  }
+}
+
+function closeRunOverlays(): void {
+  for (const o of runOverlays) {
+    if (!o.win.isDestroyed()) o.win.destroy();
+  }
+  runOverlays = [];
+}
+
+async function bridgeFx(path: string): Promise<void> {
+  if (!apiInfo) return;
+  await fetch(`${apiInfo.baseUrl}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiInfo.token}` },
+  }).catch(() => {});
+}
+
+/** 브리지 /fx/clicks 폴링 — 물리픽셀 클릭을 소속 디스플레이 로컬 DIP 로 변환해 버퍼링. */
+function pollFxClicks(): void {
+  if (!apiInfo || !runFx.active) return;
+  fetch(`${apiInfo.baseUrl}/fx/clicks?since=${runFx.lastSeq}`, {
+    headers: { Authorization: `Bearer ${apiInfo.token}` },
+  })
+    .then((r) => r.json())
+    .then((data: { seq: number; clicks: { x: number; y: number }[] }) => {
+      if (!data || typeof data.seq !== "number") return;
+      runFx.lastSeq = data.seq;
+      for (const c of data.clicks || []) {
+        const dip = screen.screenToDipPoint({ x: c.x, y: c.y });
+        const disp = screen.getDisplayNearestPoint(dip);
+        const entry = runOverlays.find((o) => o.displayId === disp.id);
+        if (!entry || entry.win.isDestroyed()) continue;
+        const b = entry.win.getBounds();
+        const buf = runFx.clickBuf.get(disp.id) ?? [];
+        buf.push({ x: dip.x - b.x, y: dip.y - b.y });
+        if (buf.length > 20) buf.splice(0, buf.length - 20);
+        runFx.clickBuf.set(disp.id, buf);
+      }
+    })
+    .catch(() => {});
+}
+
+function startRunFx(): void {
+  if (runFx.closeTimer) {
+    clearTimeout(runFx.closeTimer);
+    runFx.closeTimer = null;
+  }
+  runFx.active = true;
+  runFx.phase = "running";
+  runFx.success = null;
+  runFx.progress = null;
+  runFx.lastSeq = 0;
+  runFx.clickBuf.clear();
+  createRunOverlays();
+  void bridgeFx("/fx/start");
+  if (!runFx.pollTimer) runFx.pollTimer = setInterval(pollFxClicks, 120);
+}
+
+function stopRunFx(success: boolean | null): void {
+  if (!runFx.active && runOverlays.length === 0) return;
+  runFx.phase = "done";
+  runFx.success = success;
+  runFx.active = false;
+  if (runFx.pollTimer) {
+    clearInterval(runFx.pollTimer);
+    runFx.pollTimer = null;
+  }
+  void bridgeFx("/fx/stop");
+  mainWindow?.setProgressBar(-1);
+  // 종료 플래시(성공/실패 색)를 잠깐 보여준 뒤 닫는다. 즉시 재실행 시 startRunFx 가 취소.
+  runFx.closeTimer = setTimeout(() => {
+    closeRunOverlays();
+    runFx.closeTimer = null;
+  }, 900);
+}
+
+function registerRunFxIpc(): void {
+  ipcMain.handle("runfx:start", () => startRunFx());
+  ipcMain.handle("runfx:stop", (_e, r: { success?: boolean | null } | undefined) =>
+    stopRunFx(r?.success ?? null),
+  );
+  ipcMain.handle(
+    "runfx:progress",
+    (_e, p: { current: number; total: number; label: string }) => {
+      runFx.progress = p;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        // 작업표시줄 진행바 — total 미상이면 indeterminate(>1).
+        mainWindow.setProgressBar(p.total > 0 ? Math.min(1, p.current / p.total) : 2);
+      }
+    },
+  );
+  // run 오버레이 폴링 — 호출 창(=디스플레이) 기준 로컬 상태 반환 (§77 fromWebContents 패턴).
+  ipcMain.handle("runfx:poll", (event) => {
+    const sender = BrowserWindow.fromWebContents(event.sender);
+    const entry = runOverlays.find((o) => o.win === sender);
+    if (!entry || entry.win.isDestroyed()) {
+      return { active: false, phase: runFx.phase, success: runFx.success };
+    }
+    const b = entry.win.getBounds();
+    const cur = screen.getCursorScreenPoint(); // DIP
+    const curDisp = screen.getDisplayNearestPoint(cur);
+    const cursor =
+      curDisp.id === entry.displayId ? { x: cur.x - b.x, y: cur.y - b.y } : null;
+    const clicks = runFx.clickBuf.get(entry.displayId) ?? [];
+    if (clicks.length) runFx.clickBuf.set(entry.displayId, []);
+    const isPrimary = screen.getPrimaryDisplay().id === entry.displayId;
+    return {
+      active: runFx.active,
+      phase: runFx.phase,
+      success: runFx.success,
+      isPrimary,
+      cursor,
+      clicks,
+      progress: runFx.progress,
+    };
+  });
+}
+
 /** 메인 윈도우에서 호출하는 picker IPC 핸들러 등록 (1회). */
 function registerPickIpc(): void {
   ipcMain.handle("pick:start", async () => {
@@ -505,6 +771,22 @@ function registerPickIpc(): void {
   ipcMain.handle("fs:reveal", (_e, p: string) => {
     if (p) shell.showItemInFolder(p);
   });
+  // renderer 테마 토글 → WCO 캡션 버튼 영역 색 동기화 (Windows 전용 API, 타 플랫폼 no-op).
+  ipcMain.handle(
+    "window:set-titlebar-theme",
+    (_e, colors: { color?: string; symbolColor?: string }) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      try {
+        mainWindow.setTitleBarOverlay?.({
+          color: colors?.color || TITLEBAR_DARK.color,
+          symbolColor: colors?.symbolColor || TITLEBAR_DARK.symbolColor,
+          height: TITLEBAR_HEIGHT,
+        });
+      } catch {
+        /* titleBarOverlay 미지원 플랫폼 — 무시 */
+      }
+    },
+  );
   ipcMain.handle("pick:hover", async (event) => {
     if (!apiInfo) return { box: null, paused: false };
     try {
@@ -530,6 +812,7 @@ app.whenReady().then(async () => {
   // renderer 가 API 접속 정보를 요청할 때 응답 (preload → contextBridge).
   ipcMain.handle("ohdo:get-api-info", () => apiInfo);
   registerPickIpc();
+  registerRunFxIpc();
 
   try {
     apiInfo = await startPythonBridge();
@@ -549,6 +832,7 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   closePickOverlay();
+  closeRunOverlays();
   stopPythonBridge();
 });
 

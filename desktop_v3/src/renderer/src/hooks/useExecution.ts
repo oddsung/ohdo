@@ -21,10 +21,27 @@ export function useExecution(sessionId: string) {
         "log",
         i18n.t("console.runStart", { mode, step: stepId != null ? ` step ${stepId}` : "" }),
       );
+      // 실행 FX (§79) — 화면 테두리/HUD/커서 링/클릭 리플 오버레이 시작 + 진행 보고.
+      // total: 전체 실행이면 세션 step 수(캐시), 단일이면 1. 실패해도 실행엔 영향 없음.
+      const cached = qc.getQueryData<{ steps?: unknown[] }>(["session", sessionId]);
+      const fxTotal = mode === "all" ? (cached?.steps?.length ?? 0) : 1;
+      let fxDone = 0;
+      const fxProgress = () =>
+        void window.ohdo
+          .runFxProgress({
+            current: fxDone,
+            total: fxTotal,
+            label: i18n.t("runfx.hud", { done: fxDone, total: fxTotal || "?" }),
+          })
+          .catch(() => {});
+      void window.ohdo.runFxStart().catch(() => {});
+      fxProgress();
       try {
         handleRef.current = await runExecution(sessionId, mode, stepId, {
           onLog: (m) => appendLog("log", m),
-          onStepDone: (sid, r) =>
+          onStepDone: (sid, r) => {
+            fxDone += 1;
+            fxProgress();
             appendLog(
               "step_done",
               i18n.t("console.stepResult", {
@@ -32,11 +49,13 @@ export function useExecution(sessionId: string) {
                 status: r.success ? i18n.t("console.success") : i18n.t("console.fail"),
                 error: r.error ? ` — ${r.error}` : "",
               }),
-            ),
+            );
+          },
           onError: (m) => {
             appendLog("error", `⚠ ${m}`);
             toast.error(i18n.t("console.runError", { message: m }));
             setRunning(false);
+            void window.ohdo.runFxStop({ success: false }).catch(() => {});
             qc.invalidateQueries({ queryKey: ["session", sessionId] });
             // 실행된 코드가 띄운 대상 앱이 포커스를 가져갔으므로 ohdo 창을 앞으로 (§49).
             void window.ohdo.focusMainWindow().catch(() => {});
@@ -47,6 +66,7 @@ export function useExecution(sessionId: string) {
               toast.success(i18n.t("console.runComplete"));
             }
             setRunning(false);
+            void window.ohdo.runFxStop({ success: true }).catch(() => {});
             qc.invalidateQueries({ queryKey: ["session", sessionId] });
             qc.invalidateQueries({ queryKey: ["sessions"] });
             // 실행된 코드가 띄운 대상 앱이 포커스를 가져갔으므로 ohdo 창을 앞으로 (§49).
@@ -56,6 +76,7 @@ export function useExecution(sessionId: string) {
       } catch (e) {
         appendLog("error", `⚠ ${(e as Error).message}`);
         setRunning(false);
+        void window.ohdo.runFxStop({ success: false }).catch(() => {});
       }
     },
     [sessionId, appendLog, clearLogs, setRunning, qc],
@@ -65,6 +86,8 @@ export function useExecution(sessionId: string) {
     handleRef.current?.stop();
     appendLog("log", i18n.t("console.stopReq"));
     setRunning(false);
+    // 수동 중지 — 성공/실패 플래시 없이 오버레이 정리.
+    void window.ohdo.runFxStop({ success: null }).catch(() => {});
   }, [appendLog, setRunning]);
 
   return { running, run, stop };

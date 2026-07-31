@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Discord-like 3-column 셸: 서버 레일 + 세션 사이드바 + 채팅/스텝 + Monaco 코드 뷰어 + 콘솔.
-// 전역: 단축키(useShortcuts) + 요소 선택 오버레이(PickOverlay) + 토스트(Toaster).
+// IDE 셸 (§78): 상단 커스텀 타이틀바(로고+메뉴+세션탭+유틸, WCO) 아래 Discord-like
+// 컬럼 — 세션 사이드바 + 채팅/스텝 + Monaco 코드 뷰어 + 콘솔. 구 좌측 ServerRail(§59)의
+// 유틸은 타이틀바로 이전. 전역: 단축키(useShortcuts) + PickOverlay + Toaster.
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -22,8 +23,7 @@ import { PickOverlay } from "./components/PickOverlay";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingWizard, shouldShowOnboarding } from "./components/OnboardingWizard";
 import { RecordingReviewDialog } from "./components/RecordingReviewDialog";
-import { ServerRail } from "./components/ServerRail";
-import { TabBar } from "./components/TabBar";
+import { TitleBar } from "./components/TitleBar";
 import { Toaster } from "./components/Toaster";
 
 function CodePane({ sessionId }: { sessionId: string }) {
@@ -138,22 +138,26 @@ export default function App() {
   });
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
-      <ServerRail />
-      <SessionSidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TabBar />
-        {selectedSessionId ? (
-          <div className="flex min-h-0 flex-1">
-            <ChatPanel sessionId={selectedSessionId} />
-            <CodePane sessionId={selectedSessionId} />
-          </div>
-        ) : (
-          <EmptyState
-            onCreate={() => newSessionMut.mutate()}
-            creating={newSessionMut.isPending}
-          />
-        )}
+    <div className="flex h-screen w-screen flex-col overflow-hidden">
+      <TitleBar
+        onNewSession={() => newSessionMut.mutate()}
+        creating={newSessionMut.isPending}
+      />
+      <div className="flex min-h-0 flex-1">
+        <SessionSidebar />
+        <div className="flex min-w-0 flex-1 flex-col">
+          {selectedSessionId ? (
+            <div className="flex min-h-0 flex-1">
+              <ChatPanel sessionId={selectedSessionId} />
+              <CodePane sessionId={selectedSessionId} />
+            </div>
+          ) : (
+            <EmptyState
+              onCreate={() => newSessionMut.mutate()}
+              creating={newSessionMut.isPending}
+            />
+          )}
+        </div>
       </div>
       <PickOverlay />
       <CommandPalette />

@@ -44,6 +44,7 @@ from api_server.routes import (
     capture,
     environment,
     execution,
+    fx,
     generate,
     health,
     pick,
@@ -113,5 +114,6 @@ def create_app(token: str = "", data_dir: "str | Path | None" = None) -> FastAPI
     app.include_router(environment.router)
     app.include_router(capture.router)
     app.include_router(secrets.router)
+    app.include_router(fx.router)
 
     return app

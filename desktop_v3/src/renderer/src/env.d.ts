@@ -23,6 +23,12 @@ export interface OhdoBridge {
   // 프로젝트 내보내기/가져오기 (§47 #15).
   pickDirectory: () => Promise<string | null>;
   revealPath: (p: string) => Promise<void>;
+  // 커스텀 타이틀바(WCO) 캡션 버튼 색 동기화.
+  setTitleBarTheme: (colors: { color: string; symbolColor: string }) => Promise<void>;
+  // 실행 중 시각 효과 (run FX, handoff §79).
+  runFxStart: () => Promise<void>;
+  runFxProgress: (p: { current: number; total: number; label: string }) => Promise<void>;
+  runFxStop: (r?: { success?: boolean | null }) => Promise<void>;
 }
 
 declare global {

@@ -27,6 +27,15 @@ const api = {
   // 프로젝트 내보내기/가져오기 (§47 #15) — 네이티브 폴더 선택 + Explorer 열기.
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("fs:pick-directory"),
   revealPath: (p: string): Promise<void> => ipcRenderer.invoke("fs:reveal", p),
+  // 커스텀 타이틀바(WCO) 캡션 버튼 색을 renderer 테마와 동기화.
+  setTitleBarTheme: (colors: { color: string; symbolColor: string }): Promise<void> =>
+    ipcRenderer.invoke("window:set-titlebar-theme", colors),
+  // 실행 중 시각 효과 (run FX, handoff §79) — 시작/진행/종료.
+  runFxStart: (): Promise<void> => ipcRenderer.invoke("runfx:start"),
+  runFxProgress: (p: { current: number; total: number; label: string }): Promise<void> =>
+    ipcRenderer.invoke("runfx:progress", p),
+  runFxStop: (r?: { success?: boolean | null }): Promise<void> =>
+    ipcRenderer.invoke("runfx:stop", r),
 };
 
 contextBridge.exposeInMainWorld("ohdo", api);
@@ -41,6 +50,11 @@ contextBridge.exposeInMainWorld("ohdoCapture", {
   done: (rect: { x: number; y: number; w: number; h: number }) =>
     ipcRenderer.send("capture:done", rect),
   cancel: () => ipcRenderer.send("capture:cancel"),
+});
+
+// run FX 오버레이 전용 — 커서/클릭/진행 상태 폴링 (handoff §79).
+contextBridge.exposeInMainWorld("ohdoRunFx", {
+  poll: () => ipcRenderer.invoke("runfx:poll"),
 });
 
 export type OhdoApi = typeof api;
