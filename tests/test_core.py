@@ -13893,6 +13893,45 @@ if __name__ == "__main__":
         self.assert_equal(r2.status_code, 200, "stop 200 (idempotent)")
         fx_pump._clicks.clear()
 
+    def test_246_ime_shim_restores_user_layout(self):
+        """[handoff §80] IME shim — 영문 강제 후 사용자 레이아웃/한영키 환경 자동 복원.
+
+        실버그(사용자 실측): hotkey 래퍼의 force_english_ime 가 LoadKeyboardLayout(US)+
+        WM_INPUTLANGCHANGEREQUEST 로 입력 언어를 통째로 바꾸고 **복원하지 않아**, 자동화
+        후 한/영 키가 죽고(US 레이아웃에선 무동작) Win+Space 로만 복귀 가능 + US 레이아웃이
+        입력 언어 목록에 영구 추가되던 문제. §80: 원래 HKL/IME 모드 저장 → 디바운스(2.5s)
+        자동 복원 + 신규 로드 레이아웃 언로드 + 기존 영문 레이아웃 재사용. 레이아웃 전환의
+        실동작은 실측 프로브(ime_restore_probe)로 검증 — 여기선 shim 계약을 가드한다.
+        """
+        from core.workflow_engine import _IME_COMPAT_SHIM
+
+        self.step("(1) 복원 인프라 존재 — 저장/복원/디바운스/재사용/언로드")
+        for marker in (
+            "restore_user_ime",
+            "_ohdo_schedule_ime_restore",
+            "GetKeyboardLayoutList",  # 기존 영문 레이아웃 재사용 (신규 로드 회피)
+            "UnloadKeyboardLayout",  # 신규 로드분 원복 (입력 언어 목록 오염 방지)
+            "ImmGetConversionStatus",  # 원래 IME 모드 저장
+        ):
+            self.assert_true(marker in _IME_COMPAT_SHIM, f"shim 에 {marker} 필수")
+
+        self.step("(2) write/typewrite 래핑 — ASCII 입력의 영문 보장(직전 hotkey 우연 의존 제거)")
+        self.assert_true(
+            "_ohdo_write" in _IME_COMPAT_SHIM and "typewrite" in _IME_COMPAT_SHIM,
+            "write/typewrite 래퍼 필수",
+        )
+
+        self.step("(3) shim 단독 exec + 복원 no-op 안전 + 상태 정리")
+        ns: dict = {}
+        exec(_IME_COMPAT_SHIM, ns)  # noqa: S102 — 주입 코드 자체 실행 가능성 검증
+        for fn in ("force_english_ime", "restore_user_ime", "save_as_to_path"):
+            self.assert_true(callable(ns.get(fn)), f"{fn} 정의")
+        ns["restore_user_ime"]()  # 빈 상태 no-op
+        # 죽은 hwnd(0) 가 저장돼 있어도 복원이 상태를 비우고 크래시하지 않아야 한다.
+        ns["_ohdo_ime_state"]["saved"][0] = (0x04120412, None)
+        ns["restore_user_ime"]()
+        self.assert_equal(ns["_ohdo_ime_state"]["saved"], {}, "복원 후 저장 상태 클리어")
+
     def test_243_found_index_paren_title_safe(self):
         """[handoff §78d] restore_user_strings 8단계 — 괄호 포함 창제목 오염 방지 (core fix).
 

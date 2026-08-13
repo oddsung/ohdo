@@ -917,14 +917,36 @@ _ESSENTIAL_LIBRARY_IMPORTS = (
 )
 
 
-# IME 호환 shim (devloop 실측, 2026-06-05): 한국어 등 IME 환경에서 Ctrl+Shift 는 IME
-# 언어전환 단축키라 `pyautogui.hotkey('ctrl','shift','s')` (다른 이름으로 저장) 등 modifier
-# 조합이 IME 에 흡수되어 앱에 닿지 않는다(스크린샷으로 확인 — 영문 강제 시 정상 동작).
-# 라이브러리 블럭에 자동 주입: force_english_ime() 헬퍼 + hotkey 래핑(modifier 조합 직전
-# foreground 를 영문 입력으로 강제). 비-IME(영문) 환경에선 무해(no-op 수준).
+# IME 호환 shim (devloop 실측, 2026-06-05 / 사용자 실측 §80, 2026-08-13): 한국어 등 IME
+# 환경에서 Ctrl+Shift 는 IME 언어전환 단축키라 `pyautogui.hotkey('ctrl','shift','s')`
+# (다른 이름으로 저장) 등 modifier 조합이 IME 에 흡수되어 앱에 닿지 않는다(스크린샷으로
+# 확인 — 영문 강제 시 정상 동작). 라이브러리 블럭에 자동 주입:
+# - force_english_ime(): 대상 창을 영문 입력으로 강제하되 **원래 레이아웃/IME 모드를 저장**
+# - restore_user_ime(): 저장된 상태 복원(+우리가 새로 로드한 US 레이아웃은 언로드)
+# - hotkey/write 래핑: 자동화 입력 직전 영문 강제 + **디바운스 자동 복원**(마지막 강제 후
+#   ~2.5s) — 이전 버전은 복원이 없어 실행 후 사용자의 한/영 키가 죽었다(레이아웃이 US 로
+#   남아 한/영 키 무반응, Win+Space 로만 복귀 가능 — §80 사용자 실측). 비-IME 환경 무해.
 _IME_COMPAT_SHIM = '''
+_ohdo_ime_state = {"saved": {}, "loaded_hkl": None, "timer": None}
+
+def _ohdo_english_hkl():
+    """활성화할 영문 HKL 결정 — 이미 시스템에 있는 영문 레이아웃을 재사용하고,
+    없을 때만 US 레이아웃을 새로 로드(이 경우 복원 시 언로드 대상으로 기록)."""
+    import ctypes
+    u = ctypes.windll.user32
+    n = u.GetKeyboardLayoutList(0, None)
+    if n > 0:
+        buf = (ctypes.c_void_p * n)()
+        u.GetKeyboardLayoutList(n, buf)
+        for h in buf:
+            if h and (int(h) & 0xFFFF) == 0x0409:  # LOWORD = 언어 (en-US)
+                return int(h), False
+    hkl = u.LoadKeyboardLayoutW("00000409", 0x00000001)  # US, KLF_ACTIVATE
+    return int(hkl), True
+
 def force_english_ime(hwnd=None):
-    """foreground(또는 지정 hwnd) 창을 영문(US) 레이아웃 + IME 영숫자 모드로 강제.
+    """foreground(또는 지정 hwnd) 창을 영문 입력으로 강제 — 원래 상태는 저장해 두고
+    restore_user_ime()(자동화 입력 종료 후 자동 호출)가 복원한다.
     IME 환경에서 Ctrl+Shift 등 가속기가 언어전환에 흡수되는 문제 회피."""
     try:
         import ctypes
@@ -932,17 +954,85 @@ def force_english_ime(hwnd=None):
         u = ctypes.windll.user32
         if not hwnd:
             hwnd = u.GetForegroundWindow()
+        hwnd = int(hwnd or 0)
+        if not hwnd:
+            return
+        # 원래 IME 변환 모드 저장 + 영숫자 모드 강제 (한/영 키와 동일 차원의 토글).
+        conv = None
         try:
             imm = ctypes.windll.imm32
             himc = imm.ImmGetContext(hwnd)
             if himc:
+                c = ctypes.c_uint(0); s = ctypes.c_uint(0)
+                if imm.ImmGetConversionStatus(himc, ctypes.byref(c), ctypes.byref(s)):
+                    conv = (c.value, s.value)
                 imm.ImmSetConversionStatus(himc, 0, 0)  # IME_CMODE_ALPHANUMERIC
                 imm.ImmReleaseContext(hwnd, himc)
         except Exception:
             pass
-        hkl = u.LoadKeyboardLayoutW("00000409", 0x00000001)  # US, KLF_ACTIVATE
-        u.PostMessageW(hwnd, 0x0050, 0, hkl)  # WM_INPUTLANGCHANGEREQUEST
-        _t.sleep(0.3)  # 언어전환이 적용되도록 대기(미적용 시 단축키가 IME 에 흡수되는 race)
+        tid = u.GetWindowThreadProcessId(hwnd, None)
+        cur = int(u.GetKeyboardLayout(tid))
+        if (cur & 0xFFFF) != 0x0409:  # 이미 영문이면 레이아웃 전환 불필요
+            en, loaded = _ohdo_english_hkl()
+            if loaded and _ohdo_ime_state["loaded_hkl"] is None:
+                _ohdo_ime_state["loaded_hkl"] = en
+            # 창별 **최초** 상태만 저장 (반복 강제가 원래 상태를 덮어쓰지 않게).
+            if hwnd not in _ohdo_ime_state["saved"]:
+                _ohdo_ime_state["saved"][hwnd] = (cur, conv)
+            u.PostMessageW(hwnd, 0x0050, 0, en)  # WM_INPUTLANGCHANGEREQUEST
+            _t.sleep(0.3)  # 언어전환 적용 대기(미적용 시 단축키가 IME 에 흡수되는 race)
+        _ohdo_schedule_ime_restore()
+    except Exception:
+        pass
+
+def restore_user_ime():
+    """force_english_ime 가 저장해 둔 창들의 레이아웃/IME 모드를 복원하고, 우리가 새로
+    로드한 US 레이아웃은 언로드 — 사용자의 한/영 키 전환 환경을 원상 복구(§80)."""
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        t = _ohdo_ime_state["timer"]
+        if t is not None:
+            _ohdo_ime_state["timer"] = None
+            try: t.cancel()
+            except Exception: pass
+        saved = _ohdo_ime_state["saved"]
+        _ohdo_ime_state["saved"] = {}
+        for hwnd, (hkl, conv) in saved.items():
+            if not u.IsWindow(hwnd):
+                continue
+            u.PostMessageW(hwnd, 0x0050, 0, hkl)  # 원래 레이아웃으로
+            if conv is not None:
+                try:
+                    imm = ctypes.windll.imm32
+                    himc = imm.ImmGetContext(hwnd)
+                    if himc:
+                        imm.ImmSetConversionStatus(himc, conv[0], conv[1])
+                        imm.ImmReleaseContext(hwnd, himc)
+                except Exception:
+                    pass
+        loaded = _ohdo_ime_state["loaded_hkl"]
+        if loaded:
+            _ohdo_ime_state["loaded_hkl"] = None
+            try:
+                u.UnloadKeyboardLayout(ctypes.c_void_p(loaded))  # 입력 언어 목록 원복
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+def _ohdo_schedule_ime_restore(delay=2.5):
+    """마지막 영문 강제 후 delay 초 뒤 자동 복원 (자동화 입력 burst 동안은 디바운스)."""
+    try:
+        import threading
+        t = _ohdo_ime_state["timer"]
+        if t is not None:
+            try: t.cancel()
+            except Exception: pass
+        nt = threading.Timer(delay, restore_user_ime)
+        nt.daemon = True
+        _ohdo_ime_state["timer"] = nt
+        nt.start()
     except Exception:
         pass
 
@@ -995,6 +1085,18 @@ try:
                 force_english_ime()
             return _ohdo_orig_hotkey(*a, **k)
         _ohdo_pg.hotkey = _ohdo_hotkey
+        # write/typewrite 도 래핑 — 한글 IME 상태로 ASCII 를 치면 한글이 되는 문제.
+        # (이전엔 직전 hotkey 의 영문 강제에 우연히 의존 — §80 복원 도입으로 명시 보장.)
+        _ohdo_orig_write = _ohdo_pg.write
+        def _ohdo_write(message, *a, **k):
+            try:
+                if message and any(ord(ch) < 128 for ch in str(message)):
+                    force_english_ime()
+            except Exception:
+                pass
+            return _ohdo_orig_write(message, *a, **k)
+        _ohdo_pg.write = _ohdo_write
+        _ohdo_pg.typewrite = _ohdo_write
         _ohdo_pg._ohdo_ime_wrapped = True
 except Exception:
     pass
