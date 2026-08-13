@@ -13802,7 +13802,7 @@ if __name__ == "__main__":
                 "control_type": "TabItem",
                 "name": "스카이스캐너의 도쿄 호텔 특가 상품",
                 "rect": None,
-                "window_title": "홈 - 우양HC 그룹웨어 - Chrome",
+                "window_title": "홈 - 사내 그룹웨어 - Chrome",
                 "exe_name": "chrome.exe",
                 "process_id": 4321,
             }
@@ -13812,7 +13812,7 @@ if __name__ == "__main__":
             self.assert_true("connect(process=4321" in ctx, "process 우선 connect")
             self.assert_true("title_re='.*Chrome'" in ctx, "프로그램명 title_re 폴백")
             self.assert_true("app.top_window()" in ctx, "full-title window 매칭 제거")
-            self.assert_true('connect(title="홈 - 우양HC' not in ctx, "pick 시점 full-title 미사용")
+            self.assert_true('connect(title="홈 - 사내' not in ctx, "pick 시점 full-title 미사용")
             self.assert_true(
                 extract_template_code(ctx) is not None, "교체 후 템플릿 컴파일 가능(가드 호환)"
             )
@@ -13968,6 +13968,180 @@ if __name__ == "__main__":
         self.assert_true("found_index=0)" in out3, "괄호 없는 제목도 추가(기존 동작)")
         plain = 'app = Application(backend="uia").connect(process=1234, timeout=5)'
         self.assert_equal(rs(plain, ""), plain, "title 없는 connect 는 무시(기존 동작)")
+
+    def test_247_api_server_config_dir_persistence(self):
+        """[handoff §81] --config-dir — settings.json 사용자 디렉터리 영속 + 번들 키 유출 차단.
+
+        배포 재결정(§81)의 선행 과제(§64 잔여) 2건 가드: ① packaged 앱에서 설정 변경이
+        번들 내부 config/ 에 쓰여 업데이트마다 초기화 → --config-dir(userData) 로 영속.
+        ② spec 이 config/ 를 통째 동봉해 빌드 머신의 settings.json(사용자 API 키,
+        gitignore 대상)이 설치본으로 유출 → 개발자 유지 파일만 명시 동봉.
+        core 0줄 — EnvironmentScanner(config_dir=) 는 기존 공개 파라미터.
+        """
+        import json as _json
+        import tempfile
+        from pathlib import Path
+
+        from api_server import deps
+        from api_server.server import create_app
+
+        self.step("(1) seed_config_dir — first-run 복사 + 기존 파일 절대 미덮음 (밀폐)")
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "srcconf"
+            src.mkdir()
+            (src / "settings.json").write_text('{"seed": 1}', encoding="utf-8")
+            dest = Path(td) / "destconf"
+            deps.seed_config_dir(dest, src)
+            self.assert_equal(
+                _json.loads((dest / "settings.json").read_text(encoding="utf-8")),
+                {"seed": 1},
+                "first-run 시 source settings.json 복사",
+            )
+            (dest / "settings.json").write_text('{"seed": 2}', encoding="utf-8")
+            deps.seed_config_dir(dest, src)
+            self.assert_equal(
+                _json.loads((dest / "settings.json").read_text(encoding="utf-8")),
+                {"seed": 2},
+                "기존 settings.json 은 재실행에도 덮지 않음",
+            )
+            empty_src = Path(td) / "emptyconf"
+            empty_src.mkdir()
+            fresh = deps.seed_config_dir(Path(td) / "freshconf", empty_src)
+            self.assert_true(
+                fresh.is_dir() and not (fresh / "settings.json").exists(),
+                "source 에 없으면 빈 상태로 시작(디렉터리만 생성)",
+            )
+
+            self.step("(2) create_app(config_dir=...) — state 배선 + settings_path 라우팅")
+            user_conf = Path(td) / "userconf"
+            app = create_app(token="", data_dir=str(PROJECT_ROOT / "data"), config_dir=user_conf)
+            self.assert_equal(Path(app.state.config_dir), user_conf, "app.state.config_dir 설정")
+            self.assert_true(user_conf.is_dir(), "first-run 디렉터리 생성")
+            self.assert_equal(
+                deps.settings_path(app),
+                user_conf / "settings.json",
+                "settings_path 가 config_dir 를 참조",
+            )
+
+            self.step("(3) PUT /settings → 사용자 디렉터리 기록, 프로젝트 config/ 불변")
+            project_settings = deps.CONFIG_DIR / "settings.json"
+            before = project_settings.read_bytes() if project_settings.exists() else None
+            try:
+                from fastapi.testclient import TestClient
+            except Exception:
+                TestClient = None  # noqa: N806
+            if TestClient is not None:
+                client = TestClient(app)
+                res = client.put(
+                    "/settings", json={"settings": {"ui": {"marker_247": True}}}
+                )  # ai 섹션 없음 → reload_ai 미트리거 (파일 I/O 만 검증)
+                self.assert_equal(res.status_code, 200, "PUT /settings 200")
+                saved = _json.loads((user_conf / "settings.json").read_text(encoding="utf-8"))
+                self.assert_true(
+                    saved.get("ui", {}).get("marker_247") is True,
+                    "설정이 --config-dir 쪽 settings.json 에 기록",
+                )
+                after = project_settings.read_bytes() if project_settings.exists() else None
+                self.assert_equal(before, after, "프로젝트/번들 config/settings.json 불변")
+                body = client.get("/settings").json()
+                self.assert_true(
+                    body["settings"].get("ui", {}).get("marker_247") is True,
+                    "GET /settings 가 config_dir 값을 defaults 위에 병합",
+                )
+
+        self.step("(4) 기본값 하위호환 — config_dir 미지정 시 기존 CONFIG_DIR")
+        app_default = create_app(token="", data_dir=str(PROJECT_ROOT / "data"))
+        self.assert_equal(
+            Path(app_default.state.config_dir), deps.CONFIG_DIR, "미지정 시 CONFIG_DIR"
+        )
+        self.assert_equal(
+            deps.settings_path(app_default),
+            deps.CONFIG_DIR / "settings.json",
+            "기존 경로 그대로 (dev/v2 공유 유지)",
+        )
+
+        self.step("(5) spec 키 유출 차단 — config 통째 동봉 금지 + 명시 파일만")
+        spec_text = (PROJECT_ROOT / "desktop_v3" / "build" / "ohdo-bridge.spec").read_text(
+            encoding="utf-8"
+        )
+        self.assert_true(
+            '(os.path.join(PROJECT_ROOT, "config"), "config")' not in spec_text,
+            "spec 이 config/ 를 통째 동봉하면 settings.json(API 키)이 설치본 유출",
+        )
+        self.assert_true("prompts_archive" not in spec_text, "prompts_archive 미동봉")
+        self.assert_true(
+            '"default_settings.json"' in spec_text and '"prompts.json"' in spec_text,
+            "런타임 필수 config 파일은 명시 동봉",
+        )
+
+        self.step("(6) 배선 sentinel — __main__ --config-dir + Electron packaged 전달")
+        main_src = (PROJECT_ROOT / "api_server" / "__main__.py").read_text(encoding="utf-8")
+        self.assert_true("--config-dir" in main_src, "__main__ 에 --config-dir 인자")
+        self.assert_true("config_dir=args.config_dir" in main_src, "create_app 에 config_dir 전달")
+        ts_src = (PROJECT_ROOT / "desktop_v3" / "src" / "main" / "index.ts").read_text(
+            encoding="utf-8"
+        )
+        self.assert_true('"--config-dir"' in ts_src, "Electron packaged spawn 이 --config-dir 전달")
+
+    def test_248_desktop_v3_auto_update_wiring(self):
+        """[handoff §82] electron-updater 자동 업데이트 배선 sentinel (배포 재결정 §81 스코프).
+
+        v1.0 배포 스코프 = NSIS + electron-updater(GitHub Releases). 프론트 로직은 tsc/build
+        가 지키므로 여기선 배선의 존재만 텍스트 sentinel 로 가드 — 실수로 publish 설정/이벤트
+        체인/알림 UI 가 빠진 채 릴리스되는 회귀 방지. desktop_v3 전용(core 0줄).
+        """
+        import json as _json
+
+        v3 = PROJECT_ROOT / "desktop_v3"
+
+        self.step("(1) package.json — 의존성 + GitHub publish + 스크립트")
+        pkg = _json.loads((v3 / "package.json").read_text(encoding="utf-8"))
+        self.assert_true(
+            "electron-updater" in pkg.get("dependencies", {}), "electron-updater 의존성"
+        )
+        publish = pkg.get("build", {}).get("publish") or []
+        gh = next((p for p in publish if p.get("provider") == "github"), None)
+        self.assert_true(gh is not None, "build.publish 에 github provider 필수")
+        self.assert_equal(gh.get("owner"), "oddsung", "publish owner")
+        self.assert_equal(gh.get("repo"), "ohdo", "publish repo")
+        self.assert_true(
+            "--publish never" in pkg["scripts"]["dist"],
+            "dist 는 publish 금지(로컬 빌드가 릴리스 업로드하지 않게)",
+        )
+        self.assert_true("dist:publish" in pkg["scripts"], "릴리스 업로드용 dist:publish 스크립트")
+
+        self.step("(2) main — autoUpdater 이벤트/설치 체인 + dev 가드")
+        main_ts = (v3 / "src" / "main" / "index.ts").read_text(encoding="utf-8")
+        for marker in (
+            "setupAutoUpdater",
+            "app.isPackaged",  # dev 에선 app-update.yml 이 없어 skip
+            "update-downloaded",
+            "quitAndInstall",
+            '"updater:install"',
+            "updater:event",
+        ):
+            self.assert_true(marker in main_ts, f"main index.ts 에 {marker} 필수")
+
+        self.step("(3) preload/renderer — 구독 API + 알림 배너 + i18n 키")
+        preload_ts = (v3 / "src" / "preload" / "index.ts").read_text(encoding="utf-8")
+        self.assert_true(
+            "onUpdaterEvent" in preload_ts and "installUpdate" in preload_ts,
+            "preload 가 updater API 노출",
+        )
+        app_tsx = (v3 / "src" / "renderer" / "src" / "App.tsx").read_text(encoding="utf-8")
+        self.assert_true("<UpdateNotice />" in app_tsx, "App 이 UpdateNotice 렌더")
+        notice = (v3 / "src" / "renderer" / "src" / "components" / "UpdateNotice.tsx").read_text(
+            encoding="utf-8"
+        )
+        self.assert_true(
+            "downloaded" in notice and "installUpdate" in notice, "배너가 downloaded→재시작 체인"
+        )
+        ko_ts = (v3 / "src" / "renderer" / "src" / "i18n" / "locales" / "ko.ts").read_text(
+            encoding="utf-8"
+        )
+        self.assert_true(
+            "updater:" in ko_ts, "ko 카탈로그 updater 섹션 (en 은 tsc Catalog 타입이 강제)"
+        )
 
 
 if __name__ == "__main__":

@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from api_server.deps import (
-    CONFIG_DIR,
     CreateSessionRequest,
     DuplicateSessionRequest,
     ExportRequest,
@@ -19,6 +18,7 @@ from api_server.deps import (
     load_json,
     require_token,
     session_captures_dir,
+    settings_path,
     to_dict,
 )
 
@@ -213,7 +213,7 @@ def export_session(
         target = parent / f"{base}_{n}"
         n += 1
 
-    settings = load_json(CONFIG_DIR / "settings.json")
+    settings = load_json(settings_path(request.app))
     try:
         path = service.export_workflow(session_id, target, settings=settings)
     except NotImplementedError:

@@ -15,17 +15,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api_server.deps import (
-    CONFIG_DIR,
     SwitchEngineRequest,
     get_app_service,
     load_json,
     require_token,
     save_json,
+    settings_path,
 )
 
 router = APIRouter()
-
-_SETTINGS_PATH = CONFIG_DIR / "settings.json"
 
 
 @router.get("/ai/engines")
@@ -67,11 +65,12 @@ def switch_engine(
     # settings.json 의 ai.selected 갱신 — 설정 다이얼로그/재시작과 일관 (best-effort).
     persist_error = None
     try:
-        current = load_json(_SETTINGS_PATH)
+        path = settings_path(request.app)
+        current = load_json(path)
         ai_section = dict(current.get("ai") or {})
         ai_section["selected"] = name
         current["ai"] = ai_section
-        save_json(_SETTINGS_PATH, current)
+        save_json(path, current)
     except Exception as exc:  # noqa: BLE001 — 런타임 전환은 됐으니 경고만
         persist_error = str(exc)
 

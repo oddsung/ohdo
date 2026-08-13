@@ -36,6 +36,18 @@ const api = {
     ipcRenderer.invoke("runfx:progress", p),
   runFxStop: (r?: { success?: boolean | null }): Promise<void> =>
     ipcRenderer.invoke("runfx:stop", r),
+  // 자동 업데이트 (handoff §82) — main 의 electron-updater 이벤트 구독 + 재시작 설치.
+  onUpdaterEvent: (
+    cb: (e: { status: string; info?: { version?: string; message?: string } }) => void,
+  ): (() => void) => {
+    const listener = (
+      _event: unknown,
+      payload: { status: string; info?: { version?: string; message?: string } },
+    ) => cb(payload);
+    ipcRenderer.on("updater:event", listener);
+    return () => ipcRenderer.removeListener("updater:event", listener);
+  },
+  installUpdate: (): Promise<void> => ipcRenderer.invoke("updater:install"),
 };
 
 contextBridge.exposeInMainWorld("ohdo", api);

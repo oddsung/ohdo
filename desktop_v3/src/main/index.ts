@@ -14,6 +14,7 @@ import { randomBytes } from "crypto";
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import { autoUpdater } from "electron-updater";
 
 const READY_MARKER = "OHDO_API_READY";
 const PREFERRED_PORT = 8765;
@@ -72,10 +73,12 @@ function projectRoot(): string {
  *
  * - **packaged** (app.isPackaged): electron-builder extraResources 로 동봉된 **frozen 브리지**
  *   (`resources/pybridge/ohdo-bridge[.exe]`, PyInstaller onedir) 를 직접 실행. Python 런타임
- *   미설치 PC 에서도 동작. 인자는 `--port <p>` + `--data-dir <userData>/data`.
- *   data-dir 를 명시하는 이유: frozen 브리지의 기본 data 경로는 번들 내부
- *   (`resources/pybridge/_internal/data`) 로 잡혀, 앱 업데이트/재설치 시 세션이 날아가거나
- *   perMachine 설치 시 쓰기 불가가 된다. userData(`%APPDATA%/ohdo`)로 빼서 영속·쓰기 보장.
+ *   미설치 PC 에서도 동작. 인자는 `--port <p>` + `--data-dir <userData>/data`
+ *   + `--config-dir <userData>/config`.
+ *   data/config-dir 를 명시하는 이유: frozen 브리지의 기본 경로는 번들 내부
+ *   (`resources/pybridge/_internal/…`) 로 잡혀, 앱 업데이트/재설치 시 세션·설정이 날아가거나
+ *   perMachine 설치 시 쓰기 불가가 된다. userData(`%APPDATA%/ohdo`)로 빼서 영속·쓰기 보장
+ *   (config 는 handoff §81 — settings.json 만 사용자 쪽, prompts/defaults 는 번들에서 읽음).
  * - **dev**: `..\.venv\Scripts\python.exe -m api_server` (data-dir 미지정 → 프로젝트 루트 data/,
  *   PySide6 앱과 공유).
  * - `OHDO_PYTHON` env 가 있으면 dev/packaged 무관하게 그 인터프리터로 `-m api_server` (디버그용).
@@ -95,11 +98,12 @@ function bridgeCommand(port: number): { cmd: string; args: string[]; cwd: string
     // extraResources: { from: "build/pybridge", to: "pybridge" } → process.resourcesPath/pybridge/
     const exe = process.platform === "win32" ? "ohdo-bridge.exe" : "ohdo-bridge";
     const frozen = join(process.resourcesPath, "pybridge", exe);
-    // 세션 저장소는 번들 밖 userData 로 (업데이트/재설치에도 보존 + 항상 쓰기 가능).
+    // 세션(data)·설정(config)은 번들 밖 userData 로 (업데이트/재설치에도 보존 + 항상 쓰기 가능).
     const dataDir = join(app.getPath("userData"), "data");
+    const configDir = join(app.getPath("userData"), "config");
     return {
       cmd: frozen,
-      args: ["--port", String(port), "--data-dir", dataDir],
+      args: ["--port", String(port), "--data-dir", dataDir, "--config-dir", configDir],
       cwd: join(process.resourcesPath, "pybridge"),
     };
   }
@@ -808,11 +812,44 @@ function registerPickIpc(): void {
   });
 }
 
+// ── 자동 업데이트 (handoff §82 — 배포 재결정 §81: NSIS + electron-updater) ──
+// GitHub Releases 의 latest.yml 을 확인해 자동 다운로드. 다운로드 완료 시 renderer 에
+// updater:event 로 알리고, 사용자가 배너에서 "재시작"을 누르면 quitAndInstall.
+// 배너를 무시해도 autoInstallOnAppQuit(기본 true)로 앱 종료 시 설치된다.
+// v1.0 은 미서명(§81 결정) — electron-updater 는 실행 중 앱이 미서명이면 서명 검증을
+// 건너뛰므로 동작에 문제없다. repo 가 private 인 동안 확인은 404 로 조용히 실패(로그만).
+function setupAutoUpdater(): void {
+  if (!app.isPackaged) return; // dev 는 app-update.yml 이 없어 에러만 난다.
+  const send = (status: string, info?: { version?: string; message?: string }) => {
+    try {
+      mainWindow?.webContents.send("updater:event", { status, info });
+    } catch {
+      /* 창 파괴 등 — best-effort */
+    }
+  };
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("update-available", (i) => send("available", { version: i.version }));
+  autoUpdater.on("update-downloaded", (i) => send("downloaded", { version: i.version }));
+  autoUpdater.on("error", (e) => {
+    // repo 미공개/오프라인 등 — 사용자에게 소음 내지 않는다 (renderer 도 error 는 무시).
+    console.warn("[updater]", e instanceof Error ? e.message : String(e));
+  });
+  ipcMain.handle("updater:install", () => {
+    // before-quit 핸들러(브리지 SIGTERM 등)가 그대로 타도록 quitAndInstall 사용.
+    autoUpdater.quitAndInstall();
+  });
+  const check = () => autoUpdater.checkForUpdates().catch(() => null);
+  setTimeout(check, 10_000); // 부팅 직후는 브리지 spawn 과 겹치지 않게 10s 지연
+  setInterval(check, 4 * 60 * 60 * 1000); // 장기 실행 세션 대비 4시간 간격 재확인
+}
+
 app.whenReady().then(async () => {
   // renderer 가 API 접속 정보를 요청할 때 응답 (preload → contextBridge).
   ipcMain.handle("ohdo:get-api-info", () => apiInfo);
   registerPickIpc();
   registerRunFxIpc();
+  setupAutoUpdater();
 
   try {
     apiInfo = await startPythonBridge();

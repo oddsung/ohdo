@@ -17,9 +17,40 @@ from fastapi import Header, HTTPException, Request
 from pydantic import BaseModel
 
 # 프로젝트 루트 = api_server/ 의 부모. data/ + config/ 는 PySide6 앱과 공유한다.
+# frozen(PyInstaller) 에선 CONFIG_DIR = 번들 내부(_internal/config) 읽기 전용 취급 —
+# 쓰기가 필요한 settings.json 은 --config-dir(사용자 디렉터리)로 분리한다 (handoff §81).
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = _PROJECT_ROOT / "data"
 CONFIG_DIR = _PROJECT_ROOT / "config"
+
+
+def settings_path(app) -> Path:
+    """settings.json 경로 — ``--config-dir`` 지정 시 사용자 config 디렉터리 (handoff §81).
+
+    packaged 앱은 번들 내부 config 가 업데이트마다 교체되므로, 사용자가 설정 다이얼로그로
+    바꾼 값(settings.json)은 userData 쪽에 영속한다. default_settings.json/prompts.json 은
+    개발자 유지 콘텐츠라 항상 번들(CONFIG_DIR)에서 읽는다 (구버전 사본 잔존 방지).
+    """
+    config_dir = getattr(app.state, "config_dir", None) or CONFIG_DIR
+    return Path(config_dir) / "settings.json"
+
+
+def seed_config_dir(config_dir: "str | Path", source_dir: "str | Path | None" = None) -> Path:
+    """사용자 config 디렉터리 first-run 준비 (handoff §81 — §64 잔여 후속).
+
+    디렉터리를 만들고, ``settings.json`` 이 아직 없으면 source(기본 CONFIG_DIR)에서 1회
+    복사한다(dev 에서 --config-dir 로 띄울 때 기존 설정 이관). 이미 있으면 절대 덮지
+    않는다. source 에 없으면 빈 상태로 시작 — GET /settings 가 defaults 를 병합하므로 안전.
+    """
+    target = Path(config_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    dest = target / "settings.json"
+    src = Path(source_dir) if source_dir is not None else CONFIG_DIR / "settings.json"
+    if src.is_dir():
+        src = src / "settings.json"
+    if not dest.exists() and src.exists():
+        dest.write_bytes(src.read_bytes())
+    return target
 
 
 # ── 직렬화 헬퍼 ──────────────────────────────────────
@@ -176,7 +207,8 @@ def get_app_service(app):
     if app.state.app_service is None:
         from core.app_service import AppService, PromptBuilder
 
-        settings = load_json(CONFIG_DIR / "settings.json")
+        # settings.json 은 --config-dir(사용자 영속) 우선, prompts.json 은 항상 번들 (handoff §81).
+        settings = load_json(settings_path(app))
         service = AppService.create_default(data_dir=app.state.data_dir, settings=settings)
         if settings.get("ai"):
             service.reload_ai(settings)

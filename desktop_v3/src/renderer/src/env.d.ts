@@ -29,6 +29,11 @@ export interface OhdoBridge {
   runFxStart: () => Promise<void>;
   runFxProgress: (p: { current: number; total: number; label: string }) => Promise<void>;
   runFxStop: (r?: { success?: boolean | null }) => Promise<void>;
+  // 자동 업데이트 (handoff §82) — 이벤트 구독(해제 함수 반환) + 재시작 설치.
+  onUpdaterEvent: (
+    cb: (e: { status: string; info?: { version?: string; message?: string } }) => void,
+  ) => () => void;
+  installUpdate: () => Promise<void>;
 }
 
 declare global {

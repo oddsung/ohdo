@@ -44,9 +44,13 @@ hiddenimports += collect_submodules("comtypes")
 datas = []
 datas += collect_data_files("uiautomation")
 
-# config/ (settings/prompts) + core/locale 는 런타임에 파일로 읽으므로 동봉.
+# config 는 개발자 유지 파일만 **명시적으로** 동봉한다 (handoff §81).
+# 절대 폴더째 넣지 말 것 — 빌드 머신의 config/settings.json 에는 사용자 API 키가
+# 들어 있어(gitignore 대상) 통째 동봉 시 설치본으로 유출된다. settings.json 은
+# 번들 밖 --config-dir(userData)에서 first-run 생성/영속된다.
 datas += [
-    (os.path.join(PROJECT_ROOT, "config"), "config"),
+    (os.path.join(PROJECT_ROOT, "config", "default_settings.json"), "config"),
+    (os.path.join(PROJECT_ROOT, "config", "prompts.json"), "config"),
     (os.path.join(PROJECT_ROOT, "core", "locale"), "core/locale"),
 ]
 

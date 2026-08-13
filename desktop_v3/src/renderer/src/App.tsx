@@ -25,6 +25,7 @@ import { OnboardingWizard, shouldShowOnboarding } from "./components/OnboardingW
 import { RecordingReviewDialog } from "./components/RecordingReviewDialog";
 import { TitleBar } from "./components/TitleBar";
 import { Toaster } from "./components/Toaster";
+import { UpdateNotice } from "./components/UpdateNotice";
 
 function CodePane({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
@@ -164,6 +165,7 @@ export default function App() {
       {onboardingOpen && <OnboardingWizard onClose={() => setOnboardingOpen(false)} />}
       <RecordingReviewDialog />
       <Toaster />
+      <UpdateNotice />
     </div>
   );
 }

@@ -16,7 +16,7 @@ Electron main 이 이 모듈을 subprocess 로 spawn 한다 (handoff §37 통신
 4. Electron 이 종료할 때 이 프로세스에 SIGTERM(→5s 후 SIGKILL)을 보낸다.
 
 CLI:
-    python -m api_server [--host 127.0.0.1] [--port 8765] [--data-dir DIR]
+    python -m api_server [--host 127.0.0.1] [--port 8765] [--data-dir DIR] [--config-dir DIR]
     토큰은 ``OHDO_API_TOKEN`` env 로만 전달 (argv 노출 회피).
 """
 
@@ -91,6 +91,14 @@ def main(argv: "list[str] | None" = None) -> None:
         default=None,
         help="세션 저장소 디렉터리 (기본: 프로젝트 루트 data/)",
     )
+    parser.add_argument(
+        "--config-dir",
+        default=None,
+        help=(
+            "settings.json 읽기/쓰기 디렉터리 (기본: 프로젝트/번들 config/). "
+            "packaged 앱은 userData 를 넘겨 설정 변경을 업데이트에도 영속 (handoff §81)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     # 토큰은 env 로만 받는다. 없으면 random 생성 (단독 실행/테스트 시).
@@ -103,7 +111,7 @@ def main(argv: "list[str] | None" = None) -> None:
 
     sock, port = _bind_free_socket(args.host, args.port)
 
-    app = create_app(token=token, data_dir=args.data_dir)
+    app = create_app(token=token, data_dir=args.data_dir, config_dir=args.config_dir)
     config = uvicorn.Config(app, log_level="info")
     server = uvicorn.Server(config)
 

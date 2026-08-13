@@ -14,6 +14,12 @@ export const ko = {
     online: "bridge v{{version}}",
     offline: "bridge 연결 안됨",
   },
+  updater: {
+    downloaded: "새 버전 v{{version}} 이 준비되었습니다.",
+    detail: "지금 재시작하면 업데이트가 적용됩니다. 나중에 해도 앱 종료 시 자동 설치됩니다.",
+    restart: "재시작하여 업데이트",
+    later: "나중에",
+  },
   sidebar: {
     sessions: "세션",
     newSession: "새 세션",

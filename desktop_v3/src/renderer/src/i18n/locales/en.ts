@@ -16,6 +16,13 @@ export const en: Catalog = {
     online: "bridge v{{version}}",
     offline: "bridge offline",
   },
+  updater: {
+    downloaded: "A new version v{{version}} is ready.",
+    detail:
+      "Restart now to apply the update. If you skip, it installs automatically when the app quits.",
+    restart: "Restart to update",
+    later: "Later",
+  },
   sidebar: {
     sessions: "Sessions",
     newSession: "New session",

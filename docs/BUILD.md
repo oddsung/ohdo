@@ -12,8 +12,9 @@ ohdo-0.1.0-setup.exe (NSIS)
    └─ resources/pybridge/ohdo-bridge.exe   # PyInstaller onedir 로 freeze 된 FastAPI 브리지
 ```
 
-Electron 메인이 시작 시 `ohdo-bridge.exe --port <p> --data-dir <userData>/data` 를 spawn 하고
-stdout 의 `OHDO_API_READY {json}` 한 줄을 기다려 포트/토큰을 확정한다 (`src/main/index.ts`).
+Electron 메인이 시작 시 `ohdo-bridge.exe --port <p> --data-dir <userData>/data
+--config-dir <userData>/config` 를 spawn 하고 stdout 의 `OHDO_API_READY {json}` 한 줄을
+기다려 포트/토큰을 확정한다 (`src/main/index.ts`).
 
 > **검증 상태 (2026-05-31, handoff §64)**: 이 개발 환경(Windows)에서 1~3단계를 실제로 돌려
 > ① freeze 성공 ② frozen `ohdo-bridge.exe` 단독 부팅 + `/health`·`/sessions`·`/environment`
@@ -117,20 +118,35 @@ npm run dist:dir      # → release/win-unpacked/ohdo.exe
 - [ ] 설치본 실행 → 메인 창 + 브리지 spawn 성공 (작업관리자에 `ohdo-bridge.exe`).
 - [ ] 세션 생성 → 자연어 요청 → AI 코드 생성 (CLI AI 엔진이 설치/로그인 돼 있어야 함).
 - [ ] 세션이 `%APPDATA%\ohdo\data` 에 저장되는지 (번들 내부 아님).
+- [ ] 설정 다이얼로그에서 값 변경 → `%APPDATA%\ohdo\config\settings.json` 에 기록되는지
+      (handoff §81 — 번들 내부 `_internal/config` 아님. API 키 입력 후 재설치해도 유지돼야 함).
+- [ ] 설치본의 `resources/pybridge/_internal/config/` 에 `settings.json` 이 **없는지**
+      (있다면 빌드 머신의 API 키가 동봉된 것 — spec 회귀, 배포 금지).
 - [ ] 앱 종료 시 `ohdo-bridge.exe` 도 함께 종료 (좀비 프로세스 없음).
+- [ ] (repo public + 첫 릴리스 후) 구버전 설치 → 앱 시작 ~10초 뒤 업데이트 배너 →
+      "재시작하여 업데이트" → 새 버전으로 재기동 (handoff §82 electron-updater).
 - [ ] §58~§63 기능 실측 (온보딩 / 캡처 / 시크릿 / 녹화 review 등) — `pending_gui_verification`.
 
 ---
 
 ## 5. 알려진 한계 / 후속 작업
 
-- **코드 서명 없음**: 설치/첫 실행 시 Windows SmartScreen 경고가 뜬다. 정식 배포 전 코드
-  서명 인증서 + electron-builder `win.certificateFile` 구성 필요 (후속).
-- **자동 업데이트 미구성**: `electron-updater` 미도입 (후속).
-- **설정(config) 영속성**: 세션 데이터는 `--data-dir` 로 userData 에 빼냈지만, `config/`
-  (settings/prompts) 는 여전히 번들 내부(`resources/pybridge/_internal/config`)에서 읽는다.
-  설정 다이얼로그(§47)로 바꾼 값은 번들 안에 써지므로 **앱 업데이트 시 초기화**된다. userData 로
-  config 를 복사·우선로드하는 first-run 로직이 후속으로 필요 (브리지에 `--config-dir` 추가 등).
+- **코드 서명 없음**: 설치/첫 실행 시 Windows SmartScreen 경고가 뜬다. **2026-08-13 배포
+  재결정(handoff §81): v1.0 은 의도적으로 미서명 출시** — README 에 경고 안내 문구를 넣고,
+  서명(SignPath OSS / Azure Trusted Signing / OV)은 사용자 확보 후 도입.
+- ~~자동 업데이트 미구성~~ → **도입 (handoff §82)**: `electron-updater` + GitHub Releases
+  provider (`build.publish` = github oddsung/ohdo). packaged 앱이 시작 10초 후 + 4시간 간격으로
+  `latest.yml` 을 확인해 자동 다운로드 → renderer 배너("재시작하여 업데이트") → `quitAndInstall`
+  (배너 무시 시 앱 종료 때 자동 설치). 미서명(§81)이라도 동작. dev 는 자동 skip.
+  **repo 가 private 인 동안엔 확인이 404 로 조용히 실패** — public 전환 + 첫 릴리스 후 활성화.
+  릴리스 업로드: `npm run dist:publish` (`GH_TOKEN` env 필요 — setup.exe + latest.yml + blockmap
+  을 GitHub Release 에 올림. `npm run dist` 는 `--publish never` 로 로컬 빌드만).
+- ~~설정(config) 영속성~~ → **해결 (handoff §81)**: 브리지 `--config-dir` 지원 —
+  `settings.json` 읽기/쓰기는 `%APPDATA%\ohdo\config\` (first-run 시 디렉터리 생성 + 기존
+  settings.json 1회 이관, 환경 스캔 캐시도 동일 위치). `default_settings.json`/`prompts.json`
+  은 개발자 유지 콘텐츠라 항상 번들에서 읽는다 (앱 업데이트가 새 프롬프트를 전달).
+  spec 은 config 를 통째 동봉하지 않고 위 2개 파일만 명시 동봉 — **빌드 머신의
+  `config/settings.json`(API 키 포함, gitignore 대상)이 설치본에 유출되지 않게** (test_247).
 - **freeze 크기**: pandas/opencv/PySide6 제외에도 onedir 가 수백 MB. 필요 시 spec `excludes`
   추가로 다이어트 가능 (단, hidden import 깨지지 않게 검증 필수).
 

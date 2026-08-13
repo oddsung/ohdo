@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # DEFAULT_DATA_DIR 은 create_app 에서, 스키마 3종은 하위호환 re-export 용.
 # §43 routes 분리 전에는 스키마가 server.py 에 있었어서, 외부/테스트(test_209)의
 # ``from api_server.server import GenerateRequest`` 경로를 유지하기 위해 re-export.
+from api_server import deps
 from api_server.deps import (  # noqa: F401  (CreateSessionRequest/Generate/Update = re-export)
     DEFAULT_DATA_DIR,
     CreateSessionRequest,
@@ -63,17 +64,28 @@ __all__ = [
 ]
 
 
-def create_app(token: str = "", data_dir: "str | Path | None" = None) -> FastAPI:
+def create_app(
+    token: str = "",
+    data_dir: "str | Path | None" = None,
+    config_dir: "str | Path | None" = None,
+) -> FastAPI:
     """FastAPI 앱 인스턴스를 생성한다.
 
     Args:
         token: 요청 인증 토큰. 빈 문자열이면 인증을 비활성화한다(개발/테스트용).
         data_dir: 세션 저장소 디렉터리. 기본은 프로젝트 루트의 ``data/``.
+        config_dir: settings.json 을 읽고/쓰는 디렉터리 (handoff §81). 기본은 프로젝트
+            (frozen 은 번들 내부) ``config/``. packaged 앱은 userData 쪽을 넘겨 설정
+            변경이 업데이트/재설치에도 영속되게 한다. first-run 시 디렉터리 생성 +
+            기존 settings.json 1회 이관. default_settings/prompts 는 항상 번들에서 읽음.
 
     Returns:
         구성된 ``FastAPI`` 인스턴스. ``app.state.app_service`` 로 AppService 접근.
     """
     resolved_data_dir = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
+    resolved_config_dir = (
+        deps.CONFIG_DIR if config_dir is None else deps.seed_config_dir(config_dir)
+    )
 
     app = FastAPI(
         title="ohdo desktop_v3 bridge",
@@ -95,6 +107,8 @@ def create_app(token: str = "", data_dir: "str | Path | None" = None) -> FastAPI
     # ── app.state — 라우터가 request.app.state 로 접근하는 공유 상태 ──
     app.state.api_token = token
     app.state.data_dir = resolved_data_dir
+    # settings.json 읽기/쓰기 디렉터리 (handoff §81) — deps.settings_path(app) 가 참조.
+    app.state.config_dir = resolved_config_dir
     app.state.app_service = None  # lazy — 첫 도메인 호출 시 생성 (deps.get_app_service)
     # 세션별 ExecutionKernel 캐시 — run 간 상태 연속 (ui_v2 의 self._kernel 패턴).
     app.state.kernels = {}

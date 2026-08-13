@@ -56,7 +56,9 @@ def capture_region_route(
 
     captures_dir = _captures_dir(service, body.session_id)
     if captures_dir is None:
-        raise HTTPException(status_code=501, detail="파일 기반 저장소가 아니라 캡처를 저장할 수 없습니다.")
+        raise HTTPException(
+            status_code=501, detail="파일 기반 저장소가 아니라 캡처를 저장할 수 없습니다."
+        )
 
     from api_server.capture_pump import capture_region
 

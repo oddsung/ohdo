@@ -23,11 +23,13 @@ from api_server.deps import (
     load_json,
     require_token,
     save_json,
+    settings_path,
 )
 
 router = APIRouter()
 
-_SETTINGS_PATH = CONFIG_DIR / "settings.json"
+# defaults 는 개발자 유지 콘텐츠 — 항상 번들(CONFIG_DIR)에서 읽는다 (handoff §81).
+# settings.json 은 --config-dir 지정 시 사용자 디렉터리 → settings_path(app) 경유.
 _DEFAULTS_PATH = CONFIG_DIR / "default_settings.json"
 
 
@@ -50,7 +52,7 @@ def get_settings(request: Request, _: None = Depends(require_token)) -> dict:
     UI 는 effective 를 편집하고 PUT 으로 전체를 되돌려 저장한다.
     """
     defaults = load_json(_DEFAULTS_PATH)
-    current = load_json(_SETTINGS_PATH)
+    current = load_json(settings_path(request.app))
     effective = _deep_merge(defaults, current)
     return {"settings": effective, "defaults": defaults}
 
@@ -67,7 +69,7 @@ def save_settings(
     if not isinstance(settings, dict):
         raise HTTPException(status_code=400, detail="settings 는 객체여야 합니다.")
 
-    save_json(_SETTINGS_PATH, settings)
+    save_json(settings_path(request.app), settings)
 
     # AI 재초기화 — 캐시된 AppService 의 ai_manager 를 새 설정으로 교체.
     if settings.get("ai"):
