@@ -11,7 +11,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { createServer } from "net";
 import { randomBytes } from "crypto";
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
 import { autoUpdater } from "electron-updater";
@@ -20,6 +20,42 @@ const READY_MARKER = "OHDO_API_READY";
 const PREFERRED_PORT = 8765;
 const READY_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 5_000;
+
+// ── GPU 샌드박스 자동 fallback (handoff §85) ─────────────────────────
+// 일부 환경(보안 에이전트의 경로 기반 인젝션 등)에서 **설치 경로의 앱만** GPU 샌드박스
+// 프로세스가 STATUS_BREAKPOINT 로 연속 크래시 → Chromium 이 9회 후 앱 전체를 종료해
+// "더블클릭해도 무반응"이 된다 (2026-08-13 설치본 실측 — win-unpacked/복사본은 정상,
+// 동일 바이트·ACL 재상속 경로에선 재현 안 됨 = 경로별 보안 컨텍스트가 원인).
+// 대응: 기본은 풀 샌드박스 유지, GPU 크래시가 3회 연속이면 userData 에 마커를 남기고
+// 재기동 → 이후 기동은 마커를 보고 --disable-gpu-sandbox 를 적용(자가 복구, GPU 한정).
+const GPU_FALLBACK_MARKER = join(app.getPath("userData"), "gpu-sandbox-fallback");
+if (existsSync(GPU_FALLBACK_MARKER)) {
+  app.commandLine.appendSwitch("disable-gpu-sandbox");
+}
+
+let gpuCrashCount = 0;
+app.on("child-process-gone", (_event, details) => {
+  if (details.type !== "GPU") return;
+  if (!["crashed", "abnormal-exit", "launch-failed", "integrity-failure"].includes(details.reason))
+    return;
+  gpuCrashCount += 1;
+  console.warn(`[main] GPU process gone (${details.reason}) x${gpuCrashCount}`);
+  // Chromium 은 9회에서 FATAL 종료하므로 그 전에 fallback 으로 재기동한다.
+  if (gpuCrashCount === 3 && !app.commandLine.hasSwitch("disable-gpu-sandbox")) {
+    try {
+      writeFileSync(
+        GPU_FALLBACK_MARKER,
+        "GPU sandbox crashed repeatedly on this machine; relaunching with --disable-gpu-sandbox.\n" +
+          "Delete this file to re-enable the GPU sandbox.\n",
+      );
+    } catch {
+      /* 마커 실패 시에도 재기동은 시도 (다음 기동에 또 감지) */
+    }
+    console.warn("[main] GPU sandbox unusable — relaunching with --disable-gpu-sandbox");
+    app.relaunch();
+    app.quit(); // before-quit 를 태워 Python 브리지를 정리하고 재기동
+  }
+});
 
 interface ApiInfo {
   baseUrl: string;

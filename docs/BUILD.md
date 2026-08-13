@@ -165,6 +165,18 @@ npm run dist:dir      # → release/win-unpacked/ohdo.exe
   대부분 재시도로 통과하지만(이 환경 검증 시 `--dir` 는 exit 0), NSIS 빌드가 막히면:
   **Windows 설정 → 개인 정보 및 보안 → 개발자용 → 개발자 모드 ON** (비관리자 symlink 허용)
   후 재빌드. 코드 서명을 안 하므로 darwin 도구 자체는 실제로 불필요.
+- **설치본 더블클릭 시 무반응 (즉시 종료)**: 콘솔에서 실행해 stderr 를 보면 `GPU process
+  exited unexpectedly (-2147483645)` ×9 → `GPU process isn't usable. Goodbye.` — 일부 환경
+  (보안 에이전트 등)에서 **설치 경로의 GPU 샌드박스 프로세스만** 죽는다 (2026-08-13 §85,
+  win-unpacked/복사본은 정상). 앱에 자동 fallback 내장: GPU 크래시 3회 → userData 에
+  `gpu-sandbox-fallback` 마커 기록 후 `--disable-gpu-sandbox` 로 자가 재기동 (마커 삭제 시
+  원복). ⚠️ 콘솔 테스트 시 VS Code 계열 터미널의 `ELECTRON_RUN_AS_NODE=1` 이 상속되면
+  앱이 Node 로 돌아 즉시 exit 0 — 반드시 해당 env 제거 후 테스트.
+- **`remove ...\win-unpacked\resources\app.asar: being used by another process`**: 이전 빌드
+  산출물을 다른 프로세스가 점유 — 테스트로 띄운 `ohdo.exe`/브리지 외에, **ohdo 폴더를 열어둔
+  다른 IDE(Antigravity 등)의 인덱서**가 물고 있는 경우가 실제 있었다 (2026-08-13 §84b).
+  해당 IDE/프로세스를 닫고 재실행. 잠금 주인 식별은 Restart Manager(RmGetList) 또는
+  `openfiles`/Sysinternals handle.
 - **frozen exe 가 `--port` 후 즉시 종료 + 콘솔에 ImportError**: hidden import 누락 →
   §1 의 단독 실행으로 누락 모듈 확인 후 spec 보강.
 - **`ohdo-bridge.exe` not found (설치본 실행 시)**: 2단계 복사 누락 — `build/pybridge/` 가
