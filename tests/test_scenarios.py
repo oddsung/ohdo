@@ -1457,7 +1457,7 @@ class ScenariosTest(TestCase):
     def test_68_fix_hallucinated_imports(self):
         """[회귀] AI 환각 import (FindBestMatchException → MatchError) 자동 교정.
 
-        사용자 보고 (5/5): wooyang 세션의 `from pywinauto.findbestmatch import
+        사용자 보고 (5/5): 그룹웨어 세션의 `from pywinauto.findbestmatch import
         FindBestMatchException` 이 ImportError 로 라이브러리 블럭 죽임 → 후속 import
         모두 skip → 모든 step cascade fail. 실제 클래스 이름은 MatchError.
         """

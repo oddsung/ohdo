@@ -13,7 +13,6 @@ Thanks for your interest. ohdo is a small project with a focused scope, so a few
    - Project layout & test workflow: [`CLAUDE.md`](CLAUDE.md)
    - Long-term roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
    - Recent change history & open work: [`docs/handoff.md`](docs/handoff.md)
-   - Honest competitive analysis: [`docs/commercial_review.md`](docs/commercial_review.md)
 3. **Check existing tests** — `tests/test_runner.py` orchestrates `core` / `scenarios` / `ai_integration` / GUI suites. Most contributions need a regression test in `core` or `scenarios`.
 
 ## Development setup
@@ -75,7 +74,7 @@ For larger / structural contributions we may ask you to also sign a per-contribu
 
 ## What's out of scope (for now)
 
-- macOS / Linux desktop support (Windows-only is a deliberate niche choice — see `docs/commercial_review.md`).
+- macOS / Linux desktop support (Windows-only is a deliberate niche choice).
 - Vendor-locked formats (XAML, proprietary scripting). The whole point of ohdo is plain Python.
 - Phase 2 SaaS code — that lives behind the open-core boundary and is not yet open.
 

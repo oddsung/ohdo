@@ -13,7 +13,6 @@
    - 프로젝트 구조 + 테스트 워크플로우: [`CLAUDE.md`](CLAUDE.md)
    - 장기 로드맵: [`docs/ROADMAP.md`](docs/ROADMAP.md)
    - 최근 변경 이력 + 진행 작업: [`docs/handoff.md`](docs/handoff.md)
-   - 정직한 경쟁 분석: [`docs/commercial_review.md`](docs/commercial_review.md)
 3. **기존 테스트 확인** — `tests/test_runner.py` 가 `core` / `scenarios` / `ai_integration` / GUI 스위트 실행. 대부분의 기여는 `core` 또는 `scenarios` 회귀 테스트 필요.
 
 ## 개발 환경 셋업
@@ -75,7 +74,7 @@ git commit -s -m "Fix the thing"
 
 ## 범위 외 (현재)
 
-- macOS / Linux 데스크톱 지원 (Windows 전용은 의도적 niche — `docs/commercial_review.md` 참조).
+- macOS / Linux 데스크톱 지원 (Windows 전용은 의도적 niche).
 - 벤더 락인 포맷 (XAML, 자체 스크립팅). ohdo 의 핵심은 순수 Python.
 - Phase 2 SaaS 코드 — 오픈코어 경계 너머, 아직 비공개.
 

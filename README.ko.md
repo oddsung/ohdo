@@ -34,8 +34,6 @@ ohdo 는 **자기 niche 에 정직**합니다: *개발자 친화적, 코드 우�
 한 번에 자연어로 자동화하는 게 우선이면 Computer Use 가 더 유연.
 **Inspectable + 이식 가능 + 반복 가능한 Python** 을 step-by-step 빌드 루프로 만들고 싶다면 ohdo 입니다.
 
-경쟁 분석 (ohdo 의 약점 포함) 자세히 보기: [`docs/commercial_review.md`](docs/commercial_review.md).
-
 ## 핵심 기능
 
 - **자연어 → Python 코드** — 요청 → 실제 `pywinauto`/`pyautogui`/Selenium 코드 생성 → 편집 → 실행
@@ -122,7 +120,7 @@ ohdo/
 ## 로드맵
 
 ohdo 는 오픈코어 전략 하 SaaS 확장 단계로 진행 중: Phase 0 (인프라 표준화) → Phase 1 (저장소 추상화 + UI-Core 분리) → Phase 2+ (백엔드 / Agent / 웹 대시보드).
-**Phase 0 + Phase 1 모두 100% 완료 (2026-05-09).** Phase 2 진입은 [`docs/commercial_review.md`](docs/commercial_review.md) 의 게이트 통과 후 결정.
+**Phase 0 + Phase 1 모두 100% 완료 (2026-05-09).** Phase 2 진입은 내부 go/no-go 기준 (커뮤니티 확산 + 사용자 검증) 통과 후 결정.
 
 전체 계획: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

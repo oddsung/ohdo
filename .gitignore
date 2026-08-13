@@ -70,6 +70,10 @@ step?_*.txt
 *.tmp
 *.temp
 .cache/
+tmp/
+
+# 비공개 전략 문서 (handoff §83b — repo public 전환 시 트리 제외, 로컬 보관)
+docs_private/
 
 # Secrets / credentials (broad guard — 공개 직전 추가, 5/9)
 .env

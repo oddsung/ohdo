@@ -2,7 +2,7 @@
 
 - **상태**: Accepted (2026-05-16 — 사용자 검토 완료, 5개 결정 확정 + 메인화면 통합점 추가, PR-11 부터 구현 시작)
 - **최초 작성일**: 2026-05-16
-- **결정자**: @toytiger
+- **결정자**: @oddsung
 - **관련 문서**:
   - [설계 — Phase R1+R2 데이터 흐름·삽입점](../architecture/25-recording-phase-r1-r2.md)
   - [ADR 0001 — wrap-first 정책](0001-preserve-existing-core.md)

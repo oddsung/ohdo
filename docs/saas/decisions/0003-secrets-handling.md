@@ -2,7 +2,7 @@
 
 - **상태**: Accepted (2026-05-13 — Phase 1 PR-1 구현 진행 중)
 - **최초 작성일**: 2026-05-13
-- **결정자**: @toytiger
+- **결정자**: @oddsung
 - **관련 문서**: [설계 — Phase 1+2 데이터 흐름·삽입점](../architecture/24-secrets-phase-1-2.md), [handoff.md §6 #5](../../handoff.md), [ADR 0001](0001-preserve-existing-core.md) (wrap-first 정책)
 
 ## 컨텍스트
@@ -136,4 +136,4 @@ Phase 1 단독으로도 누출 경로 #2/#3 의 위험을 크게 낮춤. Phase 2
 - [ADR 0001: wrap-first 정책](0001-preserve-existing-core.md)
 - [ADR 0002: AppService + Storage Facade](0002-appservice-facade-approach.md)
 - [handoff.md §6 #5](../../handoff.md) — keyring 결정 대기 → 본 ADR 로 해소
-- [commercial_review.md](../../commercial_review.md) GO/NO-GO #1 — 본 ADR Phase 1+2 완료 시 #1 보안 게이트 1차 통과
+- commercial_review.md (docs_private/ 비공개 보관) GO/NO-GO #1 — 본 ADR Phase 1+2 완료 시 #1 보안 게이트 1차 통과

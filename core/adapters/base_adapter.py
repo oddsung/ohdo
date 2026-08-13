@@ -241,8 +241,8 @@ class BaseAIAdapter(ABC):
         2. 생성된 코드에 해당 값이 손상(공백 삽입)된 채로 있으면 원본으로 교체합니다.
         3. 추출 실패 시 fallback으로 문자열 리터럴 내 @ 주변 공백을 제거합니다.
 
-        예: input_text = "doosung.oh @wooyang.co.kr"
-            → input_text = "doosung.oh@wooyang.co.kr"
+        예: input_text = "user.name @example.com"
+            → input_text = "user.name@example.com"
         """
         import re
 

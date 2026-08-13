@@ -35,9 +35,6 @@ If you want a no-code RPA for non-technical users, UiPath/Power Automate is a be
 If you want one-shot natural-language automation at any cost, Computer Use is more flexible.
 If you want **inspectable, portable, repeatable Python** with a per-step build loop, ohdo is for you.
 
-See [`docs/commercial_review.md`](docs/commercial_review.md) for an honest
-competitive analysis (including ohdo's weaknesses).
-
 ## Key features
 
 - **Natural language → Python** — request something, see real `pywinauto`/`pyautogui`/Selenium code, edit it, run it
@@ -146,7 +143,7 @@ Full runbook, smoke test, and known limitations (code signing, config persistenc
 ## Roadmap
 
 ohdo is being staged for SaaS expansion under an open-core strategy: Phase 0 (infrastructure standardization) → Phase 1 (storage abstraction + UI–core split) → Phase 2+ (backend / agent / web dashboard).
-**Phase 0 + Phase 1 are 100% complete (2026-05-09).** Phase 2 entry is gated on the criteria in [`docs/commercial_review.md`](docs/commercial_review.md).
+**Phase 0 + Phase 1 are 100% complete (2026-05-09).** Phase 2 entry is gated on internal go/no-go criteria (community adoption and user validation).
 
 Full plan: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

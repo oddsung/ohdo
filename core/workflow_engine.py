@@ -708,7 +708,7 @@ class WorkflowEngine:
                 on_log(f"📦 라이브러리 블럭 {changed} 중...")
             # AI 환각 import (예: FindBestMatchException) 자동 교정 후 idempotent 가드.
             # 환각 import 가 라이브러리 블럭에서 ImportError 로 죽으면 후속 import 도 skip
-            # → 모든 step cascade fail (사용자 보고 5/5 wooyang 세션).
+            # → 모든 step cascade fail (사용자 보고 5/5 그룹웨어 세션).
             lib_result = kernel.execute_block(
                 make_browser_init_idempotent(fix_hallucinated_imports(lib_block)),
                 step_id=LIBRARY_BLOCK_STEP_ID,
