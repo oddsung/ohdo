@@ -27,6 +27,7 @@ import json
 import os
 import secrets
 import socket
+import sys
 
 # stdout 의 READY 마커는 Electron 이 기계 파싱하므로 절대 깨지면 안 된다.
 READY_MARKER = "OHDO_API_READY"
@@ -76,6 +77,15 @@ def _ensure_bridge_dpi_awareness() -> str:
 
 
 def main(argv: "list[str] | None" = None) -> None:
+    # frozen(PyInstaller) 콘솔은 한국어 Windows 에서 cp949 라 유니코드 출력(argparse
+    # help 의 → 등, 한글 로그)이 UnicodeEncodeError 로 죽을 수 있다 (handoff §84).
+    # READY 마커는 ASCII 지만, 모든 stdout/stderr 출력을 안전하게 만든다.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass  # 재구성 불가 환경(파이프 등)에선 기존 인코딩 유지
+
     # 멀티모니터(서로 다른 DPI/해상도)에서 pick/capture/LL-hook 좌표가 OS 에 의해
     # "가상화"되지 않도록 브리지 프로세스를 PER_MONITOR_AWARE_V2 로 설정한다(handoff §76).
     # v1 의 main.py 가 SetProcessDpiAwarenessContext 로 하던 것과 동등 — 브리지는 별도

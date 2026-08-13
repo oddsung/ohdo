@@ -85,6 +85,11 @@ curl.exe -H "Authorization: Bearer smoketest" http://127.0.0.1:9123/environment
 
 ## 2. 브리지를 동봉 위치로 복사
 
+> ⚠️ **`build/pybridge/` 가 이전 freeze 잔재인 채로 3단계(dist)로 가지 말 것** — 옛 spec
+> 산출물에는 `_internal/config/settings.json`(빌드 머신 API 키)이 들어 있을 수 있다
+> (2026-08-13 §84 에서 실제로 근접사고). §1 재freeze 후 반드시 이 복사 단계를 다시 수행하고,
+> `_internal/config/` 에 `default_settings.json`+`prompts.json` 만 있는지 확인.
+
 `electron-builder` 가 `extraResources` 로 `build/pybridge` → `resources/pybridge` 를 동봉한다.
 `dist/ohdo-bridge/` **내용물**을 `desktop_v3/build/pybridge/` 에 넣는다 (폴더가 아니라 내용물 —
 결과가 `desktop_v3/build/pybridge/ohdo-bridge.exe` 가 되어야 함):
