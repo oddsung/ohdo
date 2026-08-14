@@ -131,6 +131,7 @@ desktop_v3/electron.vite.config.*.mjs
 desktop_v3/*.timestamp-*.mjs
 # electron-builder 설치본 출력 (handoff §46).
 desktop_v3/release/
+desktop_v3/release2/
 # PyInstaller freeze 산출물 (사용자가 로컬에서 생성, 커밋 X) — 브리지 동봉용.
 desktop_v3/build/pybridge/
 # PyInstaller 작업 디렉터리 (프로젝트 루트에서 freeze 시 생성).
