@@ -128,7 +128,9 @@ config 영속성(`--config-dir`)은 버그 성격으로 선행.
 - [x] 첫 릴리스 공개 — 2026-08-14: **v0.1.0** (setup.exe+latest.yml+blockmap, 일반 릴리스 —
       pre-release 표시는 electron-updater 기본 설정이 무시하므로 미사용). 비인증 latest.yml
       접근 검증 → 자동업데이트 경로 활성
-- [ ] 자동업데이트 실검증 — 다음 패치(0.1.x) 릴리스 시 "구버전 설치 → 배너 → 재시작" 확인
+- [x] 자동업데이트 실검증 — 2026-08-14 완료 (handoff §89): v0.1.1 릴리스 후 설치된 0.1.0 이
+      시작 ~40초 만에 자동 다운로드(183MB) → 배너 표시 → 종료 시 자동 설치 → 0.1.1 확인.
+      §82 체인 전체가 실제 GitHub Releases 경유로 동작 입증
 - [ ] v1.0 정식 릴리스(버전 범프) + 발표 (사용자): 영어 Show HN/Reddit · 사용자 5명 확보
 - 코드서명: v1.0 스코프 제외 — 출시 후 SignPath OSS(무료, 심사) 또는 Azure Trusted Signing/OV 재평가
 
