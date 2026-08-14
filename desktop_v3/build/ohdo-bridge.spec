@@ -35,6 +35,9 @@ hiddenimports = [
     "pyautogui", "mss", "PIL", "cv2", "pytesseract", "pandas", "openpyxl",
     "keyring", "keyring.backends", "keyring.backends.Windows",
     "pydantic", "pydantic_settings",
+    # 코드 실행 커널 (§92) — 소스에서 파일 경로로만 참조돼 정적 분석에 안 잡힌다.
+    # frozen 에선 exe 런너 모드(--run-kernel-worker)가 이 모듈을 runpy 로 실행.
+    "core.kernel_worker",
 ]
 
 # comtypes 가 런타임 생성하는 typelib 캐시 + uiautomation 데이터는 collect_all 권장.

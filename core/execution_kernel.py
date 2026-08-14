@@ -156,8 +156,18 @@ class ExecutionKernel:
         worker_path = Path(__file__).parent / "kernel_worker.py"
         env = self._build_subprocess_env()
 
+        # frozen(PyInstaller) 브리지에선 sys.executable 이 파이썬이 아니라 브리지 exe 다
+        # (handoff §92). 이때는 exe 의 런너 모드(--run-kernel-worker, api_server.__main__)
+        # 로 번들된 core.kernel_worker 모듈을 실행한다 — frozen 번들엔 kernel_worker.py
+        # 가 파일로 존재하지 않아 경로 실행이 불가능하다. python_exe 를 명시적으로 다른
+        # 인터프리터로 준 경우는 기존 경로 그대로 (v2/dev 무영향).
+        if getattr(sys, "frozen", False) and self.python_exe == sys.executable:
+            worker_cmd = [self.python_exe, "--run-kernel-worker"]
+        else:
+            worker_cmd = [self.python_exe, "-u", str(worker_path)]
+
         self._proc = subprocess.Popen(
-            [self.python_exe, "-u", str(worker_path)],
+            worker_cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # stderr를 stdout으로 병합

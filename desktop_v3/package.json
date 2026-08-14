@@ -1,7 +1,7 @@
 {
   "name": "ohdo-desktop-v3",
   "productName": "ohdo",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "ohdo desktop_v3 — Electron + React + TS UI (handoff §37 TS UI v3 트랙)",
   "author": "oddsung",
   "license": "AGPL-3.0-or-later",

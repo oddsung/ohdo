@@ -14164,6 +14164,65 @@ if __name__ == "__main__":
             "updater:" in ko_ts, "ko 카탈로그 updater 섹션 (en 은 tsc Catalog 타입이 강제)"
         )
 
+    def test_249_frozen_python_runner_mode(self):
+        """[handoff §92] frozen 브리지의 파이썬 런너 모드 — packaged 코드 실행 성립 가드.
+
+        실버그(사용자 환경점검 화면에서 발견): packaged 앱의 sys.executable 은 파이썬이
+        아니라 브리지 exe 인데, 실행 커널/샌드박스/환경스캐너가 전부 그걸 인터프리터로
+        서브프로세스 실행 → 커널 즉사(설치본에서 스텝 실행 원천 불가) + 환경점검 전 패키지
+        missing 오탐. fix: exe 런너 모드(--run-kernel-worker/--run-script) + frozen 분기.
+        런너 모드는 비-frozen(python -m api_server)에서도 동작하므로 기능 검증 가능.
+        """
+        import subprocess as sp
+        import sys as _sys
+        import tempfile
+        from pathlib import Path
+
+        self.step("(1) 기능: --run-script 가 실제로 스크립트를 실행 (비-frozen 경로)")
+        with tempfile.TemporaryDirectory() as td:
+            probe = Path(td) / "probe_249.py"
+            probe.write_text("print('RUNNER_OK_249'); import sys; sys.exit(0)", encoding="utf-8")
+            r = sp.run(
+                [_sys.executable, "-m", "api_server", "--run-script", str(probe)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(PROJECT_ROOT),
+            )
+            self.assert_equal(r.returncode, 0, f"런너 exit 0 (stderr: {r.stderr[:200]})")
+            self.assert_true("RUNNER_OK_249" in r.stdout, "스크립트 출력이 stdout 으로 전달")
+
+        self.step("(2) 런너/분기 sentinel — __main__ · 커널 · 샌드박스 · 스캐너 · spec")
+        main_src = (PROJECT_ROOT / "api_server" / "__main__.py").read_text(encoding="utf-8")
+        for marker in ("--run-kernel-worker", "--run-script", "runpy"):
+            self.assert_true(marker in main_src, f"__main__ 런너 모드에 {marker} 필수")
+        kernel_src = (PROJECT_ROOT / "core" / "execution_kernel.py").read_text(encoding="utf-8")
+        self.assert_true(
+            '"--run-kernel-worker"' in kernel_src and 'sys, "frozen"' in kernel_src,
+            "ExecutionKernel frozen 분기 — exe 런너로 커널 스폰",
+        )
+        wf_src = (PROJECT_ROOT / "core" / "workflow_engine.py").read_text(encoding="utf-8")
+        self.assert_true(
+            '"--run-script"' in wf_src and "패키지 자동 설치를 건너뜁니다" in wf_src,
+            "CodeSandbox frozen 분기 + frozen pip 가드",
+        )
+        scan_src = (PROJECT_ROOT / "core" / "environment_scanner.py").read_text(encoding="utf-8")
+        self.assert_true(
+            "_is_frozen_self" in scan_src and "find_spec" in scan_src,
+            "환경스캐너 frozen in-process 패키지 확인",
+        )
+        spec_src = (PROJECT_ROOT / "desktop_v3" / "build" / "ohdo-bridge.spec").read_text(
+            encoding="utf-8"
+        )
+        self.assert_true(
+            '"core.kernel_worker"' in spec_src,
+            "spec hiddenimports 에 core.kernel_worker (파일 경로 참조라 정적 분석 미탐)",
+        )
+
+        self.step("(3) 비-frozen 무회귀 — 기본 스폰은 여전히 python -u 경로")
+        self.assert_true('"-u", str(worker_path)' in kernel_src, "비-frozen 커널 스폰 보존")
+        self.assert_true('"-u", script_file' in wf_src, "비-frozen 샌드박스 스폰 보존")
+
 
 if __name__ == "__main__":
     from tests.test_runner import TestRunner

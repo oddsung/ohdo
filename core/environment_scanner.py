@@ -151,6 +151,9 @@ class EnvironmentScanner:
         (subprocess/OSError) 만 'unknown' 으로 폴백하고, 그 외 예외는 위로
         전파시켜 디버깅을 어렵게 만들지 않는다.
         """
+        # frozen 브리지 자기 자신 — exe 는 --version 을 모른다. 번들 런타임 버전 반환 (§92).
+        if getattr(sys, "frozen", False) and python_path == sys.executable:
+            return f"{platform.python_version()} (bundled)"
         try:
             result = subprocess.run(
                 [python_path, "--version"], capture_output=True, text=True, timeout=timeout
@@ -291,8 +294,41 @@ class EnvironmentScanner:
 
         return python_paths
 
+    @staticmethod
+    def _is_frozen_self(python_path: str) -> bool:
+        """스캔 대상이 'frozen 브리지 exe 자기 자신'인지 (handoff §92).
+
+        packaged 앱에선 sys.executable 이 파이썬이 아니라 브리지 exe 라서
+        ``exe -c "import x"`` 식 서브프로세스 프로브가 전부 실패한다(환경 점검이
+        전 패키지를 missing 으로 오탐하던 원인). 이 경우 in-process 로 확인한다.
+        """
+        return bool(getattr(sys, "frozen", False)) and python_path == sys.executable
+
     def check_package(self, python_path: str, package_name: str, import_name: str) -> Dict:
         """특정 Python 경로에서 패키지 설치 여부 확인"""
+        # frozen 자기 자신 — 번들 안에서 in-process 확인 (handoff §92)
+        if self._is_frozen_self(python_path):
+            import importlib.util
+
+            try:
+                installed = importlib.util.find_spec(import_name) is not None
+            except Exception:
+                installed = False
+            version = None
+            if installed:
+                try:
+                    import importlib.metadata as _md
+
+                    version = _md.version(package_name)
+                except Exception:
+                    version = "bundled"  # dist-info 미동봉 — 존재 확인만으로 충분
+            return {
+                "package": package_name,
+                "import_name": import_name,
+                "installed": installed,
+                "version": version,
+                "error": None,
+            }
         try:
             result = subprocess.run(
                 [python_path, "-c", f'import {import_name}; print("OK")'],
@@ -350,7 +386,14 @@ class EnvironmentScanner:
         """모든 필수/선택 패키지 상태 확인"""
         results = {"required": [], "optional": [], "all_required_installed": True}
 
-        for pkg, imp in self.REQUIRED_PACKAGES:
+        # frozen 브리지 자기 스캔에선 PySide6 를 필수에서 제외 (handoff §92) —
+        # UI 프레임워크는 Electron 앱의 실행 런타임에 불필요해 번들에서 의도적으로
+        # 뺐다(spec excludes). 포함하면 항상 "필수 누락"으로 오탐.
+        required = self.REQUIRED_PACKAGES
+        if self._is_frozen_self(python_path):
+            required = [(p, i) for (p, i) in required if p != "PySide6"]
+
+        for pkg, imp in required:
             status = self.check_package(python_path, pkg, imp)
             results["required"].append(status)
             if not status["installed"]:

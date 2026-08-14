@@ -193,6 +193,18 @@ class CodeSandbox:
             # pkg_resources를 사용할 수 없는 경우 모두 설치 시도
             missing_packages = list(required_packages)
 
+        # frozen(PyInstaller) 브리지 자체가 인터프리터인 경우 pip 사용 불가 — 번들에
+        # 자동화 패키지가 이미 동봉돼 있고, 동결 환경에 pip 설치도 불가능하다 (handoff §92).
+        # (frozen 에선 pkg_resources 부재로 전 패키지가 '누락 후보'로 잡히는 오탐도 차단.)
+        if missing_packages and getattr(sys, "frozen", False) and self.python_exe == sys.executable:
+            msg = (
+                "packaged 실행 환경 — 패키지 자동 설치를 건너뜁니다 (번들 동봉 패키지로 실행). "
+                f"감지된 후보: {', '.join(missing_packages)}"
+            )
+            print(msg)
+            logger.info(msg)
+            return None
+
         # 4. 누락된 패키지 설치
         if missing_packages:
             log_msgs = [f"누락된 패키지를 발견했습니다: {', '.join(missing_packages)}"]
@@ -293,9 +305,15 @@ class CodeSandbox:
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
 
+            # frozen 브리지가 인터프리터면 exe 런너 모드(--run-script)로 실행 (handoff §92).
+            if getattr(sys, "frozen", False) and self.python_exe == sys.executable:
+                run_cmd = [self.python_exe, "--run-script", script_file]
+            else:
+                run_cmd = [self.python_exe, "-u", script_file]
+
             # Popen으로 실행 — F9 강제 중지 시 proc.kill() 호출 가능
             self._current_proc = subprocess.Popen(
-                [self.python_exe, "-u", script_file],
+                run_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

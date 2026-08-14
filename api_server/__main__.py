@@ -76,15 +76,50 @@ def _ensure_bridge_dpi_awareness() -> str:
         return "error"
 
 
+def _run_as_python_runner(argv: "list[str]") -> bool:
+    """frozen exe 를 파이썬 런너로 재사용하는 특수 모드 (handoff §92).
+
+    packaged 앱에선 ``sys.executable`` 이 파이썬이 아니라 이 브리지 exe 라서,
+    코드 실행 커널/샌드박스가 파이썬 서브프로세스를 띄울 수 없다. 이를 위해:
+
+    - ``--run-kernel-worker``: 번들된 ``core.kernel_worker`` 를 __main__ 으로 실행
+      (frozen 에선 kernel_worker.py 가 파일로 존재하지 않아 모듈 실행이 유일한 경로).
+    - ``--run-script <path> [args...]``: 임의 스크립트 실행 (CodeSandbox 용).
+
+    비-frozen(``python -m api_server``)에서도 동일하게 동작해 테스트 가능하다.
+    처리했으면 True — 호출측은 서버 기동을 건너뛴다.
+    """
+    if not argv:
+        return False
+    import runpy
+
+    if argv[0] == "--run-kernel-worker":
+        sys.argv = ["kernel_worker", *argv[1:]]
+        runpy.run_module("core.kernel_worker", run_name="__main__")
+        return True
+    if argv[0] == "--run-script" and len(argv) >= 2:
+        sys.argv = list(argv[1:])  # 스크립트 관점의 argv (argv[0]=스크립트 경로)
+        runpy.run_path(argv[1], run_name="__main__")
+        return True
+    return False
+
+
 def main(argv: "list[str] | None" = None) -> None:
     # frozen(PyInstaller) 콘솔은 한국어 Windows 에서 cp949 라 유니코드 출력(argparse
     # help 의 → 등, 한글 로그)이 UnicodeEncodeError 로 죽을 수 있다 (handoff §84).
     # READY 마커는 ASCII 지만, 모든 stdout/stderr 출력을 안전하게 만든다.
+    # line_buffering: 런너 모드(§92)의 스크립트/커널 출력이 파이프에서도 라인 단위로
+    # 흐르게 (비-frozen 경로의 `python -u` 와 동등한 효과).
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         except Exception:
             pass  # 재구성 불가 환경(파이프 등)에선 기존 인코딩 유지
+
+    # 파이썬 런너 모드 (handoff §92) — DPI/argparse/서버 기동 전에 분기.
+    args_in = list(sys.argv[1:]) if argv is None else list(argv)
+    if _run_as_python_runner(args_in):
+        return
 
     # 멀티모니터(서로 다른 DPI/해상도)에서 pick/capture/LL-hook 좌표가 OS 에 의해
     # "가상화"되지 않도록 브리지 프로세스를 PER_MONITOR_AWARE_V2 로 설정한다(handoff §76).
@@ -109,7 +144,7 @@ def main(argv: "list[str] | None" = None) -> None:
             "packaged 앱은 userData 를 넘겨 설정 변경을 업데이트에도 영속 (handoff §81)"
         ),
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(args_in)
 
     # 토큰은 env 로만 받는다. 없으면 random 생성 (단독 실행/테스트 시).
     token = os.environ.get("OHDO_API_TOKEN") or secrets.token_urlsafe(32)
