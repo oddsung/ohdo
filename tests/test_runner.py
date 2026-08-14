@@ -174,9 +174,10 @@ def collect_environment() -> dict:
             env[f"pkg_{pkg_name}"] = getattr(mod, "__version__", "installed")
         except ImportError:
             env[f"pkg_{pkg_name}"] = "not_installed"
-        except Exception as exc:  # noqa: BLE001 — 환경 수집이 테스트 실행을 막으면 안 됨
-            # 예: headless Linux(CI)에서 pyautogui→mouseinfo 가 DISPLAY 부재로
-            # KeyError 를 던짐 — 버전 수집 실패는 기록만 하고 계속 진행.
+        except (SystemExit, Exception) as exc:  # noqa: BLE001 — 수집이 러너를 죽이면 안 됨
+            # 예: Linux(CI)에서 pyautogui→mouseinfo 가 DISPLAY 부재로 KeyError,
+            # tkinter 부재로는 아예 sys.exit(SystemExit) 를 던짐 — 버전 수집 실패는
+            # 기록만 하고 계속 진행.
             env[f"pkg_{pkg_name}"] = f"import_error: {type(exc).__name__}"
 
     return env

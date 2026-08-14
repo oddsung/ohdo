@@ -70,7 +70,9 @@ jobs:
             libdbus-1-3 \
             libfontconfig1 \
             libxcb-cursor0 \
-            xvfb
+            xvfb \
+            python3-tk \
+            python3-dev
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
