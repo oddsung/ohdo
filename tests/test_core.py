@@ -2362,9 +2362,12 @@ if __name__ == "__main__":
         import json
         from pathlib import Path
 
-        cfg = json.loads(
-            (Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8")
-        )
+        # settings.json 은 gitignore(로컬 전용 구성) — CI/새 클론엔 없다. 아래는
+        # "내 로컬 구성이 가드 의도를 지키는지" 검증이므로 파일이 있을 때만 수행.
+        settings_path = Path(__file__).parent.parent / "config" / "settings.json"
+        if not settings_path.exists():
+            return
+        cfg = json.loads(settings_path.read_text(encoding="utf-8"))
         cli_cfg = cfg.get("ai", {}).get("available_engines", {}).get("cli_ai", {})
         # 가드 의도 (5/4): Gemini CLI default preview 자동 매핑 회피 — model 명시 필수.
         # 2026-05-29 사용자 보고: agy CLI 는 -m flag 미지원 (구 gemini 와 완전히 다른
@@ -2650,14 +2653,18 @@ if __name__ == "__main__":
             "[회귀] ADAPTER_REGISTRY['openai_compat'] = OpenAICompatAdapter 매핑 필수",
         )
 
-        # 8. settings.json default 에 openai_compat 항목 존재 + 필수 키
+        # 8. default_settings.json 에 openai_compat 항목 존재 + 필수 키.
+        # (원래 settings.json 을 읽었으나 그 파일은 gitignore 로컬 전용이라 CI/새 클론에
+        # 없다 — "default 필수" 가드 의도상 배포되는 default_settings.json 이 올바른 대상.)
         cfg = json.loads(
-            (Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8")
+            (Path(__file__).parent.parent / "config" / "default_settings.json").read_text(
+                encoding="utf-8"
+            )
         )
         oc_cfg = cfg.get("ai", {}).get("available_engines", {}).get("openai_compat", {})
         self.assert_true(
             bool(oc_cfg),
-            "[회귀] settings.json 에 openai_compat 엔진 default 필수",
+            "[회귀] default_settings.json 에 openai_compat 엔진 default 필수",
         )
         for required_key in ("base_url", "api_key", "api_key_env", "model"):
             self.assert_true(
@@ -12036,19 +12043,23 @@ if __name__ == "__main__":
             "POST /sessions (create) 노출",
         )
 
-        self.step("(3) TestClient 로 세션 상세 직렬화 (steps 포함) 검증")
+        self.step("(3) TestClient — create 로 데이터 자급 후 목록/상세 직렬화 검증")
         try:
             from fastapi.testclient import TestClient
         except Exception:
             self.step("TestClient 사용 불가 (httpx 미설치) — 라우트 노출 가드까지만")
             return
 
+        # CI/새 클론엔 data/ 가 없다(gitignore) — 기존 세션에 의존하지 말고 직접 생성.
         client = TestClient(app)
-        listed = client.get("/sessions").json()
-        self.assert_true(listed["count"] >= 1, "테스트 데이터에 세션 1개 이상 존재")
-        sid = listed["sessions"][0]["session_id"]
+        created = client.post("/sessions", json={"title": "__t207_tmp__"}).json()
+        new_id = created["session"]["session_id"]
+        self.assert_equal(created["session"]["title"], "__t207_tmp__", "생성 세션 제목 일치")
 
-        detail = client.get(f"/sessions/{sid}").json()
+        listed = client.get("/sessions").json()
+        self.assert_true(listed["count"] >= 1, "생성 후 세션 목록 1개 이상")
+
+        detail = client.get(f"/sessions/{new_id}").json()
         self.assert_true("session" in detail, "상세 응답에 session 키")
         self.assert_true("steps" in detail["session"], "세션 상세에 steps 직렬화 포함")
 
@@ -12056,11 +12067,7 @@ if __name__ == "__main__":
         missing = client.get("/sessions/__no_such_session__")
         self.assert_equal(missing.status_code, 404, "없는 세션 GET → 404")
 
-        self.step("(5) create → delete round-trip (테스트 데이터 비오염)")
-        created = client.post("/sessions", json={"title": "__t207_tmp__"}).json()
-        new_id = created["session"]["session_id"]
-        self.assert_equal(created["session"]["title"], "__t207_tmp__", "생성 세션 제목 일치")
-        # 정리 — 테스트 세션 디렉터리 제거
+        self.step("(5) 정리 (테스트 데이터 비오염)")
         import shutil
 
         shutil.rmtree(PROJECT_ROOT / "data" / "sessions" / new_id, ignore_errors=True)
@@ -12231,13 +12238,17 @@ if __name__ == "__main__":
             409,
             "녹화 안 함 + marker → 409",
         )
-        listed = client.get("/sessions").json()
-        sid = listed["sessions"][0]["session_id"]
+        # CI/새 클론엔 data/ 가 없다(gitignore) — 기존 세션에 의존하지 말고 직접 생성.
+        created = client.post("/sessions", json={"title": "__t210_tmp__"}).json()
+        sid = created["session"]["session_id"]
         self.assert_equal(
             client.post(f"/sessions/{sid}/recording/stop_commit", json={}).status_code,
             409,
             "녹화 안 함 + stop_commit → 409",
         )
+        import shutil
+
+        shutil.rmtree(PROJECT_ROOT / "data" / "sessions" / sid, ignore_errors=True)
 
         self.step("(4) cancel idle → was_recording False / 없는 세션 start → 404")
         cancel = client.post("/recording/cancel").json()
