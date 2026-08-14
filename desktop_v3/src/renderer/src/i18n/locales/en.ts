@@ -17,6 +17,19 @@ export const en: Catalog = {
     online: "bridge v{{version}}",
     offline: "bridge offline",
   },
+  about: {
+    title: "About ohdo",
+    tagline: "AI-native Windows RPA — plain Python automation, built by chat",
+    appVersion: "App version",
+    bridgeVersion: "Python bridge",
+    runtime: "Runtime",
+    checkUpdates: "Check for updates",
+    latest: "You're on the latest version.",
+    available: "Downloading v{{version}} — a notice will appear below when it's ready.",
+    devMode: "Update checks are unavailable in dev mode.",
+    checkError: "Update check failed: {{message}}",
+    github: "GitHub",
+  },
   updater: {
     downloaded: "A new version v{{version}} is ready.",
     detail:

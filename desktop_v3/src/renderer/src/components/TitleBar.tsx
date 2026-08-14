@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import {
   Activity,
   HelpCircle,
+  Info,
   KeyRound,
   Languages,
   Menu,
@@ -76,6 +77,7 @@ export function TitleBar({ onNewSession }: { onNewSession: () => void }) {
   const setEnvOpen = useUiStore((st) => st.setEnvOpen);
   const setOnboardingOpen = useUiStore((st) => st.setOnboardingOpen);
   const setSecretsOpen = useUiStore((st) => st.setSecretsOpen);
+  const setAboutOpen = useUiStore((st) => st.setAboutOpen);
   const theme = useThemeStore((st) => st.theme);
   const toggleTheme = useThemeStore((st) => st.toggle);
   const lang = (i18n.language || currentLang()).startsWith("ko") ? "ko" : "en";
@@ -178,6 +180,11 @@ export function TitleBar({ onNewSession }: { onNewSession: () => void }) {
               label={t("sidebar.help")}
               icon={<HelpCircle className="h-4 w-4" />}
               onSelect={pick(() => setOnboardingOpen(true))}
+            />
+            <MenuItem
+              label={t("about.title")}
+              icon={<Info className="h-4 w-4" />}
+              onSelect={pick(() => setAboutOpen(true))}
             />
           </div>
         )}

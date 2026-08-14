@@ -26,6 +26,7 @@ import { TitleBar } from "./components/TitleBar";
 import { Toaster } from "./components/Toaster";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { NewSessionDialog } from "./components/NewSessionDialog";
+import { AboutDialog } from "./components/AboutDialog";
 
 function CodePane({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
@@ -109,6 +110,8 @@ export default function App() {
   // 새 세션은 이름 입력 다이얼로그(§89)를 거친다 — 생성 로직은 NewSessionDialog 내부.
   const newSessionOpen = useUiStore((st) => st.newSessionOpen);
   const setNewSessionOpen = useUiStore((st) => st.setNewSessionOpen);
+  const aboutOpen = useUiStore((st) => st.aboutOpen);
+  const setAboutOpen = useUiStore((st) => st.setAboutOpen);
 
   useShortcuts({
     onRunToggle: () => {
@@ -138,6 +141,7 @@ export default function App() {
         </div>
       </div>
       {newSessionOpen && <NewSessionDialog />}
+      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       <PickOverlay />
       <CommandPalette />
       {onboardingOpen && <OnboardingWizard onClose={() => setOnboardingOpen(false)} />}

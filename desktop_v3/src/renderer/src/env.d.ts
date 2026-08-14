@@ -34,6 +34,17 @@ export interface OhdoBridge {
     cb: (e: { status: string; info?: { version?: string; message?: string } }) => void,
   ) => () => void;
   installUpdate: () => Promise<void>;
+  // About 다이얼로그 (handoff §90).
+  getAppInfo: () => Promise<{
+    version: string;
+    electron: string;
+    chrome: string;
+    node: string;
+    platform: string;
+    packaged: boolean;
+  }>;
+  checkForUpdates: () => Promise<{ status: string; version?: string; message?: string }>;
+  openRepo: () => Promise<void>;
 }
 
 declare global {

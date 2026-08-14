@@ -855,6 +855,25 @@ function registerPickIpc(): void {
 // v1.0 은 미서명(§81 결정) — electron-updater 는 실행 중 앱이 미서명이면 서명 검증을
 // 건너뛰므로 동작에 문제없다. repo 가 private 인 동안 확인은 404 로 조용히 실패(로그만).
 function setupAutoUpdater(): void {
+  // About 다이얼로그의 수동 "업데이트 확인" (handoff §90). packaged 가드는 핸들러
+  // 내부에서 — dev 에서도 invoke 가 throw 하지 않고 status="dev" 를 받게 한다.
+  ipcMain.handle("updater:manual-check", async () => {
+    if (!app.isPackaged) return { status: "dev" };
+    try {
+      const current = app.getVersion();
+      const r = await autoUpdater.checkForUpdates();
+      const next = r?.updateInfo?.version;
+      if (next && next !== current) {
+        // autoDownload=true 라 이 시점부터 내려받는 중 — 완료되면 update-downloaded
+        // 이벤트가 renderer 배너(UpdateNotice)를 띄운다.
+        return { status: "available", version: next };
+      }
+      return { status: "latest", version: current };
+    } catch (e) {
+      return { status: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
   if (!app.isPackaged) return; // dev 는 app-update.yml 이 없어 에러만 난다.
   const send = (status: string, info?: { version?: string; message?: string }) => {
     try {
@@ -883,6 +902,19 @@ function setupAutoUpdater(): void {
 app.whenReady().then(async () => {
   // renderer 가 API 접속 정보를 요청할 때 응답 (preload → contextBridge).
   ipcMain.handle("ohdo:get-api-info", () => apiInfo);
+  // About 다이얼로그 (handoff §90) — 앱/런타임 버전 정보.
+  ipcMain.handle("app:get-info", () => ({
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    platform: `${process.platform} ${process.arch}`,
+    packaged: app.isPackaged,
+  }));
+  // About 의 GitHub 링크 — 저장소 URL 만 허용(임의 URL 오픈 방지).
+  ipcMain.handle("shell:open-repo", () => {
+    void shell.openExternal("https://github.com/oddsung/ohdo");
+  });
   registerPickIpc();
   registerRunFxIpc();
   setupAutoUpdater();

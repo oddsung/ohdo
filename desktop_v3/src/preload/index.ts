@@ -48,6 +48,18 @@ const api = {
     return () => ipcRenderer.removeListener("updater:event", listener);
   },
   installUpdate: (): Promise<void> => ipcRenderer.invoke("updater:install"),
+  // About 다이얼로그 (handoff §90) — 버전 정보 + 수동 업데이트 확인 + 저장소 링크.
+  getAppInfo: (): Promise<{
+    version: string;
+    electron: string;
+    chrome: string;
+    node: string;
+    platform: string;
+    packaged: boolean;
+  }> => ipcRenderer.invoke("app:get-info"),
+  checkForUpdates: (): Promise<{ status: string; version?: string; message?: string }> =>
+    ipcRenderer.invoke("updater:manual-check"),
+  openRepo: (): Promise<void> => ipcRenderer.invoke("shell:open-repo"),
 };
 
 contextBridge.exposeInMainWorld("ohdo", api);
