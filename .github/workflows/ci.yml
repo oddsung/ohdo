@@ -53,10 +53,14 @@ jobs:
       # 실패 → headless CI 에선 offscreen 사용. tests/test_core.py 는 module import
       # 만 하지만 일부 scenarios 가 ui_v2 클래스 import → Qt 모듈 로드.
       QT_QPA_PLATFORM: offscreen
+      # headless Linux 엔 SecretService(DBus) 가 없어 vault 계열 테스트가
+      # NoKeyringError — CI 한정 plaintext 백엔드로 vault 로직 자체를 검증
+      # (실사용 백엔드는 OS keyring — Windows 잡이 실경로 커버).
+      PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt 시스템 의존성
+      - name: Install Qt 시스템 의존성 + xvfb
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -65,7 +69,8 @@ jobs:
             libxkbcommon0 \
             libdbus-1-3 \
             libfontconfig1 \
-            libxcb-cursor0
+            libxcb-cursor0 \
+            xvfb
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -73,13 +78,17 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (no Windows-only — sys_platform marker)
-        run: uv sync
+        run: |
+          uv sync
+          uv pip install keyrings.alt
 
+      # xvfb-run: pyautogui→mouseinfo 가 import 시점에 X DISPLAY 를 요구
+      # (KeyError: DISPLAY 로 테스트 즉사) → 가상 디스플레이로 감싼다.
       - name: Run core suite
-        run: uv run python -m tests.test_runner --suite core
+        run: xvfb-run -a uv run python -m tests.test_runner --suite core
 
       - name: Run scenarios suite
-        run: uv run python -m tests.test_runner --suite scenarios
+        run: xvfb-run -a uv run python -m tests.test_runner --suite scenarios
 
       - name: Upload test results
         if: always()

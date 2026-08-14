@@ -12250,13 +12250,17 @@ if __name__ == "__main__":
 
         shutil.rmtree(PROJECT_ROOT / "data" / "sessions" / sid, ignore_errors=True)
 
-        self.step("(4) cancel idle → was_recording False / 없는 세션 start → 404")
+        self.step("(4) cancel idle → was_recording False / 없는 세션 start → 404(win)/501(비win)")
         cancel = client.post("/recording/cancel").json()
         self.assert_equal(cancel["was_recording"], False, "idle cancel → was_recording False")
+        # start 는 세션 조회보다 win32 가드가 먼저다 — 비-Windows(CI ubuntu)에선 501 이 계약.
+        import sys as _sys
+
+        expected_start = 404 if _sys.platform == "win32" else 501
         self.assert_equal(
             client.post("/sessions/__no_such__/recording/start").status_code,
-            404,
-            "없는 세션 녹화 시작 → 404",
+            expected_start,
+            f"없는 세션 녹화 시작 → {expected_start} (플랫폼별 계약)",
         )
 
     def test_211_desktop_v3_generate_stream_ws(self):
@@ -13939,9 +13943,15 @@ if __name__ == "__main__":
             self.assert_true(callable(ns.get(fn)), f"{fn} 정의")
         ns["restore_user_ime"]()  # 빈 상태 no-op
         # 죽은 hwnd(0) 가 저장돼 있어도 복원이 상태를 비우고 크래시하지 않아야 한다.
+        # 상태 클리어는 Windows 전용 검증 — 비-Windows(CI ubuntu)에선 restore 가
+        # ctypes.windll 부재로 조기 종료(안전)해 상태가 남는 게 정상 (shim 은 Windows
+        # 자동화 커널에만 주입됨).
         ns["_ohdo_ime_state"]["saved"][0] = (0x04120412, None)
         ns["restore_user_ime"]()
-        self.assert_equal(ns["_ohdo_ime_state"]["saved"], {}, "복원 후 저장 상태 클리어")
+        import sys as _sys
+
+        if _sys.platform == "win32":
+            self.assert_equal(ns["_ohdo_ime_state"]["saved"], {}, "복원 후 저장 상태 클리어")
 
     def test_243_found_index_paren_title_safe(self):
         """[handoff §78d] restore_user_strings 8단계 — 괄호 포함 창제목 오염 방지 (core fix).
