@@ -23,7 +23,6 @@ import {
   Upload,
 } from "lucide-react";
 import {
-  createSession,
   duplicateSession,
   exportSession,
   fetchSessions,
@@ -76,18 +75,8 @@ export function CommandPalette() {
   const toggleTheme = useThemeStore((s) => s.toggle);
   const lang = (i18n.language || currentLang()).startsWith("ko") ? "ko" : "en";
 
-  const createMut = useMutation({
-    mutationFn: () => {
-      const stamp = new Date().toISOString().slice(5, 16).replace("T", " ");
-      return createSession(t("sidebar.newSessionName", { stamp }));
-    },
-    onSuccess: (s) => {
-      qc.invalidateQueries({ queryKey: ["sessions"] });
-      selectSession(s.session_id);
-      toast.success(t("session.created"));
-    },
-    onError: (e) => toast.error(t("session.createFailed", { message: (e as Error).message })),
-  });
+  // 새 세션은 이름 입력 다이얼로그(§89, NewSessionDialog)를 연다.
+  const setNewSessionOpen = useUiStore((s) => s.setNewSessionOpen);
 
   // 팔레트 열릴 때 검색어/선택 리셋 + 입력 포커스.
   useEffect(() => {
@@ -107,7 +96,7 @@ export function CommandPalette() {
     label: t("palette.newSession"),
     hint: "Ctrl+N",
     icon: <Plus className="h-4 w-4" />,
-    run: () => createMut.mutate(),
+    run: () => setNewSessionOpen(true),
   });
   if (selectedSessionId && !recording) {
     commands.push(

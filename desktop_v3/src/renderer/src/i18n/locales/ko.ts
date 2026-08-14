@@ -3,6 +3,7 @@
 export const ko = {
   common: {
     cancel: "취소",
+    create: "생성",
     save: "저장",
     saving: "저장 중…",
     edit: "편집",
@@ -156,7 +157,7 @@ export const ko = {
     import: "프로젝트 가져오기",
     imported: "프로젝트 가져오기 완료",
     importFailed: "가져오기 실패: {{message}}",
-    renamePrompt: "새 세션 이름:",
+    namePlaceholder: "세션 이름",
     renamed: "이름 변경됨",
     renameFailed: "이름 변경 실패: {{message}}",
     confirmDelete: '세션 "{{title}}" 을(를) 삭제할까요? 되돌릴 수 없습니다.',

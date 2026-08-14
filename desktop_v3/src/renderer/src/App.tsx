@@ -3,15 +3,14 @@
 // 컬럼 — 세션 사이드바 + 채팅/스텝 + Monaco 코드 뷰어 + 콘솔. 구 좌측 ServerRail(§59)의
 // 유틸은 타이틀바로 이전. 전역: 단축키(useShortcuts) + PickOverlay + Toaster.
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Loader2, Plus } from "lucide-react";
-import { createSession, fetchSession, fetchBlocks } from "./api/client";
+import { Plus } from "lucide-react";
+import { fetchSession, fetchBlocks } from "./api/client";
 import { buttonVariants } from "./components/ui/button";
 import { useUiStore } from "./store/uiStore";
 import { usePickStore } from "./store/pickStore";
 import { useExecStore } from "./store/execStore";
-import { toast } from "./store/toastStore";
 import "./store/themeStore"; // 모듈 로드 시 테마 적용 (FOUC 방지)
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useExecution } from "./hooks/useExecution";
@@ -26,6 +25,7 @@ import { RecordingReviewDialog } from "./components/RecordingReviewDialog";
 import { TitleBar } from "./components/TitleBar";
 import { Toaster } from "./components/Toaster";
 import { UpdateNotice } from "./components/UpdateNotice";
+import { NewSessionDialog } from "./components/NewSessionDialog";
 
 function CodePane({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
@@ -68,7 +68,7 @@ function CodePane({ sessionId }: { sessionId: string }) {
   );
 }
 
-function EmptyState({ onCreate, creating }: { onCreate: () => void; creating: boolean }) {
+function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useTranslation();
   return (
     <main className="flex h-full flex-1 items-center justify-center">
@@ -76,19 +76,14 @@ function EmptyState({ onCreate, creating }: { onCreate: () => void; creating: bo
         <p className="text-lg">{t("app.welcome")}</p>
         <p className="mt-2 text-sm">{t("app.pickOrCreate")}</p>
         <p className="mt-1 text-xs">{t("app.hint")}</p>
-        {/* 빈 상태에서도 곧장 시작할 수 있는 1차 행동 — 사이드바의 작은 "+" 를 찾지 않아도 된다. */}
+        {/* 빈 상태에서도 곧장 시작할 수 있는 1차 행동 — 이름 입력 다이얼로그(§89)를 연다. */}
         <button
           type="button"
           data-testid="empty-create-session"
-          disabled={creating}
           onClick={onCreate}
           className={buttonVariants({ className: "mt-5" })}
         >
-          {creating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Plus className="h-4 w-4" />
-          )}
+          <Plus className="h-4 w-4" />
           {t("app.createSession")}
         </button>
       </div>
@@ -97,10 +92,7 @@ function EmptyState({ onCreate, creating }: { onCreate: () => void; creating: bo
 }
 
 export default function App() {
-  const qc = useQueryClient();
-  const { t } = useTranslation();
   const selectedSessionId = useUiStore((st) => st.selectedSessionId);
-  const selectSession = useUiStore((st) => st.selectSession);
   const togglePalette = useUiStore((st) => st.togglePalette);
   const onboardingOpen = useUiStore((st) => st.onboardingOpen);
   const setOnboardingOpen = useUiStore((st) => st.setOnboardingOpen);
@@ -114,18 +106,9 @@ export default function App() {
   // 전역 단축키용 실행 훅 — 세션 미선택 시 빈 문자열(핸들러에서 가드).
   const { run, stop } = useExecution(selectedSessionId ?? "");
 
-  const newSessionMut = useMutation({
-    mutationFn: () => {
-      const stamp = new Date().toISOString().slice(5, 16).replace("T", " ");
-      return createSession(t("sidebar.newSessionName", { stamp }));
-    },
-    onSuccess: (s) => {
-      qc.invalidateQueries({ queryKey: ["sessions"] });
-      selectSession(s.session_id);
-      toast.success(t("session.created"));
-    },
-    onError: (e) => toast.error(t("session.createFailed", { message: (e as Error).message })),
-  });
+  // 새 세션은 이름 입력 다이얼로그(§89)를 거친다 — 생성 로직은 NewSessionDialog 내부.
+  const newSessionOpen = useUiStore((st) => st.newSessionOpen);
+  const setNewSessionOpen = useUiStore((st) => st.setNewSessionOpen);
 
   useShortcuts({
     onRunToggle: () => {
@@ -133,17 +116,14 @@ export default function App() {
       if (useExecStore.getState().running) stop();
       else run("all", null);
     },
-    onNewSession: () => newSessionMut.mutate(),
+    onNewSession: () => setNewSessionOpen(true),
     onEscape: () => cancelPick(),
     onCommandPalette: () => togglePalette(),
   });
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden">
-      <TitleBar
-        onNewSession={() => newSessionMut.mutate()}
-        creating={newSessionMut.isPending}
-      />
+      <TitleBar onNewSession={() => setNewSessionOpen(true)} />
       <div className="flex min-h-0 flex-1">
         <SessionSidebar />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -153,13 +133,11 @@ export default function App() {
               <CodePane sessionId={selectedSessionId} />
             </div>
           ) : (
-            <EmptyState
-              onCreate={() => newSessionMut.mutate()}
-              creating={newSessionMut.isPending}
-            />
+            <EmptyState onCreate={() => setNewSessionOpen(true)} />
           )}
         </div>
       </div>
+      {newSessionOpen && <NewSessionDialog />}
       <PickOverlay />
       <CommandPalette />
       {onboardingOpen && <OnboardingWizard onClose={() => setOnboardingOpen(false)} />}

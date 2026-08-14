@@ -5,6 +5,7 @@ import type { Catalog } from "./ko";
 export const en: Catalog = {
   common: {
     cancel: "Cancel",
+    create: "Create",
     save: "Save",
     saving: "Saving…",
     edit: "Edit",
@@ -159,7 +160,7 @@ export const en: Catalog = {
     import: "Import project",
     imported: "Project imported",
     importFailed: "Import failed: {{message}}",
-    renamePrompt: "New session name:",
+    namePlaceholder: "Session name",
     renamed: "Renamed",
     renameFailed: "Rename failed: {{message}}",
     confirmDelete: 'Delete session "{{title}}"? This cannot be undone.',

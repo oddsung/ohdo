@@ -17,7 +17,6 @@ import {
   Moon,
   Plus,
   Settings,
-  SquarePen,
   Sun,
 } from "lucide-react";
 import { useUiStore } from "@/store/uiStore";
@@ -68,13 +67,7 @@ function MenuItem({
   );
 }
 
-export function TitleBar({
-  onNewSession,
-  creating,
-}: {
-  onNewSession: () => void;
-  creating: boolean;
-}) {
+export function TitleBar({ onNewSession }: { onNewSession: () => void }) {
   const { t, i18n } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -190,11 +183,7 @@ export function TitleBar({
         )}
       </div>
 
-      {/* 새 세션 퀵버튼 (OpenCode 타이틀바의 새 세션 버튼 대응). */}
-      <IconButton title={t("app.createSession")} onClick={onNewSession}>
-        <SquarePen className={`h-4 w-4 ${creating ? "animate-pulse" : ""}`} />
-      </IconButton>
-
+      {/* 새 세션 퀵버튼은 제거(§89 — 사이드바 "+" 와 중복, 사용자 결정). 메뉴 항목은 유지. */}
       <div className="mx-0.5 h-4 w-px shrink-0 bg-discord-muted/20" />
 
       {/* 세션 탭 — 남는 영역은 드래그 유지(TabBar 자체만 no-drag). */}

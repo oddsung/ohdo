@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Copy, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import {
-  createSession,
   deleteSession,
   duplicateSession,
   exportSession,
@@ -41,14 +40,14 @@ function HealthDot() {
 function SessionRow({
   s,
   busy,
-  onRename,
+  onRenameSubmit,
   onDuplicate,
   onExport,
   onDelete,
 }: {
   s: SessionSummary;
   busy: boolean;
-  onRename: () => void;
+  onRenameSubmit: (title: string) => void;
   onDuplicate: () => void;
   onExport: () => void;
   onDelete: () => void;
@@ -57,20 +56,53 @@ function SessionRow({
   const selectedId = useUiStore((st) => st.selectedSessionId);
   const select = useUiStore((st) => st.selectSession);
   const active = selectedId === s.session_id;
+  // 인라인 이름 편집 (§89) — Electron 은 window.prompt 미지원이라 행 내 input 으로 편집.
+  // Enter=저장, Esc/blur=취소.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const startEdit = () => {
+    setDraft(s.title || "");
+    setEditing(true);
+  };
+  const commitEdit = () => {
+    const title = draft.trim();
+    setEditing(false);
+    if (!title || title === s.title) return;
+    onRenameSubmit(title);
+  };
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={() => select(s.session_id)}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") select(s.session_id);
+        if (!editing && (e.key === "Enter" || e.key === " ")) select(s.session_id);
       }}
       className={`group w-full cursor-pointer rounded px-2 py-2 text-left transition-colors ${
         active ? "bg-discord-card text-white" : "text-discord-muted hover:bg-discord-card/60"
       }`}
     >
       <div className="flex items-center gap-1">
-        <span className="flex-1 truncate text-sm font-medium">{s.title || t("chat.untitled")}</span>
+        {editing ? (
+          <input
+            autoFocus
+            data-testid="session-rename-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") commitEdit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            onBlur={() => setEditing(false)}
+            className="w-0 flex-1 rounded border border-discord-accent bg-discord-card px-1.5 py-0.5 text-sm text-white outline-none"
+          />
+        ) : (
+          <span className="flex-1 truncate text-sm font-medium">
+            {s.title || t("chat.untitled")}
+          </span>
+        )}
         <span className="flex items-center opacity-0 transition-opacity group-hover:opacity-100">
           <Button
             size="icon"
@@ -80,7 +112,7 @@ function SessionRow({
             disabled={busy}
             onClick={(e) => {
               e.stopPropagation();
-              onRename();
+              startEdit();
             }}
           >
             <Pencil className="h-3 w-3" />
@@ -148,24 +180,11 @@ export function SessionSidebar() {
   const setEnvOpen = useUiStore((st) => st.setEnvOpen);
   const secretsOpen = useUiStore((st) => st.secretsOpen);
   const setSecretsOpen = useUiStore((st) => st.setSecretsOpen);
-  const [creating, setCreating] = useState(false);
+  // 새 세션은 이름 입력 다이얼로그(§89, NewSessionDialog)를 연다 — 생성 로직은 그쪽.
+  const setNewSessionOpen = useUiStore((st) => st.setNewSessionOpen);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["sessions"],
     queryFn: fetchSessions,
-  });
-
-  const createMut = useMutation({
-    mutationFn: () => {
-      const stamp = new Date().toISOString().slice(5, 16).replace("T", " ");
-      return createSession(t("sidebar.newSessionName", { stamp }));
-    },
-    onSuccess: (session) => {
-      qc.invalidateQueries({ queryKey: ["sessions"] });
-      select(session.session_id);
-      toast.success(t("session.created"));
-    },
-    onError: (e) => toast.error(t("session.createFailed", { message: (e as Error).message })),
-    onSettled: () => setCreating(false),
   });
 
   // ── 세션 이름변경 / 삭제 (§47 (A)유형) ──
@@ -226,12 +245,6 @@ export function SessionSidebar() {
     const dir = await window.ohdo.pickDirectory();
     if (dir) importMut.mutate(dir);
   };
-  const onRenameSession = (s: SessionSummary) => {
-    const next = window.prompt(t("session.renamePrompt"), s.title || "");
-    const title = (next ?? "").trim();
-    if (!title || title === s.title) return;
-    renameMut.mutate({ id: s.session_id, title });
-  };
   const onDeleteSession = (s: SessionSummary) => {
     if (!window.confirm(t("session.confirmDelete", { title: s.title || t("chat.untitled") }))) return;
     deleteMut.mutate(s.session_id);
@@ -266,11 +279,7 @@ export function SessionSidebar() {
             variant="ghost"
             className="h-7 w-7 text-discord-muted hover:text-white"
             title={t("sidebar.newSession")}
-            disabled={creating || createMut.isPending}
-            onClick={() => {
-              setCreating(true);
-              createMut.mutate();
-            }}
+            onClick={() => setNewSessionOpen(true)}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -294,7 +303,7 @@ export function SessionSidebar() {
               key={s.session_id}
               s={s}
               busy={busyId === s.session_id}
-              onRename={() => onRenameSession(s)}
+              onRenameSubmit={(title) => renameMut.mutate({ id: s.session_id, title })}
               onDuplicate={() => duplicateMut.mutate(s)}
               onExport={() => onExportSession(s)}
               onDelete={() => onDeleteSession(s)}
