@@ -120,9 +120,16 @@ config 영속성(`--config-dir`)은 버그 성격으로 선행.
       GitHub Releases provider + 재시작 배너 + `dist:publish` 업로드 스크립트. repo public
       전환 + 첫 릴리스 후 실동작 확인 필요)
 - [ ] GUI 실측 백로그 소진 (handoff §58~§64 + §77 멀티모니터 재테스트 + §60 영역캡처 멀티모니터 후속)
-- [ ] NSIS 설치본 빌드·실측 (handoff §64, [docs/BUILD.md](BUILD.md) 런북)
-- [ ] 공개 직전 방어 정비(시크릿/이력 점검) → **repo public 전환 (v1.0 전 조기 공개)**
-- [ ] v1.0 릴리스 + 발표 (사용자): 영어 Show HN/Reddit · 사용자 5명 확보
+- [x] NSIS 설치본 빌드·기동 검증 — 2026-08-13 (handoff §84~§85: 파이프라인 end-to-end 완주 +
+      "무반응" 원인(GPU 샌드박스 경로별 크래시) 규명·자동 fallback 내장·재설치 생존 확인).
+      기능 실측(BUILD.md §4 체크리스트 + §58~§66 백로그)은 사용자 잔여
+- [x] 공개 직전 방어 정비 → **repo public 전환** — 2026-08-14 완료 (handoff §83/§86b —
+      github.com/oddsung/ohdo PUBLIC, star 측정 시작)
+- [x] 첫 릴리스 공개 — 2026-08-14: **v0.1.0** (setup.exe+latest.yml+blockmap, 일반 릴리스 —
+      pre-release 표시는 electron-updater 기본 설정이 무시하므로 미사용). 비인증 latest.yml
+      접근 검증 → 자동업데이트 경로 활성
+- [ ] 자동업데이트 실검증 — 다음 패치(0.1.x) 릴리스 시 "구버전 설치 → 배너 → 재시작" 확인
+- [ ] v1.0 정식 릴리스(버전 범프) + 발표 (사용자): 영어 Show HN/Reddit · 사용자 5명 확보
 - 코드서명: v1.0 스코프 제외 — 출시 후 SignPath OSS(무료, 심사) 또는 Azure Trusted Signing/OV 재평가
 
 ---
