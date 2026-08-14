@@ -2,9 +2,10 @@
 
 AI(Gemini CLI)와 대화하면서 Windows 데스크톱/웹 자동화 코드를 단계별로 생성·실행하는 PySide6 기반 RPA 솔루션.
 
-> **2026-05-12**: PySide6 (LGPL) 메인 전환 완료. 이전 PyQt6 (GPL) 코드는
-> [legacy_pyqt6/](legacy_pyqt6/) 에 deprecated 로 보관 (실행은 `uv sync --extra legacy-pyqt6` 후 가능).
-> 자세한 결정 배경은 [docs/handoff.md](docs/handoff.md) §19/§20 참조.
+> **2026-05-12**: PySide6 (LGPL) 메인 전환 완료. 이전 PyQt6 (GPL) 코드는 deprecated —
+> **2026-08-14 오픈코어 경계 복원(handoff §88)으로 public 트리에서 제외** (git 이력 + 로컬
+> `legacy_pyqt6/` 보관). SaaS 트랙(`packages/`, agent 인스톨러)도 같은 날 private repo
+> `oddsung/ohdo-saas` 로 분리. 결정 배경은 [docs/handoff.md](docs/handoff.md) §19/§20/§88 참조.
 
 ## 프로젝트 구조
 

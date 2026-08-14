@@ -16,7 +16,8 @@
       "Bash(git ls-tree *)",
       "Bash(git ls-remote *)",
       "Bash(gh release *)",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Bash(gh repo *)"
     ]
   }
 }

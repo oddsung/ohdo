@@ -75,6 +75,17 @@ tmp/
 # 비공개 전략 문서 (handoff §83b — repo public 전환 시 트리 제외, 로컬 보관)
 docs_private/
 
+# 오픈코어 경계 (handoff §88) — SaaS/상용 트랙은 private repo(oddsung/ohdo-saas) 보관.
+# agent/bridge.py(+__init__.py) 는 데스크톱 Phase 1 로컬 브리지 스켈레톤이라 공개 유지.
+packages/
+agent/*
+!agent/__init__.py
+!agent/bridge.py
+
+# deprecated PyQt6 보관분 — 공개 트리 제외 (이력 + 로컬 보관, §88)
+legacy_pyqt6/
+uia_dump.txt
+
 # Secrets / credentials (broad guard — 공개 직전 추가, 5/9)
 .env
 .env.local

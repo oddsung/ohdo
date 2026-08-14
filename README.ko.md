@@ -46,57 +46,65 @@ ohdo 는 **자기 niche 에 정직**합니다: *개발자 친화적, 코드 우�
 > **참고**: ohdo 는 현재 **Windows 전용** (Win32 / UWP / Windows 의 브라우저).
 > macOS / Linux 데스크톱 지원은 단기 로드맵에 없음.
 
-## 빠른 시작
+## 다운로드 (Windows)
 
-### 설치 (권장: [`uv`](https://docs.astral.sh/uv/))
+**[⬇ 최신 설치본 받기](https://github.com/oddsung/ohdo/releases/latest)** —
+`ohdo-<버전>-setup.exe`. Python/Node 설치 불필요 — 앱이 자체 런타임을 동봉하며,
+GitHub Releases 를 통해 자동 업데이트됩니다.
+
+> **Windows SmartScreen 안내**: 아직 코드 서명이 없어 첫 실행 시 *"Windows 의 PC 보호"*
+> 경고가 뜰 수 있습니다. **추가 정보 → 실행** 을 누르면 됩니다. 코드 서명은 사용자가
+> 충분히 모이면 도입할 계획입니다.
+
+## 소스에서 실행 (개발자)
+
+두 UI 가 같은 Python `core/` 를 공유합니다:
+
+- **`desktop_v3/` (Electron + React + TS)** — 출시 제품 (설치본이 패키징하는 그것)
+- **`ui_v2/` (PySide6)** — 안정 fallback UI (유지보수 모드)
+
+### desktop_v3 (제품)
 
 ```powershell
-# Python 3.12+ 필요. uv 미설치 시: pip install uv (또는 uv 공식 문서)
+# Python 3.12+ / Node 20+ 필요. uv 미설치 시: pip install uv
+uv sync                      # Python 쪽 (core + api_server 브리지) → .venv/
+cd desktop_v3
+npm install
+npm run dev                  # Python 브리지 자동 spawn
+```
+
+### PySide6 fallback UI
+
+```powershell
 uv sync
-
-# Gemini CLI 설치 (별도) — https://github.com/google-gemini/gemini-cli
+.venv\Scripts\python.exe main.py --ui v2
 ```
 
-`uv sync` 가 `pyproject.toml` + `uv.lock` 을 보고 자동으로 `.venv/` 생성 + 의존성 잠금 설치.
+### AI 엔진
 
-### 설치 (legacy: `pip`)
+앱 안에서 (온보딩 위저드 또는 설정) 엔진을 고릅니다: **OpenAI 호환 API**(예: DeepSeek)
+또는 **CLI AI** 어댑터. 특정 벤더에 하드코딩돼 있지 않습니다.
 
-```powershell
-py -3.12 -m venv venv
-venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-### 설치 (Codespaces / Dev Container)
+### Codespaces / Dev Container
 
 상단 Codespaces 배지 클릭, 또는 VS Code "Dev Containers" 확장으로 [.devcontainer/](.devcontainer/) 열면 Python 3.12 + uv + Qt 의존성 + ruff + pre-commit 자동 셋업.
 
 > **제약**: Dev container 는 Linux 환경이라 Windows 자동화 라이브러리 (`pywinauto`, `pyautogui`, `uiautomation`) 는 실행 불가.
-> 컨테이너는 `core/` + 미래 `backend/` + `web/` 작업용.
-> 실제 Windows 자동화 테스트는 로컬 Windows (또는 GitHub Actions `windows-latest`).
-
-### 실행
-
-```powershell
-.venv\Scripts\python.exe main.py
-
-# 실험적 v2 UI:
-.venv\Scripts\python.exe main.py --ui v2
-```
+> 컨테이너는 `core/` 작업용. 실제 Windows 자동화 테스트는 로컬 Windows (또는 GitHub Actions `windows-latest`).
 
 ## 프로젝트 구조
 
 ```
 ohdo/
-├── main.py                # 진입점 (PySide6 앱)
+├── desktop_v3/            # Electron + React 데스크톱 앱 — 출시 제품
+├── api_server/            # FastAPI 브리지: Electron ↔ core (localhost, 토큰 인증)
 ├── core/                  # AI 엔진 / 워크플로우 / 세션 / Windows inspector
-├── ui/                    # PySide6 메인 윈도우 + step 카드 + 콘솔
-├── ui_v2/                 # UI redesign v2 PoC (별도 진입)
+├── main.py + ui/ + ui_v2/ # PySide6 fallback UI
 ├── tests/                 # core / scenarios / ai_integration / GUI 테스트
-├── config/                # settings.json / prompts.json
-├── docs/                  # ROADMAP, handoff, 상업 검토, 와이어프레임
-├── data/                  # 세션, 캡처, 로그 (git-ignored)
-└── legacy_pyqt6/          # Deprecated PyQt6 코드 (실행 시 `uv sync --extra legacy-pyqt6`)
+├── devloop/               # 자율 테스트-수정 하네스 (Playwright + Electron)
+├── config/                # default_settings.json / prompts.json
+├── docs/                  # ROADMAP, BUILD 런북, handoff
+└── data/                  # 세션, 캡처, 로그 (git-ignored)
 ```
 
 자세한 구조: [`CLAUDE.md`](CLAUDE.md) 와 [`docs/handoff.md`](docs/handoff.md).
@@ -130,8 +138,9 @@ ohdo 는 오픈코어 전략 하 SaaS 확장 단계로 진행 중: Phase 0 (인�
 
 **오픈코어 전략** ([`docs/ROADMAP.md`](docs/ROADMAP.md) §1):
 - **데스크톱 (이 저장소)**: AGPL-3.0. 자유 사용·수정·재배포 가능. 단, 수정본을 네트워크 서비스 (SaaS) 로 제공하는 경우 소스 공개 의무.
-- **Hosted SaaS / Pro 기능**: 향후 별도 라이선스 (폐쇄 소스) 운영 예정. 저작권 보유자가 dual-licensing 가능.
-- **PySide6 메인 (LGPL) 2026-05-12 이후**: 데스크톱 UI 는 PySide6 (Qt for Python, LGPL — 재배포 시 상업 Qt 라이선스 불필요) 로 동작. 이전 PyQt6 코드는 [`legacy_pyqt6/`](legacy_pyqt6/) 에 보관 (참고용); 실행 시 `uv sync --extra legacy-pyqt6`.
+- **Hosted SaaS / Pro 기능**: 별도 private 저장소에서 개발, 별도 라이선스 운영. 저작권 보유자가 dual-licensing 가능.
+- **장기 과금 방향**: **개인 무료** — 기업·상용 서비스에는 상업 라이선스 + 유료 Pro/클라우드 기능 제공 예정.
+- **PySide6 (LGPL) 2026-05-12 이후**: fallback UI 는 PySide6 (Qt for Python, LGPL — 재배포 시 상업 Qt 라이선스 불필요) 로 동작. 이전 PyQt6 코드는 공개 트리에서 제외 (git 이력에만 보존).
 
 상업 / 비-AGPL 라이선스 문의: 이슈 또는 `pyproject.toml` 의 contact 으로.
 

@@ -47,59 +47,69 @@ If you want **inspectable, portable, repeatable Python** with a per-step build l
 > **Heads up**: ohdo is **Windows-only** today (Win32 / UWP / browsers running on Windows).
 > Support for macOS / Linux desktops is not on the near-term roadmap.
 
-## Quickstart
+## Download (Windows)
 
-### Install (recommended: [`uv`](https://docs.astral.sh/uv/))
+**[⬇ Get the latest installer](https://github.com/oddsung/ohdo/releases/latest)** —
+`ohdo-<version>-setup.exe`. No Python or Node required; the app bundles its own runtime
+and auto-updates via GitHub Releases.
+
+> **Windows SmartScreen**: builds are not code-signed yet, so the first run may warn
+> *"Windows protected your PC"*. Click **More info → Run anyway**. Code signing is planned
+> once the project has enough users to justify a certificate.
+
+## Run from source (developers)
+
+Two UIs share the same Python `core/`:
+
+- **`desktop_v3/` (Electron + React + TS)** — the shipping product (what the installer packages)
+- **`ui_v2/` (PySide6)** — stable fallback UI, kept in maintenance mode
+
+### desktop_v3 (the product)
 
 ```powershell
-# Python 3.12+ required. Install uv: pip install uv  (or see uv docs)
+# Python 3.12+ / Node 20+. Install uv: pip install uv  (or see https://docs.astral.sh/uv/)
+uv sync                      # Python side (core + api_server bridge) → .venv/
+cd desktop_v3
+npm install
+npm run dev                  # spawns the Python bridge automatically
+```
+
+### PySide6 fallback UI
+
+```powershell
 uv sync
-
-# ohdo currently uses Gemini CLI as its LLM adapter — install separately:
-# https://github.com/google-gemini/gemini-cli
-```
-
-`uv sync` reads `pyproject.toml` + `uv.lock` and creates `.venv/` with locked dependencies.
-
-### Install (legacy: `pip`)
-
-```powershell
-py -3.12 -m venv venv
-venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-### Install (Codespaces / Dev Container)
-
-Click the Codespaces badge above, or open the repo in VS Code with the **Dev Containers** extension —
-[`.devcontainer/`](.devcontainer/) provisions Python 3.12 + uv + Qt deps + ruff + pre-commit automatically.
-
-> **Note**: Dev containers run on Linux, so the Windows automation libs (`pywinauto`, `pyautogui`, `uiautomation`) cannot execute there.
-> The container is for working on `core/` + future `backend/` + `web/`.
-> Run the actual Windows automation tests on a local Windows machine (or GitHub Actions `windows-latest`).
-
-### Run
-
-```powershell
-.venv\Scripts\python.exe main.py
-
-# Experimental v2 UI:
 .venv\Scripts\python.exe main.py --ui v2
 ```
+
+### AI engine
+
+Pick an engine inside the app (onboarding wizard or Settings): an **OpenAI-compatible API**
+(e.g. DeepSeek) or a **CLI AI** adapter. Nothing is hardcoded to a single vendor.
+
+### Codespaces / Dev Container
+
+Click the Codespaces badge above, or open the repo in VS Code with the **Dev Containers**
+extension — [`.devcontainer/`](.devcontainer/) provisions Python 3.12 + uv + Qt deps +
+ruff + pre-commit automatically.
+
+> **Note**: Dev containers run on Linux, so the Windows automation libs (`pywinauto`,
+> `pyautogui`, `uiautomation`) cannot execute there. The container is for working on
+> `core/`; run the Windows automation tests on a local Windows machine (or GitHub
+> Actions `windows-latest`).
 
 ## Project layout
 
 ```
 ohdo/
-├── main.py                # PySide6 app entry point
+├── desktop_v3/            # Electron + React desktop app — the shipping product
+├── api_server/            # FastAPI bridge: Electron ↔ core (localhost, token auth)
 ├── core/                  # AI engine / workflow / sessions / Windows inspector
-├── ui/                    # PySide6 main window + step cards + console
-├── ui_v2/                 # UI redesign v2 PoC (separate entry)
+├── main.py + ui/ + ui_v2/ # PySide6 fallback UI
 ├── tests/                 # core / scenarios / ai_integration / GUI suites
-├── config/                # settings.json / prompts.json
-├── docs/                  # ROADMAP, handoff notes, commercial review, wireframes
-├── data/                  # Sessions, captures, logs (git-ignored)
-└── legacy_pyqt6/          # Deprecated PyQt6 codebase (run via `uv sync --extra legacy-pyqt6`)
+├── devloop/               # autonomous test-fix harness (Playwright + Electron)
+├── config/                # default_settings.json / prompts.json
+├── docs/                  # ROADMAP, BUILD runbook, handoff notes
+└── data/                  # sessions, captures, logs (git-ignored)
 ```
 
 Detailed structure: [`CLAUDE.md`](CLAUDE.md) and [`docs/handoff.md`](docs/handoff.md).
@@ -153,8 +163,9 @@ The desktop client and core libraries are released under the **GNU Affero Genera
 
 **Open-core strategy** ([`docs/ROADMAP.md`](docs/ROADMAP.md) §1):
 - **Desktop (this repo)**: AGPL-3.0. Free to use, modify, redistribute. If you offer a modified version as a network service (SaaS), you must release your source under AGPL-3.0 too.
-- **Hosted SaaS / Pro features**: planned as separately licensed (closed source). The copyright holder retains the right to dual-license.
-- **PySide6 main (LGPL) since 2026-05-12**: the desktop UI now runs on PySide6 (Qt for Python, LGPL — no commercial Qt license needed for redistribution). The previous PyQt6 codebase is preserved at [`legacy_pyqt6/`](legacy_pyqt6/) for reference; install with `uv sync --extra legacy-pyqt6` if you need to run it.
+- **Hosted SaaS / Pro features**: developed in a private repository, separately licensed. The copyright holder retains the right to dual-license.
+- **Long-term pricing direction**: **free for individuals**; businesses and commercial services will be offered a commercial license and paid Pro/cloud features.
+- **PySide6 (LGPL) since 2026-05-12**: the fallback UI runs on PySide6 (Qt for Python, LGPL — no commercial Qt license needed for redistribution). The earlier PyQt6 codebase was removed from the public tree and is kept in git history only.
 
 Commercial / non-AGPL licensing inquiries: please open an issue or reach out via the contact details in `pyproject.toml`.
 
